@@ -6,7 +6,13 @@ import {
   type ProviderClient,
 } from '@core/ports/chat-model';
 import { renderMessageContentForModel } from '@core/domain/message';
-import { joinUrl, requestJson, requestNdjsonStream } from '@providers/http/http-client';
+import {
+  HttpError,
+  joinUrl,
+  requestJson,
+  requestNdjsonStream,
+  type SseUsage,
+} from '@providers/http/http-client';
 
 interface OllamaTagsResponse {
   models?: Array<{
@@ -33,17 +39,29 @@ export class OllamaProvider implements ProviderClient {
 
     if (request.onToken) {
       let accumulated = '';
-      const streamUsage = await requestNdjsonStream(
-        joinUrl(this.baseUrl, '/api/chat'),
-        {
-          method: 'POST',
-          body: { model: request.model, messages, stream: true },
-        },
-        (token) => {
-          accumulated += token;
-          request.onToken!(token);
+      // Ollama rejects `think: true` for models that don't support reasoning,
+      // so retry without it if the first attempt is refused.
+      const runStream = (think: boolean): Promise<SseUsage> =>
+        requestNdjsonStream(
+          joinUrl(this.baseUrl, '/api/chat'),
+          {
+            method: 'POST',
+            body: { model: request.model, messages, stream: true, ...(think ? { think: true } : {}) },
+          },
+          (token) => {
+            accumulated += token;
+            request.onToken!(token);
+          },
+          request.onThinkingToken
+        );
+
+      const streamUsage = await runStream(true).catch((error: unknown) => {
+        if (error instanceof HttpError && error.status === 400) {
+          accumulated = '';
+          return runStream(false);
         }
-      );
+        throw error;
+      });
 
       if (!accumulated.trim()) {
         throw new Error('Ollama returned an empty response.');

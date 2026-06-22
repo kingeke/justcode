@@ -7,6 +7,12 @@ import { fuzzyFilter } from './fuzzy-filter.js';
 
 const VISIBLE_ROWS = 18;
 
+// SGR mouse reports (ESC[<b;x;yM) get fed into stdin while mouse tracking is on.
+// Ink passes them through to TextInput as typed text, so strip them from the query.
+const MOUSE_SEQUENCE = /\x1b?\[<\d+;\d+;\d+[Mm]/g;
+const stripMouseSequences = (value: string): string =>
+  value.replace(MOUSE_SEQUENCE, '').replace(/\x1b?\[<[\d;]*$/g, '');
+
 interface ModelPickerProps {
   models: ModelInfo[];
   currentModel: string;
@@ -30,7 +36,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
       fuzzyFilter(
         props.models,
         query,
-        (m) => `${m.id} ${m.displayName} ${PROVIDERS[m.providerId]?.name ?? ''}`
+        (m) => `${PROVIDERS[m.providerId]?.name ?? ''} ${m.id} ${m.displayName}`
       ),
     [props.models, query]
   );
@@ -73,6 +79,45 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
     setFocusedIndex(0);
     scrollOffsetRef.current = 0;
   }, [query]);
+
+  const groupedLengthRef = useRef(grouped.length);
+  useEffect(() => {
+    groupedLengthRef.current = grouped.length;
+  }, [grouped.length]);
+
+  // Mouse wheel scroll support (SGR mouse protocol)
+  useEffect(() => {
+    process.stdout.write('\x1b[?1006h\x1b[?1000h');
+
+    const onData = (chunk: Buffer) => {
+      const str = chunk.toString('utf8');
+      const match = /\x1b\[<(\d+);\d+;\d+M/.exec(str);
+      if (!match) return;
+      const btn = Number(match[1]);
+
+      if (btn === 64) {
+        setFocusedIndex((prev) => {
+          const next = Math.max(0, prev - 1);
+          if (next < scrollOffsetRef.current) scrollOffsetRef.current = next;
+          return next;
+        });
+      } else if (btn === 65) {
+        setFocusedIndex((prev) => {
+          const next = Math.min(groupedLengthRef.current - 1, prev + 1);
+          if (next >= scrollOffsetRef.current + VISIBLE_ROWS) {
+            scrollOffsetRef.current = next - VISIBLE_ROWS + 1;
+          }
+          return next;
+        });
+      }
+    };
+
+    process.stdin.on('data', onData);
+    return () => {
+      process.stdout.write('\x1b[?1006l\x1b[?1000l');
+      process.stdin.off('data', onData);
+    };
+  }, []);
 
   useInput((_, key) => {
     if (key.escape) {
@@ -128,7 +173,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
         <Text dimColor>{'> '}</Text>
         <TextInput
           value={query}
-          onChange={setQuery}
+          onChange={(value) => setQuery(stripMouseSequences(value))}
           placeholder="search..."
           focus
         />
@@ -187,16 +232,8 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
 
 function formatPricing(model: ModelInfo): string {
   if (!model.pricing) return 'local';
-  const {
-    inputPerToken,
-    outputPerToken,
-    cacheReadPerToken,
-    cacheWritePerToken,
-  } = model.pricing;
+  const { inputPerToken, outputPerToken } = model.pricing;
   if (inputPerToken === 0 && outputPerToken === 0) return 'free';
   const fmt = (n: number) => `$${(n * 1_000_000).toFixed(2)}/M`;
-  const parts = [`${fmt(inputPerToken)} in`, `${fmt(outputPerToken)} out`];
-  // if (cacheReadPerToken != null) parts.push(`${fmt(cacheReadPerToken)} cache read`);
-  // if (cacheWritePerToken != null) parts.push(`${fmt(cacheWritePerToken)} cache write`);
-  return parts.join(' · ');
+  return [`${fmt(inputPerToken)} in`, `${fmt(outputPerToken)} out`].join(' · ');
 }

@@ -14,6 +14,7 @@ import type {
   StartSessionResult,
 } from '@core/application/chat-session-service';
 import type { Conversation } from '@core/domain/conversation';
+import { createMessage } from '@core/domain/message';
 import type { ModelInfo, ProviderId, ProviderClient } from '@core/ports/chat-model';
 import { renderMarkdown } from './render-markdown.js';
 import { filterCommands, parseCommandInput } from './commands.js';
@@ -29,6 +30,9 @@ interface ChatAppProps {
   requestedModel: string | undefined;
   allProviders: ProviderClient[];
   createProvider: (id: ProviderId) => ProviderClient;
+  onModelChange?: (modelId: string, providerId: string) => void;
+  initialThinkingCollapsed?: boolean;
+  onThinkingCollapsedChange?: (collapsed: boolean) => void;
 }
 
 export function ChatApp(props: ChatAppProps): React.ReactElement {
@@ -52,10 +56,23 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   const [isSending, setIsSending] = useState(false);
   const [streamingContent, setStreamingContent] = useState<string>('');
   const streamingBufferRef = useRef('');
+  const [streamingThinking, setStreamingThinking] = useState<string>('');
+  const [thinkingDuration, setThinkingDuration] = useState<number | null>(null);
+  const thinkingRef = useRef<{ buffer: string; startMs: number; durationMs: number | null }>({
+    buffer: '',
+    startMs: 0,
+    durationMs: null,
+  });
+  const [messageThinking, setMessageThinking] = useState<
+    Record<string, { content: string; durationMs: number }>
+  >({});
   const [error, setError] = useState<string | null>(null);
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [thinkingCollapsed, setThinkingCollapsed] = useState(
+    props.initialThinkingCollapsed ?? false
+  );
 
   const isCommandMode = input.startsWith('/') && !input.includes(' ');
   const commandQuery = isCommandMode ? parseCommandInput(input) ?? '' : '';
@@ -198,6 +215,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     setActiveModel(model.id);
     setActiveModelInfo(model);
     setStatus(`Switched to ${model.displayName}`);
+    props.onModelChange?.(model.id, model.providerId);
   };
 
   const executeCommand = (name: string): void => {
@@ -206,6 +224,14 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
     if (name === 'models') {
       setShowModelPicker(true);
+      return;
+    }
+
+    if (name === 'thinking') {
+      const next = !thinkingCollapsed;
+      setThinkingCollapsed(next);
+      props.onThinkingCollapsedChange?.(next);
+      setStatus(next ? 'Thinking collapsed' : 'Thinking expanded');
       return;
     }
 
@@ -243,36 +269,75 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
     if (!conversation || !session) return;
 
+    const baseConversation = conversation;
+
     setError(null);
     setIsSending(true);
+    // Show the user's message immediately, before the model starts responding.
+    const optimisticUserMessage = createMessage('user', value.trim());
+    setConversation({
+      ...baseConversation,
+      messages: [...baseConversation.messages, optimisticUserMessage],
+    });
     setStreamingContent('');
+    setStreamingThinking('');
+    setThinkingDuration(null);
     streamingBufferRef.current = '';
+    thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
     setInput('');
     setStatus('Waiting for response...');
 
     const flushInterval = setInterval(() => {
-      const buffered = streamingBufferRef.current;
-      if (buffered) setStreamingContent(buffered);
+      const t = thinkingRef.current;
+      if (t.buffer) setStreamingThinking(t.buffer);
+      if (t.durationMs !== null) setThinkingDuration(t.durationMs);
+      const cBuf = streamingBufferRef.current;
+      if (cBuf) setStreamingContent(cBuf);
     }, 50);
 
     try {
       const attachments = await props.promptAttachmentService.resolveAttachments(value);
       const result = await props.chatSessionService.submitMessage({
-        conversation,
+        conversation: baseConversation,
         model: activeModel || session.activeModel,
         content: value,
         attachments,
         onToken: (token) => {
+          if (thinkingRef.current.startMs && thinkingRef.current.durationMs === null) {
+            thinkingRef.current.durationMs = Date.now() - thinkingRef.current.startMs;
+          }
           streamingBufferRef.current += token;
+        },
+        onThinkingToken: (token) => {
+          if (!thinkingRef.current.startMs) {
+            thinkingRef.current.startMs = Date.now();
+          }
+          thinkingRef.current.buffer += token;
         },
       });
 
+      const lastMsg = result.conversation.messages[result.conversation.messages.length - 1];
+      const capturedThinking = thinkingRef.current.buffer;
+      const capturedDuration =
+        thinkingRef.current.durationMs ??
+        (thinkingRef.current.startMs ? Date.now() - thinkingRef.current.startMs : 0);
+
       clearInterval(flushInterval);
+      streamingBufferRef.current = '';
+      thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
+
       startTransition(() => {
-        streamingBufferRef.current = '';
         setStreamingContent('');
+        setStreamingThinking('');
+        setThinkingDuration(null);
         setConversation(result.conversation);
         setStatus('Ready');
+        if (lastMsg && capturedThinking) {
+          setMessageThinking((prev) => ({
+            ...prev,
+            [lastMsg.id]: { content: capturedThinking, durationMs: capturedDuration },
+          }));
+        }
         if (result.usage) {
           const u = result.usage;
           const pricing = activeModelInfo?.pricing;
@@ -293,7 +358,10 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     } catch (caughtError: unknown) {
       clearInterval(flushInterval);
       streamingBufferRef.current = '';
+      thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
       setStreamingContent('');
+      setStreamingThinking('');
+      setThinkingDuration(null);
       setError(getErrorMessage(caughtError));
       setStatus('Request failed');
     } finally {
@@ -324,43 +392,72 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
       <Box marginTop={1} flexDirection="column">
         {conversation?.messages.length ? (
-          conversation.messages.map((message) => (
+          conversation.messages.map((message) => {
+            const thinking = message.role === 'assistant' ? messageThinking[message.id] : undefined;
+            return (
             <Box key={message.id} flexDirection="column">
-              <Text>
-                <Text
-                  color={
-                    message.role === 'user'
-                      ? 'green'
-                      : message.role === 'assistant'
-                        ? 'magenta'
-                        : 'yellow'
-                  }
+              {thinking ? (
+                <Box flexDirection="column" marginBottom={0}>
+                  <Text color="yellow">
+                    {thinkingCollapsed ? '+ ' : ''}Thought: {formatDuration(thinking.durationMs)}
+                  </Text>
+                  {thinkingCollapsed ? null : (
+                    <Text dimColor>{thinking.content}</Text>
+                  )}
+                </Box>
+              ) : null}
+              {message.role === 'user' ? (
+                <Box
+                  flexDirection="column"
+                  borderStyle="round"
+                  borderColor="cyan"
+                  borderTop={false}
+                  borderRight={false}
+                  borderBottom={false}
+                  paddingLeft={1}
+                  marginY={1}
                 >
-                  {message.role}
-                </Text>
+                  <Text bold color="white">
+                    {message.content}
+                  </Text>
+                  <Text dimColor>{formatTime(message.createdAt)}</Text>
+                </Box>
+              ) : message.role === 'assistant' ? (
+                <Text>{renderMarkdown(message.content)}</Text>
+              ) : (
                 <Text>
-                  :{' '}
-                  {message.role === 'assistant'
-                    ? renderMarkdown(message.content)
-                    : message.content}
+                  <Text color="yellow">{message.role}</Text>
+                  <Text>: {message.content}</Text>
                 </Text>
-              </Text>
+              )}
               {message.attachments?.map((attachment) => (
                 <Text key={`${message.id}:${attachment.path}`} dimColor>
                   attached: @{attachment.path}
                 </Text>
               ))}
             </Box>
-          ))
+            );
+          })
         ) : (
           <Text dimColor>No messages yet.</Text>
         )}
-        {streamingContent ? (
+        {streamingThinking || streamingContent ? (
           <Box flexDirection="column">
-            <Text>
-              <Text color="magenta">assistant</Text>
-              <Text>: {renderMarkdown(streamingContent)}</Text>
-            </Text>
+            {streamingThinking ? (
+              <Box flexDirection="column">
+                <Text color="yellow">
+                  {thinkingDuration !== null
+                    ? `${thinkingCollapsed ? '+ ' : ''}Thought: ${formatDuration(thinkingDuration)}`
+                    : 'thinking...'}
+                </Text>
+                {thinkingCollapsed ? null : (
+                  <Text dimColor>{streamingThinking}</Text>
+                )}
+              </Box>
+            ) : null}
+            {streamingContent ? (
+              <Text>{renderMarkdown(streamingContent)}</Text>
+            ) : null}
           </Box>
         ) : null}
       </Box>
@@ -380,7 +477,13 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
                 {index === selectedCommandIndex ? '›' : ' '}{' '}
                 <Text bold={index === selectedCommandIndex}>/{cmd.name}</Text>
                 {'  '}
-                <Text dimColor>{cmd.description}</Text>
+                <Text dimColor>
+                  {cmd.name === 'thinking'
+                    ? thinkingCollapsed
+                      ? 'Expand thinking'
+                      : 'Collapse thinking'
+                    : cmd.description}
+                </Text>
               </Text>
             </Box>
           ))}
@@ -471,4 +574,27 @@ function getErrorMessage(error: unknown): string {
 
 function contextPct(inputTokens: number, contextWindow: number): number {
   return Math.round((inputTokens / contextWindow) * 100);
+}
+
+function formatTime(isoDate: string): string {
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+
+  const totalSeconds = ms / 1000;
+  if (totalSeconds < 60) {
+    const rounded = Math.round(totalSeconds * 10) / 10;
+    return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}s`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.round(totalSeconds % 60);
+  return seconds > 0 ? `${minutes}min ${seconds}s` : `${minutes}min`;
 }

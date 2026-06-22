@@ -94,7 +94,8 @@ export class OpenAiCompatibleProvider implements ProviderClient {
         (token) => {
           accumulated += token;
           request.onToken!(token);
-        }
+        },
+        request.onThinkingToken
       );
 
       if (!accumulated.trim()) {

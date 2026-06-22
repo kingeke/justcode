@@ -23,6 +23,7 @@ export interface SubmitMessageInput {
   content: string;
   attachments?: MessageAttachment[];
   onToken?: (token: string) => void;
+  onThinkingToken?: (token: string) => void;
 }
 
 export interface SubmitMessageResult {
@@ -86,6 +87,7 @@ export class ChatSessionService {
       model: input.model,
       messages: [...input.conversation.messages, userMessage],
       ...(input.onToken ? { onToken: input.onToken } : {}),
+      ...(input.onThinkingToken ? { onThinkingToken: input.onThinkingToken } : {}),
     });
     const assistantMessage = createMessage('assistant', response.content);
     const updatedConversation: Conversation = {

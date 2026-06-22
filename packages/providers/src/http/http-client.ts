@@ -59,7 +59,8 @@ export interface SseUsage {
 export async function requestSseStream(
   url: string,
   options: JsonRequestOptions,
-  onToken: (token: string) => void
+  onToken: (token: string) => void,
+  onThinkingToken?: (token: string) => void
 ): Promise<SseUsage> {
   const requestOptions: RequestInit = {
     method: options.method ?? 'POST',
@@ -111,16 +112,27 @@ export async function requestSseStream(
 
       try {
         const parsed = JSON.parse(data) as {
-          choices?: Array<{ delta?: { content?: string } }>;
+          choices?: Array<{
+            delta?: {
+              content?: string;
+              reasoning?: string;
+              reasoning_content?: string;
+            };
+          }>;
           usage?: {
             prompt_tokens?: number;
             completion_tokens?: number;
             prompt_tokens_details?: { cached_tokens?: number };
           };
         };
-        const content = parsed.choices?.[0]?.delta?.content;
+        const delta = parsed.choices?.[0]?.delta;
+        const content = delta?.content;
+        const thinking = delta?.reasoning ?? delta?.reasoning_content;
         if (content) {
           onToken(content);
+        }
+        if (thinking && onThinkingToken) {
+          onThinkingToken(thinking);
         }
         if (parsed.usage) {
           usage.inputTokens = parsed.usage.prompt_tokens ?? 0;
@@ -140,7 +152,8 @@ export async function requestSseStream(
 export async function requestNdjsonStream(
   url: string,
   options: JsonRequestOptions,
-  onToken: (token: string) => void
+  onToken: (token: string) => void,
+  onThinkingToken?: (token: string) => void
 ): Promise<SseUsage> {
   const requestOptions: RequestInit = {
     method: options.method ?? 'POST',
@@ -189,14 +202,18 @@ export async function requestNdjsonStream(
 
       try {
         const parsed = JSON.parse(trimmed) as {
-          message?: { content?: string };
+          message?: { content?: string; thinking?: string };
           done?: boolean;
           prompt_eval_count?: number;
           eval_count?: number;
         };
         const content = parsed.message?.content;
+        const thinking = parsed.message?.thinking;
         if (content) {
           onToken(content);
+        }
+        if (thinking && onThinkingToken) {
+          onThinkingToken(thinking);
         }
         if (parsed.done) {
           usage.inputTokens = parsed.prompt_eval_count ?? 0;

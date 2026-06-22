@@ -5,7 +5,8 @@ import React from 'react';
 import { ChatApp } from '@cli/ui/chat-app';
 import type { ProviderId } from '@core/ports/chat-model';
 import { createRuntimeServices } from '@runtime/bootstrap/create-services';
-import { parseProviderId } from '@runtime/config/app-config';
+import { loadAppConfig, parseProviderId } from '@runtime/config/app-config';
+import { readGlobalConfig, writeGlobalConfig } from '@runtime/persistence/global-config';
 
 interface SharedOptions {
   provider?: string;
@@ -96,8 +97,21 @@ export function normalizeArgv(argv: readonly string[]): string[] {
 }
 
 async function runChat(options: SharedOptions): Promise<void> {
-  const providerId = resolveProviderId(options.provider);
-  const runtime = createRuntimeServices(providerId ? { providerId } : {});
+  const appConfig = loadAppConfig();
+  const savedConfig = await readGlobalConfig(appConfig.configDirectory);
+
+  // CLI flag > saved config > env default
+  const explicitProviderId =
+    resolveProviderId(options.provider) ?? parseProviderId(savedConfig.lastProvider);
+
+  const runtime = createRuntimeServices(explicitProviderId ? { providerId: explicitProviderId } : {});
+
+  // Merge into the persisted config so each write preserves the other fields.
+  let currentConfig = savedConfig;
+  const persistConfig = (patch: Partial<typeof savedConfig>): void => {
+    currentConfig = { ...currentConfig, ...patch };
+    void writeGlobalConfig(appConfig.configDirectory, currentConfig);
+  };
 
   render(
     React.createElement(ChatApp, {
@@ -105,9 +119,16 @@ async function runChat(options: SharedOptions): Promise<void> {
       chatSessionService: runtime.chatSessionService,
       promptAttachmentService: runtime.promptAttachmentService,
       sessionId: options.session ?? `session-${Date.now()}`,
-      requestedModel: options.model,
+      requestedModel: options.model ?? savedConfig.lastModel,
       allProviders: runtime.allProviders,
       createProvider: runtime.createProvider,
+      initialThinkingCollapsed: savedConfig.thinkingCollapsed ?? false,
+      onModelChange: (modelId: string, modelProviderId: string) => {
+        persistConfig({ lastModel: modelId, lastProvider: modelProviderId });
+      },
+      onThinkingCollapsedChange: (collapsed: boolean) => {
+        persistConfig({ thinkingCollapsed: collapsed });
+      },
     })
   );
 }

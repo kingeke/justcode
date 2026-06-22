@@ -16,6 +16,10 @@ export const COMMANDS: Command[] = [
     name: 'clear',
     description: 'Clear the current session and start fresh',
   },
+  {
+    name: 'thinking',
+    description: 'Toggle whether model reasoning is shown',
+  },
 ];
 
 export function filterCommands(query: string): Command[] {

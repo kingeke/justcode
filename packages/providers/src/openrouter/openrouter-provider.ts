@@ -75,7 +75,8 @@ export class OpenRouterProvider implements ProviderClient {
         (token) => {
           accumulated += token;
           request.onToken!(token);
-        }
+        },
+        request.onThinkingToken
       );
 
       if (!accumulated.trim()) {

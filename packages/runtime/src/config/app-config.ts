@@ -5,6 +5,7 @@ import { ProviderId } from '@core/ports/chat-model';
 
 export interface AppConfig {
   defaultProvider: ProviderId;
+  configDirectory: string;
   sessionsDirectory: string;
   openai: {
     apiKey: string | undefined;
@@ -26,6 +27,7 @@ export interface AppConfig {
 export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const requestedProvider = env.JUSTCODE_PROVIDER;
 
+  const configDirectory = env.JUSTCODE_CONFIG_DIR ?? join(homedir(), '.justcode');
   return {
     defaultProvider:
       parseProviderId(requestedProvider) ??
@@ -34,8 +36,9 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         : env.OPENROUTER_API_KEY
           ? ProviderId.OpenRouter
           : ProviderId.Ollama),
+    configDirectory,
     sessionsDirectory:
-      env.JUSTCODE_SESSIONS_DIR ?? join(homedir(), '.justcode', 'sessions'),
+      env.JUSTCODE_SESSIONS_DIR ?? join(configDirectory, 'sessions'),
     openai: {
       apiKey: env.OPENAI_API_KEY,
       baseUrl: env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
