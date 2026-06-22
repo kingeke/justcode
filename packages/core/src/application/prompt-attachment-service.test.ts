@@ -44,6 +44,20 @@ describe('PromptAttachmentService', () => {
       { path: 'README.md', content: '# Readme' },
     ]);
   });
+
+  it('skips mentions that do not resolve to a readable file', async () => {
+    const service = new PromptAttachmentService(
+      new InMemoryWorkspaceFiles({ 'src/app.ts': 'console.log("app")' })
+    );
+
+    const attachments = await service.resolveAttachments(
+      'Review @src/app.ts and @tsup'
+    );
+
+    expect(attachments).toEqual([
+      { path: 'src/app.ts', content: 'console.log("app")' },
+    ]);
+  });
 });
 
 describe('prompt mention helpers', () => {

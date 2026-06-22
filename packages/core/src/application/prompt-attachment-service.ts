@@ -17,11 +17,23 @@ export class PromptAttachmentService {
   ): Promise<MessageAttachment[]> {
     const mentions = extractFileMentions(content);
 
-    return Promise.all(
-      mentions.map(async (relativePath) => ({
-        path: relativePath,
-        content: await this.workspaceFiles.readFile(relativePath),
-      }))
+    const resolved = await Promise.all(
+      mentions.map(async (relativePath) => {
+        try {
+          return {
+            path: relativePath,
+            content: await this.workspaceFiles.readFile(relativePath),
+          };
+        } catch {
+          // Skip mentions that don't resolve to a readable file (e.g. a typo or
+          // an @mention the user never Tab-completed) so the message still sends.
+          return undefined;
+        }
+      })
+    );
+
+    return resolved.filter((attachment): attachment is MessageAttachment =>
+      attachment !== undefined
     );
   }
 }

@@ -16,7 +16,7 @@ import type {
 import type { Conversation } from '@core/domain/conversation';
 import { createMessage } from '@core/domain/message';
 import type { ModelInfo, ProviderId, ProviderClient } from '@core/ports/chat-model';
-import { renderMarkdown } from './render-markdown.js';
+import { renderMarkdown, renderMarkdownAsync } from './render-markdown.js';
 import { filterCommands, parseCommandInput } from './commands.js';
 import { ModelPicker } from './model-picker.js';
 
@@ -50,6 +50,15 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     cost: 0,
     lastInputTokens: 0,
   });
+  const [lastStats, setLastStats] = useState<{
+    ttftMs: number;
+    tokensPerSecond: number;
+    outputTokens: number;
+  } | null>(null);
+  const responseTimingRef = useRef<{
+    startMs: number;
+    firstTokenMs: number | null;
+  }>({ startMs: 0, firstTokenMs: null });
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState('');
   const [status, setStatus] = useState<string>('Loading session...');
@@ -67,6 +76,9 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     Record<string, { content: string; durationMs: number }>
   >({});
   const [error, setError] = useState<string | null>(null);
+  // Shiki highlighting is async, so finalized assistant messages are rendered
+  // off the render path and cached here by message id.
+  const [renderedContent, setRenderedContent] = useState<Record<string, string>>({});
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
@@ -201,6 +213,26 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     );
   }, [props.allProviders]);
 
+  useEffect(() => {
+    const messages = conversation?.messages;
+    if (!messages) return;
+    let cancelled = false;
+    void (async () => {
+      for (const message of messages) {
+        if (message.role !== 'assistant' || !message.content) continue;
+        if (renderedContent[message.id]) continue;
+        const rendered = await renderMarkdownAsync(message.content);
+        if (cancelled) return;
+        setRenderedContent((prev) =>
+          prev[message.id] ? prev : { ...prev, [message.id]: rendered }
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [conversation, renderedContent]);
+
   const handleModelSelect = (model: ModelInfo): void => {
     setShowModelPicker(false);
     if (model.providerId !== props.chatSessionService['provider']?.providerId) {
@@ -284,6 +316,8 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     setThinkingDuration(null);
     streamingBufferRef.current = '';
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
+    responseTimingRef.current = { startMs: Date.now(), firstTokenMs: null };
+    setLastStats(null);
     setInput('');
     setStatus('Waiting for response...');
 
@@ -303,12 +337,18 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         content: value,
         attachments,
         onToken: (token) => {
+          if (responseTimingRef.current.firstTokenMs === null) {
+            responseTimingRef.current.firstTokenMs = Date.now();
+          }
           if (thinkingRef.current.startMs && thinkingRef.current.durationMs === null) {
             thinkingRef.current.durationMs = Date.now() - thinkingRef.current.startMs;
           }
           streamingBufferRef.current += token;
         },
         onThinkingToken: (token) => {
+          if (responseTimingRef.current.firstTokenMs === null) {
+            responseTimingRef.current.firstTokenMs = Date.now();
+          }
           if (!thinkingRef.current.startMs) {
             thinkingRef.current.startMs = Date.now();
           }
@@ -316,6 +356,8 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         },
       });
 
+      const endMs = Date.now();
+      const timing = responseTimingRef.current;
       const lastMsg = result.conversation.messages[result.conversation.messages.length - 1];
       const capturedThinking = thinkingRef.current.buffer;
       const capturedDuration =
@@ -337,6 +379,16 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
             ...prev,
             [lastMsg.id]: { content: capturedThinking, durationMs: capturedDuration },
           }));
+        }
+        if (result.usage && timing.firstTokenMs !== null) {
+          const u = result.usage;
+          const ttftMs = timing.firstTokenMs - timing.startMs;
+          const genSeconds = Math.max(endMs - timing.firstTokenMs, 1) / 1000;
+          setLastStats({
+            ttftMs,
+            tokensPerSecond: u.outputTokens / genSeconds,
+            outputTokens: u.outputTokens,
+          });
         }
         if (result.usage) {
           const u = result.usage;
@@ -423,7 +475,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
                   <Text dimColor>{formatTime(message.createdAt)}</Text>
                 </Box>
               ) : message.role === 'assistant' ? (
-                <Text>{renderMarkdown(message.content)}</Text>
+                <Text>{renderedContent[message.id] ?? renderMarkdown(message.content)}</Text>
               ) : (
                 <Text>
                   <Text color="yellow">{message.role}</Text>
@@ -522,6 +574,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
             </Text>
           ) : null}
           <Text color="cyan" bold>
+            {activeModelInfo?.providerId ?? props.providerId}/
             {activeModel || session?.activeModel || 'loading'}
           </Text>
         </Box>
@@ -551,6 +604,16 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
                 <Text dimColor>
                   $<Text color="white">{metrics.cost.toFixed(4)}</Text>
                 </Text>
+              ) : null}
+              {lastStats ? (
+                <>
+                  <Text dimColor>
+                    ttft <Text color="white">{formatDuration(lastStats.ttftMs)}</Text>
+                  </Text>
+                  <Text dimColor>
+                    <Text color="white">{lastStats.tokensPerSecond.toFixed(1)}</Text> tok/s
+                  </Text>
+                </>
               ) : null}
             </>
           ) : (
