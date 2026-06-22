@@ -32,10 +32,18 @@ export interface SubmitMessageResult {
 }
 
 export class ChatSessionService {
+  private provider: ProviderClient;
+
   public constructor(
     private readonly repository: ConversationRepository,
-    private readonly provider: ProviderClient
-  ) {}
+    provider: ProviderClient
+  ) {
+    this.provider = provider;
+  }
+
+  public switchProvider(provider: ProviderClient): void {
+    this.provider = provider;
+  }
 
   public async startSession(
     input: StartSessionInput

@@ -5,6 +5,10 @@ export interface Command {
 
 export const COMMANDS: Command[] = [
   {
+    name: 'models',
+    description: 'Browse and switch the active model',
+  },
+  {
     name: 'new-session',
     description: 'Start a fresh conversation in a new session',
   },

@@ -32,7 +32,7 @@ function createProviderStub(): ProviderClient {
       return { content: `reply:${latestMessage?.content ?? ''}` };
     },
     async listModels() {
-      return [{ id: 'llama3.1', displayName: 'llama3.1' }];
+      return [{ id: 'llama3.1', displayName: 'llama3.1', providerId: ProviderId.Ollama }];
     },
     getDefaultModel() {
       return undefined;

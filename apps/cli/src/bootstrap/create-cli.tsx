@@ -106,6 +106,8 @@ async function runChat(options: SharedOptions): Promise<void> {
       promptAttachmentService: runtime.promptAttachmentService,
       sessionId: options.session ?? `session-${Date.now()}`,
       requestedModel: options.model,
+      allProviders: runtime.allProviders,
+      createProvider: runtime.createProvider,
     })
   );
 }

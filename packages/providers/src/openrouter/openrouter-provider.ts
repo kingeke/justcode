@@ -16,6 +16,8 @@ interface OpenRouterModelsResponse {
     pricing?: {
       prompt?: string | number;
       completion?: string | number;
+      input_cache_read?: string | number;
+      input_cache_write?: string | number;
     };
   }>;
 }
@@ -127,12 +129,19 @@ export class OpenRouterProvider implements ProviderClient {
       .map((model) => ({
         id: model.id,
         displayName: model.name ?? model.id,
+        providerId: ProviderId.OpenRouter,
         ...(model.context_length != null ? { contextWindow: model.context_length } : {}),
         ...(model.pricing
           ? {
               pricing: {
                 inputPerToken: Number(model.pricing.prompt ?? 0),
                 outputPerToken: Number(model.pricing.completion ?? 0),
+                ...(model.pricing.input_cache_read != null
+                  ? { cacheReadPerToken: Number(model.pricing.input_cache_read) }
+                  : {}),
+                ...(model.pricing.input_cache_write != null
+                  ? { cacheWritePerToken: Number(model.pricing.input_cache_write) }
+                  : {}),
               },
             }
           : {}),

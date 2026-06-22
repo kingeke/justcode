@@ -7,15 +7,29 @@ export enum ProviderId {
   OpenRouter = 'openrouter',
 }
 
+export interface ProviderInfo {
+  id: ProviderId;
+  name: string;
+}
+
+export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
+  [ProviderId.Openai]: { id: ProviderId.Openai, name: 'OpenAI' },
+  [ProviderId.Ollama]: { id: ProviderId.Ollama, name: 'Ollama' },
+  [ProviderId.LmStudio]: { id: ProviderId.LmStudio, name: 'LM Studio' },
+  [ProviderId.OpenRouter]: { id: ProviderId.OpenRouter, name: 'OpenRouter' },
+};
+
 export interface ModelPricing {
   inputPerToken: number;
   outputPerToken: number;
   cacheReadPerToken?: number;
+  cacheWritePerToken?: number;
 }
 
 export interface ModelInfo {
   id: string;
   displayName: string;
+  providerId: ProviderId;
   contextWindow?: number;
   pricing?: ModelPricing;
 }
@@ -43,4 +57,3 @@ export interface ProviderClient {
   listModels(): Promise<ModelInfo[]>;
   getDefaultModel(): string | undefined;
 }
-

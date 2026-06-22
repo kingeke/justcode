@@ -160,6 +160,7 @@ export class OpenAiCompatibleProvider implements ProviderClient {
         return {
           id: model.id,
           displayName: model.id,
+          providerId: this.providerId,
           ...(contextWindow != null ? { contextWindow } : {}),
           ...(pricing ? { pricing } : {}),
         };

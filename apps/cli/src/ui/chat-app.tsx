@@ -14,9 +14,10 @@ import type {
   StartSessionResult,
 } from '@core/application/chat-session-service';
 import type { Conversation } from '@core/domain/conversation';
-import type { ModelInfo, ProviderId } from '@core/ports/chat-model';
+import type { ModelInfo, ProviderId, ProviderClient } from '@core/ports/chat-model';
 import { renderMarkdown } from './render-markdown.js';
 import { filterCommands, parseCommandInput } from './commands.js';
+import { ModelPicker } from './model-picker.js';
 
 const MAX_COMMAND_ITEMS = 5;
 
@@ -26,12 +27,17 @@ interface ChatAppProps {
   promptAttachmentService: PromptAttachmentService;
   sessionId: string;
   requestedModel: string | undefined;
+  allProviders: ProviderClient[];
+  createProvider: (id: ProviderId) => ProviderClient;
 }
 
 export function ChatApp(props: ChatAppProps): React.ReactElement {
   const { exit } = useApp();
+  const [showModelPicker, setShowModelPicker] = useState(false);
+  const [allModels, setAllModels] = useState<ModelInfo[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState(props.sessionId);
   const [session, setSession] = useState<StartSessionResult | null>(null);
+  const [activeModel, setActiveModel] = useState<string>('');
   const [activeModelInfo, setActiveModelInfo] = useState<ModelInfo | null>(null);
   const [metrics, setMetrics] = useState({
     inputTokens: 0,
@@ -71,6 +77,8 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     mentionSuggestions[selectedSuggestionIndex] ?? mentionSuggestions[0];
 
   useInput((value, key) => {
+    if (showModelPicker) return;
+
     if (key.escape || (key.ctrl && value.toLowerCase() === 'c')) {
       exit();
       return;
@@ -78,9 +86,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
     if (isCommandMode && visibleCommands.length) {
       if (key.downArrow) {
-        setSelectedCommandIndex((i) =>
-          Math.min(i + 1, visibleCommands.length - 1)
-        );
+        setSelectedCommandIndex((i) => Math.min(i + 1, visibleCommands.length - 1));
         return;
       }
       if (key.upArrow) {
@@ -98,9 +104,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     if (!mentionSuggestions.length) return;
 
     if (key.downArrow) {
-      setSelectedSuggestionIndex((i) =>
-        Math.min(i + 1, mentionSuggestions.length - 1)
-      );
+      setSelectedSuggestionIndex((i) => Math.min(i + 1, mentionSuggestions.length - 1));
       return;
     }
     if (key.upArrow) {
@@ -141,6 +145,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
           ) ?? null;
         startTransition(() => {
           setSession(startedSession);
+          setActiveModel(startedSession.activeModel);
           setConversation(startedSession.conversation);
           setActiveModelInfo(modelInfo);
           setStatus('Ready');
@@ -161,18 +166,48 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     void props.promptAttachmentService
       .listFiles()
       .then((files) => {
-        startTransition(() => {
-          setWorkspaceFiles(files);
-        });
+        startTransition(() => setWorkspaceFiles(files));
       })
       .catch((caughtError: unknown) => {
         setError(getErrorMessage(caughtError));
       });
   }, [props.promptAttachmentService]);
 
+  useEffect(() => {
+    void Promise.allSettled(props.allProviders.map((p) => p.listModels())).then(
+      (results) => {
+        const models = results
+          .filter((r) => r.status === 'fulfilled')
+          .flatMap((r) => r.value);
+        startTransition(() => setAllModels(models));
+      }
+    );
+  }, [props.allProviders]);
+
+  const handleModelSelect = (model: ModelInfo): void => {
+    setShowModelPicker(false);
+    if (model.providerId !== props.chatSessionService['provider']?.providerId) {
+      try {
+        const newProvider = props.createProvider(model.providerId);
+        props.chatSessionService.switchProvider(newProvider);
+      } catch (e) {
+        setError(getErrorMessage(e));
+        return;
+      }
+    }
+    setActiveModel(model.id);
+    setActiveModelInfo(model);
+    setStatus(`Switched to ${model.displayName}`);
+  };
+
   const executeCommand = (name: string): void => {
     setInput('');
     setError(null);
+
+    if (name === 'models') {
+      setShowModelPicker(true);
+      return;
+    }
 
     if (name === 'new-session') {
       const newId = `session-${Date.now()}`;
@@ -201,9 +236,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       const query = parseCommandInput(value) ?? '';
       const exact = filteredCommands.find((c) => c.name === query);
       const selected = exact ?? visibleCommands[selectedCommandIndex];
-      if (selected) {
-        executeCommand(selected.name);
-      }
+      if (selected) executeCommand(selected.name);
       setInput('');
       return;
     }
@@ -219,17 +252,14 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
     const flushInterval = setInterval(() => {
       const buffered = streamingBufferRef.current;
-      if (buffered) {
-        setStreamingContent(buffered);
-      }
+      if (buffered) setStreamingContent(buffered);
     }, 50);
 
     try {
-      const attachments =
-        await props.promptAttachmentService.resolveAttachments(value);
+      const attachments = await props.promptAttachmentService.resolveAttachments(value);
       const result = await props.chatSessionService.submitMessage({
         conversation,
-        model: session.activeModel,
+        model: activeModel || session.activeModel,
         content: value,
         attachments,
         onToken: (token) => {
@@ -271,20 +301,25 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     }
   };
 
-  const modelsLine = session?.availableModels.length
-    ? session.availableModels.map((model) => model.id).join(', ')
-    : 'No models detected';
+  if (showModelPicker) {
+    return (
+      <ModelPicker
+        models={allModels}
+        currentModel={activeModel}
+        onSelect={handleModelSelect}
+        onCancel={() => setShowModelPicker(false)}
+      />
+    );
+  }
 
   return (
     <Box flexDirection="column" padding={1}>
       <Text color="cyan">justcode</Text>
-      <Text>
-        provider: {props.providerId} | session: {currentSessionId} | model:{' '}
-        {session?.activeModel ?? 'loading'}
-      </Text>
-      <Text dimColor>available models: {modelsLine}</Text>
       <Text dimColor>
-        press Enter to send, Tab to complete @file or /command, Esc or Ctrl+C to exit
+        provider: {props.providerId} | session: {currentSessionId}
+      </Text>
+      <Text dimColor>
+        Enter to send · Tab to complete @file or /command · Esc/Ctrl+C to exit
       </Text>
 
       <Box marginTop={1} flexDirection="column">
@@ -384,7 +419,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
             </Text>
           ) : null}
           <Text color="cyan" bold>
-            {session?.activeModel ?? 'loading'}
+            {activeModel || session?.activeModel || 'loading'}
           </Text>
         </Box>
         <Box gap={2}>
@@ -430,10 +465,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 }
 
 function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
+  if (error instanceof Error) return error.message;
   return 'Unknown error';
 }
 

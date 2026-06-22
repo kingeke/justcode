@@ -77,7 +77,7 @@ export class OllamaProvider implements ProviderClient {
     );
 
     return (response.models ?? [])
-      .map((model) => ({ id: model.name, displayName: model.name }))
+      .map((model) => ({ id: model.name, displayName: model.name, providerId: ProviderId.Ollama }))
       .sort((left, right) => left.id.localeCompare(right.id));
   }
 
