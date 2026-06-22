@@ -2,7 +2,7 @@ import {
   createConversation,
   type Conversation,
 } from '@core/domain/conversation';
-import { createMessage } from '@core/domain/message';
+import { createMessage, type MessageAttachment } from '@core/domain/message';
 import type { ModelInfo, ProviderClient } from '@core/ports/chat-model';
 import type { ConversationRepository } from '@core/ports/conversation-repository';
 
@@ -21,6 +21,7 @@ export interface SubmitMessageInput {
   conversation: Conversation;
   model: string;
   content: string;
+  attachments?: MessageAttachment[];
 }
 
 export interface SubmitMessageResult {
@@ -60,7 +61,12 @@ export class ChatSessionService {
       throw new Error('Message content cannot be empty.');
     }
 
-    const userMessage = createMessage('user', trimmedContent);
+    const userMessage = createMessage(
+      'user',
+      trimmedContent,
+      new Date(),
+      input.attachments
+    );
     const response = await this.provider.sendChat({
       model: input.model,
       messages: [...input.conversation.messages, userMessage],

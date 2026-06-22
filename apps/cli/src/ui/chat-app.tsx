@@ -1,8 +1,14 @@
-import React, { startTransition, useEffect, useState } from 'react';
+import React, { startTransition, useEffect, useMemo, useState } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import Spinner from 'ink-spinner';
 import TextInput from 'ink-text-input';
 
+import {
+  applyMentionSuggestion,
+  filterMentionSuggestions,
+  getActiveMentionQuery,
+  type PromptAttachmentService,
+} from '@core/application/prompt-attachment-service';
 import type {
   ChatSessionService,
   StartSessionResult,
@@ -13,6 +19,7 @@ import type { ProviderId } from '@core/ports/chat-model';
 interface ChatAppProps {
   providerId: ProviderId;
   chatSessionService: ChatSessionService;
+  promptAttachmentService: PromptAttachmentService;
   sessionId: string;
   requestedModel: string | undefined;
 }
@@ -25,10 +32,52 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   const [status, setStatus] = useState<string>('Loading session...');
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+
+  const activeMentionQuery = useMemo(
+    () => getActiveMentionQuery(input),
+    [input]
+  );
+  const mentionSuggestions = useMemo(
+    () => filterMentionSuggestions(workspaceFiles, activeMentionQuery),
+    [activeMentionQuery, workspaceFiles]
+  );
+  const selectedSuggestion =
+    mentionSuggestions[selectedSuggestionIndex] ?? mentionSuggestions[0];
 
   useInput((value, key) => {
     if (key.escape || (key.ctrl && value.toLowerCase() === 'c')) {
       exit();
+      return;
+    }
+
+    if (!mentionSuggestions.length) {
+      return;
+    }
+
+    if (key.downArrow) {
+      setSelectedSuggestionIndex((currentIndex) =>
+        Math.min(currentIndex + 1, mentionSuggestions.length - 1)
+      );
+      return;
+    }
+
+    if (key.upArrow) {
+      setSelectedSuggestionIndex((currentIndex) =>
+        Math.max(currentIndex - 1, 0)
+      );
+      return;
+    }
+
+    if (key.tab) {
+      if (!selectedSuggestion) {
+        return;
+      }
+
+      setInput((currentInput) =>
+        applyMentionSuggestion(currentInput, selectedSuggestion)
+      );
     }
   });
 
@@ -57,6 +106,23 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       });
   }, [props.chatSessionService, props.requestedModel, props.sessionId]);
 
+  useEffect(() => {
+    void props.promptAttachmentService
+      .listFiles()
+      .then((files) => {
+        startTransition(() => {
+          setWorkspaceFiles(files);
+        });
+      })
+      .catch((caughtError: unknown) => {
+        setError(getErrorMessage(caughtError));
+      });
+  }, [props.promptAttachmentService]);
+
+  useEffect(() => {
+    setSelectedSuggestionIndex(0);
+  }, [activeMentionQuery]);
+
   const submit = async (value: string): Promise<void> => {
     if (!conversation || !session || isSending || !value.trim()) {
       return;
@@ -68,10 +134,13 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     setStatus('Waiting for response...');
 
     try {
+      const attachments =
+        await props.promptAttachmentService.resolveAttachments(value);
       const result = await props.chatSessionService.submitMessage({
         conversation,
         model: session.activeModel,
         content: value,
+        attachments,
       });
 
       startTransition(() => {
@@ -98,24 +167,33 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         {session?.activeModel ?? 'loading'}
       </Text>
       <Text dimColor>available models: {modelsLine}</Text>
-      <Text dimColor>press Enter to send, Esc or Ctrl+C to exit</Text>
+      <Text dimColor>
+        press Enter to send, Tab to complete @file, Esc or Ctrl+C to exit
+      </Text>
       <Box marginTop={1} flexDirection="column">
         {conversation?.messages.length ? (
           conversation.messages.map((message) => (
-            <Text key={message.id}>
-              <Text
-                color={
-                  message.role === 'user'
-                    ? 'green'
-                    : message.role === 'assistant'
-                      ? 'magenta'
-                      : 'yellow'
-                }
-              >
-                {message.role}
+            <Box key={message.id} flexDirection="column">
+              <Text>
+                <Text
+                  color={
+                    message.role === 'user'
+                      ? 'green'
+                      : message.role === 'assistant'
+                        ? 'magenta'
+                        : 'yellow'
+                  }
+                >
+                  {message.role}
+                </Text>
+                <Text>: {message.content}</Text>
               </Text>
-              <Text>: {message.content}</Text>
-            </Text>
+              {message.attachments?.map((attachment) => (
+                <Text key={`${message.id}:${attachment.path}`} dimColor>
+                  attached: @{attachment.path}
+                </Text>
+              ))}
+            </Box>
           ))
         ) : (
           <Text dimColor>No messages yet.</Text>
@@ -130,6 +208,19 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
           focus={!isSending}
         />
       </Box>
+      {mentionSuggestions.length ? (
+        <Box marginTop={1} flexDirection="column">
+          <Text dimColor>file suggestions:</Text>
+          {mentionSuggestions.map((suggestion, index) => (
+            <Text
+              key={suggestion}
+              {...(index === selectedSuggestionIndex ? { color: 'cyan' } : {})}
+            >
+              {index === selectedSuggestionIndex ? '>' : ' '} @{suggestion}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
       <Box marginTop={1}>
         {isSending ? (
           <Text color="yellow">

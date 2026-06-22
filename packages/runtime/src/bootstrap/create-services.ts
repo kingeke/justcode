@@ -1,14 +1,17 @@
+import { PromptAttachmentService } from '@core/application/prompt-attachment-service';
 import { ChatSessionService } from '@core/application/chat-session-service';
 import { ListModelsService } from '@core/application/list-models-service';
 import type { ProviderId } from '@core/ports/chat-model';
 import { ProviderRegistry } from '@runtime/bootstrap/provider-registry';
 import { loadAppConfig } from '@runtime/config/app-config';
 import { FileConversationRepository } from '@runtime/persistence/file-conversation-repository';
+import { LocalWorkspaceFileService } from '@runtime/workspace/local-workspace-file-service';
 
 export interface RuntimeServices {
   providerId: ProviderId;
   chatSessionService: ChatSessionService;
   listModelsService: ListModelsService;
+  promptAttachmentService: PromptAttachmentService;
 }
 
 export interface CreateRuntimeOptions {
@@ -23,10 +26,12 @@ export function createRuntimeServices(
   const providerId = options.providerId ?? config.defaultProvider;
   const provider = new ProviderRegistry(config).create(providerId);
   const repository = new FileConversationRepository(config.sessionsDirectory);
+  const workspaceFiles = new LocalWorkspaceFileService(process.cwd());
 
   return {
     providerId,
     chatSessionService: new ChatSessionService(repository, provider),
     listModelsService: new ListModelsService(provider),
+    promptAttachmentService: new PromptAttachmentService(workspaceFiles),
   };
 }

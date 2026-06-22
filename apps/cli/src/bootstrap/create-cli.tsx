@@ -1,5 +1,5 @@
 import { render } from 'ink';
-import { Command } from 'commander';
+import { Command, type OptionValues } from 'commander';
 import React from 'react';
 
 import { ChatApp } from '@cli/ui/chat-app';
@@ -17,7 +17,7 @@ export function createCli(): Command {
   const program = new Command();
 
   program
-    .name('justcode')
+    .name('JustCode')
     .description('Just Code CLI')
     .option(
       '-p, --provider <provider>',
@@ -25,7 +25,8 @@ export function createCli(): Command {
     )
     .option('-m, --model <model>', 'Model to use')
     .option('-s, --session <session>', 'Session identifier', 'default')
-    .action(async (options: SharedOptions) => {
+    .action(async (...args: unknown[]) => {
+      const options = getActionOptions<SharedOptions>(args);
       await runChat(options);
     });
 
@@ -38,7 +39,8 @@ export function createCli(): Command {
     )
     .option('-m, --model <model>', 'Model to use')
     .option('-s, --session <session>', 'Session identifier', 'default')
-    .action(async (options: SharedOptions) => {
+    .action(async (...args: unknown[]) => {
+      const options = getActionOptions<SharedOptions>(args);
       await runChat(options);
     });
 
@@ -49,7 +51,8 @@ export function createCli(): Command {
       '-p, --provider <provider>',
       'Provider to use: openai, ollama, lmstudio'
     )
-    .action(async (options: Pick<SharedOptions, 'provider'>) => {
+    .action(async (...args: unknown[]) => {
+      const options = getActionOptions<Pick<SharedOptions, 'provider'>>(args);
       const providerId = resolveProviderId(options.provider);
       const runtime = createRuntimeServices(providerId ? { providerId } : {});
       const models = await runtime.listModelsService.execute();
@@ -70,6 +73,28 @@ export function createCli(): Command {
   return program;
 }
 
+export function normalizeArgv(argv: readonly string[]): string[] {
+  return argv.flatMap((argument) => {
+    if (
+      !argument.startsWith('-') ||
+      argument.startsWith('--') ||
+      !argument.includes('=')
+    ) {
+      return [argument];
+    }
+
+    const separatorIndex = argument.indexOf('=');
+    const optionName = argument.slice(0, separatorIndex);
+    const optionValue = argument.slice(separatorIndex + 1);
+
+    if (!['-p', '-m', '-s'].includes(optionName) || !optionValue) {
+      return [argument];
+    }
+
+    return [optionName, optionValue];
+  });
+}
+
 async function runChat(options: SharedOptions): Promise<void> {
   const providerId = resolveProviderId(options.provider);
   const runtime = createRuntimeServices(providerId ? { providerId } : {});
@@ -78,6 +103,7 @@ async function runChat(options: SharedOptions): Promise<void> {
     React.createElement(ChatApp, {
       providerId: runtime.providerId,
       chatSessionService: runtime.chatSessionService,
+      promptAttachmentService: runtime.promptAttachmentService,
       sessionId: options.session ?? 'default',
       requestedModel: options.model,
     })
@@ -88,4 +114,15 @@ function resolveProviderId(
   provider: string | undefined
 ): ProviderId | undefined {
   return parseProviderId(provider);
+}
+
+function getActionOptions<TOptions extends OptionValues>(
+  args: unknown[]
+): TOptions {
+  const command = args.at(-1);
+  if (!(command instanceof Command)) {
+    throw new Error('Failed to resolve command options.');
+  }
+
+  return command.optsWithGlobals<TOptions>();
 }

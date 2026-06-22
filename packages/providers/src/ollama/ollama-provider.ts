@@ -4,6 +4,7 @@ import type {
   ModelInfo,
   ProviderClient,
 } from '@core/ports/chat-model';
+import { renderMessageContentForModel } from '@core/domain/message';
 import { joinUrl, requestJson } from '@providers/http/http-client';
 
 interface OllamaTagsResponse {
@@ -32,7 +33,7 @@ export class OllamaProvider implements ProviderClient {
           model: request.model,
           messages: request.messages.map((message) => ({
             role: message.role,
-            content: message.content,
+            content: renderMessageContentForModel(message),
           })),
           stream: false,
         },

@@ -5,6 +5,7 @@ import type {
   ProviderClient,
   ProviderId,
 } from '@core/ports/chat-model';
+import { renderMessageContentForModel } from '@core/domain/message';
 import { joinUrl, requestJson } from '@providers/http/http-client';
 
 interface OpenAiCompatibleProviderOptions {
@@ -47,7 +48,7 @@ export class OpenAiCompatibleProvider implements ProviderClient {
           model: request.model,
           messages: request.messages.map((message) => ({
             role: message.role,
-            content: message.content,
+            content: renderMessageContentForModel(message),
           })),
           stream: false,
         },

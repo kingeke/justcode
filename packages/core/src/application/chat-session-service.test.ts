@@ -70,4 +70,23 @@ describe('ChatSessionService', () => {
     expect(result.conversation.messages[1]?.role).toBe('assistant');
     expect(repository.conversation.messages).toHaveLength(2);
   });
+
+  it('stores message attachments when files are included in a prompt', async () => {
+    const repository = new InMemoryConversationRepository();
+    const service = new ChatSessionService(repository, createProviderStub());
+
+    const startedSession = await service.startSession({
+      sessionId: 'session-1',
+    });
+    const result = await service.submitMessage({
+      conversation: startedSession.conversation,
+      model: startedSession.activeModel,
+      content: 'Review @src/app.ts',
+      attachments: [{ path: 'src/app.ts', content: 'console.log("hello")' }],
+    });
+
+    expect(result.conversation.messages[0]?.attachments).toEqual([
+      { path: 'src/app.ts', content: 'console.log("hello")' },
+    ]);
+  });
 });

@@ -1,3 +1,3 @@
-import { createCli } from '@cli/bootstrap/create-cli';
+import { createCli, normalizeArgv } from '@cli/bootstrap/create-cli';
 
-await createCli().parseAsync(process.argv);
+await createCli().parseAsync(normalizeArgv(process.argv));
