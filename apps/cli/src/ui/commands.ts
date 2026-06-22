@@ -8,6 +8,10 @@ export const COMMANDS: Command[] = [
     name: 'new-session',
     description: 'Start a fresh conversation in a new session',
   },
+  {
+    name: 'clear',
+    description: 'Clear the current session and start fresh',
+  },
 ];
 
 export function filterCommands(query: string): Command[] {

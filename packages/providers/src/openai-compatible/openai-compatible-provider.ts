@@ -2,6 +2,7 @@ import type {
   ChatRequest,
   ChatResult,
   ModelInfo,
+  ModelPricing,
   ProviderClient,
   ProviderId,
 } from '@core/ports/chat-model';
@@ -27,7 +28,39 @@ interface OpenAiChatResponse {
       content?: string | Array<{ type: string; text?: string }>;
     };
   }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    prompt_tokens_details?: { cached_tokens?: number };
+  };
 }
+
+// Prices in USD per token. Source: https://openai.com/api/pricing/
+const OPENAI_PRICING: Record<string, ModelPricing> = {
+  'gpt-4o':               { inputPerToken: 0.0000025,  outputPerToken: 0.00001,    cacheReadPerToken: 0.00000125 },
+  'gpt-4o-mini':          { inputPerToken: 0.00000015, outputPerToken: 0.0000006,  cacheReadPerToken: 0.000000075 },
+  'gpt-4-turbo':          { inputPerToken: 0.00001,    outputPerToken: 0.00003 },
+  'gpt-4':                { inputPerToken: 0.00003,    outputPerToken: 0.00006 },
+  'gpt-3.5-turbo':        { inputPerToken: 0.0000005,  outputPerToken: 0.0000015 },
+  'o1':                   { inputPerToken: 0.000015,   outputPerToken: 0.00006,    cacheReadPerToken: 0.0000075 },
+  'o1-mini':              { inputPerToken: 0.000003,   outputPerToken: 0.000012,   cacheReadPerToken: 0.0000015 },
+  'o1-preview':           { inputPerToken: 0.000015,   outputPerToken: 0.00006 },
+  'o3-mini':              { inputPerToken: 0.0000011,  outputPerToken: 0.0000044,  cacheReadPerToken: 0.00000055 },
+  'o3':                   { inputPerToken: 0.00001,    outputPerToken: 0.00004,    cacheReadPerToken: 0.0000025 },
+};
+
+const OPENAI_CONTEXT_WINDOWS: Record<string, number> = {
+  'gpt-4o':        128_000,
+  'gpt-4o-mini':   128_000,
+  'gpt-4-turbo':   128_000,
+  'gpt-4':           8_192,
+  'gpt-3.5-turbo':  16_385,
+  'o1':            200_000,
+  'o1-mini':       128_000,
+  'o1-preview':    128_000,
+  'o3-mini':       200_000,
+  'o3':            200_000,
+};
 
 export class OpenAiCompatibleProvider implements ProviderClient {
   public readonly providerId: ProviderId;
@@ -46,12 +79,17 @@ export class OpenAiCompatibleProvider implements ProviderClient {
 
     if (request.onToken) {
       let accumulated = '';
-      await requestSseStream(
+      const streamUsage = await requestSseStream(
         joinUrl(this.options.baseUrl, '/chat/completions'),
         {
           method: 'POST',
           headers: this.createHeaders(),
-          body: { model: request.model, messages, stream: true },
+          body: {
+            model: request.model,
+            messages,
+            stream: true,
+            stream_options: { include_usage: true },
+          },
         },
         (token) => {
           accumulated += token;
@@ -63,7 +101,10 @@ export class OpenAiCompatibleProvider implements ProviderClient {
         throw new Error(`Provider '${this.providerId}' returned an empty response.`);
       }
 
-      return { content: accumulated };
+      return {
+        content: accumulated,
+        ...(streamUsage.inputTokens > 0 ? { usage: streamUsage } : {}),
+      };
     }
 
     const response = await requestJson<OpenAiChatResponse>(
@@ -76,8 +117,18 @@ export class OpenAiCompatibleProvider implements ProviderClient {
     );
 
     const content = response.choices?.[0]?.message?.content;
+    const usage = response.usage
+      ? {
+          inputTokens: response.usage.prompt_tokens ?? 0,
+          outputTokens: response.usage.completion_tokens ?? 0,
+          cachedTokens: response.usage.prompt_tokens_details?.cached_tokens ?? 0,
+        }
+      : undefined;
+
+    const usageSpread = usage ? { usage } : {};
+
     if (typeof content === 'string' && content.trim()) {
-      return { content };
+      return { content, ...usageSpread };
     }
 
     if (Array.isArray(content)) {
@@ -87,7 +138,7 @@ export class OpenAiCompatibleProvider implements ProviderClient {
         .trim();
 
       if (mergedContent) {
-        return { content: mergedContent };
+        return { content: mergedContent, ...usageSpread };
       }
     }
 
@@ -103,7 +154,16 @@ export class OpenAiCompatibleProvider implements ProviderClient {
     );
 
     return (response.data ?? [])
-      .map((model) => ({ id: model.id, displayName: model.id }))
+      .map((model) => {
+        const contextWindow = this.resolveContextWindow(model.id);
+        const pricing = this.resolvePricing(model.id);
+        return {
+          id: model.id,
+          displayName: model.id,
+          ...(contextWindow != null ? { contextWindow } : {}),
+          ...(pricing ? { pricing } : {}),
+        };
+      })
       .sort((left, right) => left.id.localeCompare(right.id));
   }
 
@@ -119,5 +179,13 @@ export class OpenAiCompatibleProvider implements ProviderClient {
     return {
       authorization: `Bearer ${this.options.apiKey}`,
     };
+  }
+
+  protected resolveContextWindow(modelId: string): number | undefined {
+    return OPENAI_CONTEXT_WINDOWS[modelId];
+  }
+
+  protected resolvePricing(modelId: string): ModelPricing | undefined {
+    return OPENAI_PRICING[modelId];
   }
 }

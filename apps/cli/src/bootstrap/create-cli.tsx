@@ -24,7 +24,7 @@ export function createCli(): Command {
       'Provider to use: openai, ollama, lmstudio'
     )
     .option('-m, --model <model>', 'Model to use')
-    .option('-s, --session <session>', 'Session identifier', 'default')
+    .option('-s, --session <session>', 'Session identifier')
     .action(async (...args: unknown[]) => {
       const options = getActionOptions<SharedOptions>(args);
       await runChat(options);
@@ -38,7 +38,7 @@ export function createCli(): Command {
       'Provider to use: openai, ollama, lmstudio'
     )
     .option('-m, --model <model>', 'Model to use')
-    .option('-s, --session <session>', 'Session identifier', 'default')
+    .option('-s, --session <session>', 'Session identifier')
     .action(async (...args: unknown[]) => {
       const options = getActionOptions<SharedOptions>(args);
       await runChat(options);
@@ -104,7 +104,7 @@ async function runChat(options: SharedOptions): Promise<void> {
       providerId: runtime.providerId,
       chatSessionService: runtime.chatSessionService,
       promptAttachmentService: runtime.promptAttachmentService,
-      sessionId: options.session ?? 'default',
+      sessionId: options.session ?? `session-${Date.now()}`,
       requestedModel: options.model,
     })
   );

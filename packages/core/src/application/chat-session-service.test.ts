@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ChatSessionService } from '@core/application/chat-session-service';
 import { createConversation } from '@core/domain/conversation';
-import type { ProviderClient } from '@core/ports/chat-model';
+import { ProviderId, type ProviderClient } from '@core/ports/chat-model';
 import type { ConversationRepository } from '@core/ports/conversation-repository';
 
 class InMemoryConversationRepository implements ConversationRepository {
@@ -18,11 +18,15 @@ class InMemoryConversationRepository implements ConversationRepository {
   ): Promise<void> {
     this.conversation = conversation;
   }
+
+  public async clear(_sessionId: string): Promise<void> {
+    this.conversation = createConversation(_sessionId);
+  }
 }
 
 function createProviderStub(): ProviderClient {
   return {
-    providerId: 'ollama',
+    providerId: ProviderId.Ollama,
     async sendChat({ messages }) {
       const latestMessage = messages[messages.length - 1];
       return { content: `reply:${latestMessage?.content ?? ''}` };

@@ -50,11 +50,17 @@ export function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
 }
 
+export interface SseUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+}
+
 export async function requestSseStream(
   url: string,
   options: JsonRequestOptions,
   onToken: (token: string) => void
-): Promise<void> {
+): Promise<SseUsage> {
   const requestOptions: RequestInit = {
     method: options.method ?? 'POST',
     headers: {
@@ -87,6 +93,7 @@ export async function requestSseStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  const usage: SseUsage = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -100,28 +107,41 @@ export async function requestSseStream(
       const trimmed = line.trim();
       if (!trimmed.startsWith('data: ')) continue;
       const data = trimmed.slice(6);
-      if (data === '[DONE]') return;
+      if (data === '[DONE]') return usage;
 
       try {
         const parsed = JSON.parse(data) as {
           choices?: Array<{ delta?: { content?: string } }>;
+          usage?: {
+            prompt_tokens?: number;
+            completion_tokens?: number;
+            prompt_tokens_details?: { cached_tokens?: number };
+          };
         };
         const content = parsed.choices?.[0]?.delta?.content;
         if (content) {
           onToken(content);
+        }
+        if (parsed.usage) {
+          usage.inputTokens = parsed.usage.prompt_tokens ?? 0;
+          usage.outputTokens = parsed.usage.completion_tokens ?? 0;
+          usage.cachedTokens =
+            parsed.usage.prompt_tokens_details?.cached_tokens ?? 0;
         }
       } catch {
         // skip malformed SSE lines
       }
     }
   }
+
+  return usage;
 }
 
 export async function requestNdjsonStream(
   url: string,
   options: JsonRequestOptions,
   onToken: (token: string) => void
-): Promise<void> {
+): Promise<SseUsage> {
   const requestOptions: RequestInit = {
     method: options.method ?? 'POST',
     headers: {
@@ -153,6 +173,7 @@ export async function requestNdjsonStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  const usage: SseUsage = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -170,15 +191,23 @@ export async function requestNdjsonStream(
         const parsed = JSON.parse(trimmed) as {
           message?: { content?: string };
           done?: boolean;
+          prompt_eval_count?: number;
+          eval_count?: number;
         };
         const content = parsed.message?.content;
         if (content) {
           onToken(content);
         }
-        if (parsed.done) return;
+        if (parsed.done) {
+          usage.inputTokens = parsed.prompt_eval_count ?? 0;
+          usage.outputTokens = parsed.eval_count ?? 0;
+          return usage;
+        }
       } catch {
         // skip malformed NDJSON lines
       }
     }
   }
+
+  return usage;
 }

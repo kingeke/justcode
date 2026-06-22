@@ -3,7 +3,7 @@ import {
   type Conversation,
 } from '@core/domain/conversation';
 import { createMessage, type MessageAttachment } from '@core/domain/message';
-import type { ModelInfo, ProviderClient } from '@core/ports/chat-model';
+import type { ModelInfo, ProviderClient, TokenUsage } from '@core/ports/chat-model';
 import type { ConversationRepository } from '@core/ports/conversation-repository';
 
 export interface StartSessionInput {
@@ -28,6 +28,7 @@ export interface SubmitMessageInput {
 export interface SubmitMessageResult {
   conversation: Conversation;
   reply: string;
+  usage?: TokenUsage;
 }
 
 export class ChatSessionService {
@@ -51,6 +52,11 @@ export class ChatSessionService {
       activeModel,
       availableModels,
     };
+  }
+
+  public async clearSession(sessionId: string): Promise<Conversation> {
+    await this.repository.clear(sessionId);
+    return createConversation(sessionId);
   }
 
   public async submitMessage(
@@ -85,6 +91,7 @@ export class ChatSessionService {
     return {
       conversation: updatedConversation,
       reply: assistantMessage.content,
+      ...(response.usage ? { usage: response.usage } : {}),
     };
   }
 

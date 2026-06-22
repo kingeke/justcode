@@ -1,10 +1,29 @@
 import type { ChatMessage } from '@core/domain/message';
 
-export type ProviderId = 'openai' | 'ollama' | 'lmstudio' | 'openrouter';
+export enum ProviderId {
+  Openai = 'openai',
+  Ollama = 'ollama',
+  LmStudio = 'lmstudio',
+  OpenRouter = 'openrouter',
+}
+
+export interface ModelPricing {
+  inputPerToken: number;
+  outputPerToken: number;
+  cacheReadPerToken?: number;
+}
 
 export interface ModelInfo {
   id: string;
   displayName: string;
+  contextWindow?: number;
+  pricing?: ModelPricing;
+}
+
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
 }
 
 export interface ChatRequest {
@@ -15,6 +34,7 @@ export interface ChatRequest {
 
 export interface ChatResult {
   content: string;
+  usage?: TokenUsage;
 }
 
 export interface ProviderClient {
@@ -24,7 +44,3 @@ export interface ProviderClient {
   getDefaultModel(): string | undefined;
 }
 
-export interface OpenRouterProviderClient {
-  sendChat(request: ChatRequest): Promise<ChatResult>;
-  listModels(): Promise<ModelInfo[]>;
-}

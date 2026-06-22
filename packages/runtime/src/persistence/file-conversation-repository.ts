@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
@@ -22,6 +22,15 @@ export class FileConversationRepository implements ConversationRepository {
       }
 
       throw error;
+    }
+  }
+
+  public async clear(sessionId: string): Promise<void> {
+    const filePath = this.getFilePath(sessionId);
+    try {
+      await rm(filePath);
+    } catch (error) {
+      if (!isFileMissingError(error)) throw error;
     }
   }
 

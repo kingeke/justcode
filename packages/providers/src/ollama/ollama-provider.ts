@@ -1,8 +1,9 @@
-import type {
-  ChatRequest,
-  ChatResult,
-  ModelInfo,
-  ProviderClient,
+import {
+  ProviderId,
+  type ChatRequest,
+  type ChatResult,
+  type ModelInfo,
+  type ProviderClient,
 } from '@core/ports/chat-model';
 import { renderMessageContentForModel } from '@core/domain/message';
 import { joinUrl, requestJson, requestNdjsonStream } from '@providers/http/http-client';
@@ -20,7 +21,7 @@ interface OllamaChatResponse {
 }
 
 export class OllamaProvider implements ProviderClient {
-  public readonly providerId = 'ollama' as const;
+  public readonly providerId = ProviderId.Ollama;
 
   public constructor(private readonly baseUrl: string) {}
 
@@ -32,7 +33,7 @@ export class OllamaProvider implements ProviderClient {
 
     if (request.onToken) {
       let accumulated = '';
-      await requestNdjsonStream(
+      const streamUsage = await requestNdjsonStream(
         joinUrl(this.baseUrl, '/api/chat'),
         {
           method: 'POST',
@@ -48,7 +49,10 @@ export class OllamaProvider implements ProviderClient {
         throw new Error('Ollama returned an empty response.');
       }
 
-      return { content: accumulated };
+      return {
+        content: accumulated,
+        ...(streamUsage.inputTokens > 0 ? { usage: streamUsage } : {}),
+      };
     }
 
     const response = await requestJson<OllamaChatResponse>(

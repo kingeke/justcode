@@ -14,7 +14,7 @@ import type {
   StartSessionResult,
 } from '@core/application/chat-session-service';
 import type { Conversation } from '@core/domain/conversation';
-import type { ProviderId } from '@core/ports/chat-model';
+import type { ModelInfo, ProviderId } from '@core/ports/chat-model';
 import { renderMarkdown } from './render-markdown.js';
 import { filterCommands, parseCommandInput } from './commands.js';
 
@@ -32,6 +32,14 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   const { exit } = useApp();
   const [currentSessionId, setCurrentSessionId] = useState(props.sessionId);
   const [session, setSession] = useState<StartSessionResult | null>(null);
+  const [activeModelInfo, setActiveModelInfo] = useState<ModelInfo | null>(null);
+  const [metrics, setMetrics] = useState({
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedTokens: 0,
+    cost: 0,
+    lastInputTokens: 0,
+  });
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState('');
   const [status, setStatus] = useState<string>('Loading session...');
@@ -118,6 +126,8 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     setStatus('Loading session...');
     setSession(null);
     setConversation(null);
+    setActiveModelInfo(null);
+    setMetrics({ inputTokens: 0, outputTokens: 0, cachedTokens: 0, cost: 0, lastInputTokens: 0 });
     void props.chatSessionService
       .startSession(
         props.requestedModel
@@ -125,9 +135,14 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
           : { sessionId }
       )
       .then((startedSession) => {
+        const modelInfo =
+          startedSession.availableModels.find(
+            (m) => m.id === startedSession.activeModel
+          ) ?? null;
         startTransition(() => {
           setSession(startedSession);
           setConversation(startedSession.conversation);
+          setActiveModelInfo(modelInfo);
           setStatus('Ready');
         });
       })
@@ -156,11 +171,26 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   }, [props.promptAttachmentService]);
 
   const executeCommand = (name: string): void => {
+    setInput('');
+    setError(null);
+
     if (name === 'new-session') {
       const newId = `session-${Date.now()}`;
       setCurrentSessionId(newId);
-      setError(null);
-      setInput('');
+    }
+
+    if (name === 'clear') {
+      void props.chatSessionService
+        .clearSession(currentSessionId)
+        .then((fresh) => {
+          startTransition(() => {
+            setConversation(fresh);
+            setStatus('Ready');
+          });
+        })
+        .catch((caughtError: unknown) => {
+          setError(getErrorMessage(caughtError));
+        });
     }
   };
 
@@ -213,6 +243,22 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         setStreamingContent('');
         setConversation(result.conversation);
         setStatus('Ready');
+        if (result.usage) {
+          const u = result.usage;
+          const pricing = activeModelInfo?.pricing;
+          const requestCost = pricing
+            ? u.inputTokens * pricing.inputPerToken +
+              u.outputTokens * pricing.outputPerToken +
+              u.cachedTokens * (pricing.cacheReadPerToken ?? pricing.inputPerToken)
+            : 0;
+          setMetrics((prev) => ({
+            inputTokens: prev.inputTokens + u.inputTokens,
+            outputTokens: prev.outputTokens + u.outputTokens,
+            cachedTokens: prev.cachedTokens + u.cachedTokens,
+            cost: prev.cost + requestCost,
+            lastInputTokens: u.inputTokens,
+          }));
+        }
       });
     } catch (caughtError: unknown) {
       clearInterval(flushInterval);
@@ -240,28 +286,6 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       <Text dimColor>
         press Enter to send, Tab to complete @file or /command, Esc or Ctrl+C to exit
       </Text>
-
-      {isCommandMode && visibleCommands.length ? (
-        <Box
-          marginTop={1}
-          flexDirection="column"
-          borderStyle="single"
-          borderColor="cyan"
-          paddingX={1}
-        >
-          <Text dimColor>commands</Text>
-          {visibleCommands.map((cmd, index) => (
-            <Box key={cmd.name}>
-              <Text {...(index === selectedCommandIndex ? { color: 'cyan' } : {})}>
-                {index === selectedCommandIndex ? '›' : ' '}{' '}
-                <Text bold={index === selectedCommandIndex}>/{cmd.name}</Text>
-                {'  '}
-                <Text dimColor>{cmd.description}</Text>
-              </Text>
-            </Box>
-          ))}
-        </Box>
-      ) : null}
 
       <Box marginTop={1} flexDirection="column">
         {conversation?.messages.length ? (
@@ -306,6 +330,28 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         ) : null}
       </Box>
 
+      {isCommandMode && visibleCommands.length ? (
+        <Box
+          marginTop={1}
+          flexDirection="column"
+          borderStyle="single"
+          borderColor="cyan"
+          paddingX={1}
+        >
+          <Text dimColor>commands</Text>
+          {visibleCommands.map((cmd, index) => (
+            <Box key={cmd.name}>
+              <Text {...(index === selectedCommandIndex ? { color: 'cyan' } : {})}>
+                {index === selectedCommandIndex ? '›' : ' '}{' '}
+                <Text bold={index === selectedCommandIndex}>/{cmd.name}</Text>
+                {'  '}
+                <Text dimColor>{cmd.description}</Text>
+              </Text>
+            </Box>
+          ))}
+        </Box>
+      ) : null}
+
       <Box marginTop={1}>
         <Text>{isSending ? 'sending' : 'prompt'}&gt; </Text>
         <TextInput
@@ -330,14 +376,49 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         </Box>
       ) : null}
 
-      <Box marginTop={1}>
-        {isSending ? (
-          <Text color="yellow">
-            <Spinner type="dots" /> Thinking...
+      <Box marginTop={1} justifyContent="space-between">
+        <Box>
+          {isSending ? (
+            <Text color="yellow">
+              <Spinner type="dots" />{' '}
+            </Text>
+          ) : null}
+          <Text color="cyan" bold>
+            {session?.activeModel ?? 'loading'}
           </Text>
-        ) : (
-          <Text dimColor>{status}</Text>
-        )}
+        </Box>
+        <Box gap={2}>
+          {metrics.inputTokens > 0 ? (
+            <>
+              <Text dimColor>
+                in <Text color="white">{metrics.inputTokens.toLocaleString()}</Text>
+              </Text>
+              <Text dimColor>
+                out <Text color="white">{metrics.outputTokens.toLocaleString()}</Text>
+              </Text>
+              {metrics.cachedTokens > 0 ? (
+                <Text dimColor>
+                  cached <Text color="white">{metrics.cachedTokens.toLocaleString()}</Text>
+                </Text>
+              ) : null}
+              {activeModelInfo?.contextWindow ? (
+                <Text dimColor>
+                  ctx{' '}
+                  <Text color={contextPct(metrics.lastInputTokens, activeModelInfo.contextWindow) > 80 ? 'yellow' : 'white'}>
+                    {contextPct(metrics.lastInputTokens, activeModelInfo.contextWindow)}%
+                  </Text>
+                </Text>
+              ) : null}
+              {metrics.cost > 0 ? (
+                <Text dimColor>
+                  $<Text color="white">{metrics.cost.toFixed(4)}</Text>
+                </Text>
+              ) : null}
+            </>
+          ) : (
+            <Text dimColor>{status}</Text>
+          )}
+        </Box>
       </Box>
       {error ? (
         <Box marginTop={1}>
@@ -354,4 +435,8 @@ function getErrorMessage(error: unknown): string {
   }
 
   return 'Unknown error';
+}
+
+function contextPct(inputTokens: number, contextWindow: number): number {
+  return Math.round((inputTokens / contextWindow) * 100);
 }

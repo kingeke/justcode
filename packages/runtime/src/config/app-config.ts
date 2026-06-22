@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-import type { ProviderId } from '@core/ports/chat-model';
+import { ProviderId } from '@core/ports/chat-model';
 
 export interface AppConfig {
   defaultProvider: ProviderId;
@@ -17,6 +17,10 @@ export interface AppConfig {
   lmstudio: {
     baseUrl: string;
   };
+  openrouter: {
+    apiKey: string | undefined;
+    baseUrl: string;
+  };
 }
 
 export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -25,7 +29,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     defaultProvider:
       parseProviderId(requestedProvider) ??
-      (env.OPENAI_API_KEY ? 'openai' : 'ollama'),
+      (env.OPENAI_API_KEY
+        ? ProviderId.Openai
+        : env.OPENROUTER_API_KEY
+          ? ProviderId.OpenRouter
+          : ProviderId.Ollama),
     sessionsDirectory:
       env.JUSTCODE_SESSIONS_DIR ?? join(homedir(), '.justcode', 'sessions'),
     openai: {
@@ -39,21 +47,21 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     lmstudio: {
       baseUrl: env.LMSTUDIO_BASE_URL ?? 'http://127.0.0.1:1234/v1',
     },
+    openrouter: {
+      apiKey: env.OPENROUTER_API_KEY,
+      baseUrl: env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1',
+    },
   };
 }
 
 export function parseProviderId(
   value: string | undefined
 ): ProviderId | undefined {
-  if (!value) {
-    return undefined;
-  }
+  if (!value) return undefined;
 
-  if (value === 'openai' || value === 'ollama' || value === 'lmstudio') {
-    return value;
-  }
+  const match = Object.values(ProviderId).find((v) => v === value);
+  if (match) return match;
 
-  throw new Error(
-    `Unsupported provider '${value}'. Expected one of: openai, ollama, lmstudio.`
-  );
+  const valid = Object.values(ProviderId).join(', ');
+  throw new Error(`Unsupported provider '${value}'. Expected one of: ${valid}.`);
 }
