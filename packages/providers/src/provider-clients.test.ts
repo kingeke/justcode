@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
 import { OllamaProvider } from '@providers/ollama/ollama-provider';
+import { OpenRouterProvider } from '@providers/openrouter/openrouter-provider';
 
 function createJsonResponse(payload: unknown): Response {
   return new Response(JSON.stringify(payload), {
@@ -40,18 +41,56 @@ describe('provider clients', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       createJsonResponse({
         data: [{ id: 'qwen2.5-coder-7b' }, { id: 'mistral-small' }],
-      })
-    );
+       })
+      );
 
     vi.stubGlobal('fetch', fetchMock);
 
     const models = await new LmStudioProvider(
-      'http://127.0.0.1:1234/v1'
-    ).listModels();
+       'http://127.0.0.1:1234/v1'
+     ).listModels();
 
     expect(models).toEqual([
-      { id: 'mistral-small', displayName: 'mistral-small' },
-      { id: 'qwen2.5-coder-7b', displayName: 'qwen2.5-coder-7b' },
-    ]);
-  });
+       { id: 'mistral-small', displayName: 'mistral-small' },
+       { id: 'qwen2.5-coder-7b', displayName: 'qwen2.5-coder-7b' },
+     ]);
+   });
+
+  it('lists OpenRouter models from the catalog', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      createJsonResponse({
+        data: [
+          {
+            id: 'mistralai/mistral-7b-instruct',
+            name: 'Mistral 7B Instruct',
+            context_length: 32768,
+           },
+          {
+            id: 'anthropic/claude-3-haiku',
+            name: 'Claude 3 Haiku',
+            context_length: 200000,
+           },
+        ],
+       })
+      );
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const models = await new OpenRouterProvider(
+       'test-api-key'
+     ).listModels();
+
+    expect(models).toEqual([
+       {
+        id: 'anthropic/claude-3-haiku',
+        displayName: 'Claude 3 Haiku',
+        contextLength: 200000,
+       },
+       {
+        id: 'mistralai/mistral-7b-instruct',
+        displayName: 'Mistral 7B Instruct',
+        contextLength: 32768,
+       },
+     ]);
+   });
 });

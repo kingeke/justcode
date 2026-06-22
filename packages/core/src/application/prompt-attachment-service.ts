@@ -59,20 +59,69 @@ export function filterMentionSuggestions(
   }
 
   const normalizedQuery = query.toLowerCase();
-  const rankedFiles = [...files].sort((left, right) => {
-    const leftStartsWith = left.toLowerCase().startsWith(normalizedQuery);
-    const rightStartsWith = right.toLowerCase().startsWith(normalizedQuery);
+  const scoredFiles = files.map((filePath) => {
+    const lowerPath = filePath.toLowerCase();
+    const score = calculateMatchScore(lowerPath, normalizedQuery);
+    return { filePath, score };
+  })
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score || a.filePath.localeCompare(b.filePath))
+    .slice(0, limit)
+    .map(({ filePath }) => filePath);
 
-    if (leftStartsWith !== rightStartsWith) {
-      return leftStartsWith ? -1 : 1;
+  return scoredFiles;
+}
+
+function calculateMatchScore(filePath: string, query: string): number {
+  let score = 0;
+
+  if (filePath.toLowerCase().startsWith(query)) {
+    score += 30;
+  } else if (filePath.includes(`/${query}`) || filePath.endsWith(`/${query}`)) {
+    score += 25;
+  } else if (filePath.toLowerCase().includes(query)) {
+    score += 10;
+  }
+
+  if (filePath.toLowerCase() === query) {
+    score += 50;
+  }
+
+  if (filePath.toLowerCase().startsWith(query)) {
+    score += 15;
+  }
+
+  if (query.length >= 3) {
+    const parts = query.split('');
+    let matchIndex = -1;
+    let matchCount = 0;
+
+    for (let i = 0; i < filePath.length; i++) {
+      if (filePath[i] === parts[0]) {
+        matchIndex = i;
+        matchCount++;
+        break;
+      }
     }
 
-    return left.localeCompare(right);
-  });
+    if (matchCount > 0) {
+      for (let i = 1; i < parts.length; i++) {
+        for (let j = matchIndex + 1; j < filePath.length; j++) {
+          if (filePath[j] === parts[i]) {
+            matchCount++;
+            matchIndex = j;
+            break;
+          }
+        }
+      }
 
-  return rankedFiles
-    .filter((filePath) => filePath.toLowerCase().includes(normalizedQuery))
-    .slice(0, limit);
+      if (matchCount === parts.length) {
+        score += 20;
+      }
+    }
+  }
+
+  return score;
 }
 
 export function applyMentionSuggestion(

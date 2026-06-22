@@ -1,6 +1,6 @@
 import type { ChatMessage } from '@core/domain/message';
 
-export type ProviderId = 'openai' | 'ollama' | 'lmstudio';
+export type ProviderId = 'openai' | 'ollama' | 'lmstudio' | 'openrouter';
 
 export interface ModelInfo {
   id: string;
@@ -21,4 +21,9 @@ export interface ProviderClient {
   sendChat(request: ChatRequest): Promise<ChatResult>;
   listModels(): Promise<ModelInfo[]>;
   getDefaultModel(): string | undefined;
+}
+
+export interface OpenRouterProviderClient {
+  sendChat(request: ChatRequest): Promise<ChatResult>;
+  listModels(): Promise<ModelInfo[]>;
 }
