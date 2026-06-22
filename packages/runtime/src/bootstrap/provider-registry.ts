@@ -34,6 +34,6 @@ export class ProviderRegistry {
   }
 }
 
-function assertUnreachable(value: never): never {
+function assertUnreachable(value: string): never {
   throw new Error(`Unexpected provider '${value}'.`);
 }
