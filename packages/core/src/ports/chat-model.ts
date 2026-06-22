@@ -10,6 +10,7 @@ export interface ModelInfo {
 export interface ChatRequest {
   model: string;
   messages: ChatMessage[];
+  onToken?: (token: string) => void;
 }
 
 export interface ChatResult {

@@ -6,7 +6,7 @@ import type {
   ProviderId,
 } from '@core/ports/chat-model';
 import { renderMessageContentForModel } from '@core/domain/message';
-import { joinUrl, requestJson } from '@providers/http/http-client';
+import { joinUrl, requestJson, requestSseStream } from '@providers/http/http-client';
 
 interface OpenAiCompatibleProviderOptions {
   providerId: ProviderId;
@@ -39,19 +39,39 @@ export class OpenAiCompatibleProvider implements ProviderClient {
   }
 
   public async sendChat(request: ChatRequest): Promise<ChatResult> {
+    const messages = request.messages.map((message) => ({
+      role: message.role,
+      content: renderMessageContentForModel(message),
+    }));
+
+    if (request.onToken) {
+      let accumulated = '';
+      await requestSseStream(
+        joinUrl(this.options.baseUrl, '/chat/completions'),
+        {
+          method: 'POST',
+          headers: this.createHeaders(),
+          body: { model: request.model, messages, stream: true },
+        },
+        (token) => {
+          accumulated += token;
+          request.onToken!(token);
+        }
+      );
+
+      if (!accumulated.trim()) {
+        throw new Error(`Provider '${this.providerId}' returned an empty response.`);
+      }
+
+      return { content: accumulated };
+    }
+
     const response = await requestJson<OpenAiChatResponse>(
       joinUrl(this.options.baseUrl, '/chat/completions'),
       {
         method: 'POST',
         headers: this.createHeaders(),
-        body: {
-          model: request.model,
-          messages: request.messages.map((message) => ({
-            role: message.role,
-            content: renderMessageContentForModel(message),
-          })),
-          stream: false,
-        },
+        body: { model: request.model, messages, stream: false },
       }
     );
 
@@ -71,9 +91,7 @@ export class OpenAiCompatibleProvider implements ProviderClient {
       }
     }
 
-    throw new Error(
-      `Provider '${this.providerId}' returned an empty response.`
-    );
+    throw new Error(`Provider '${this.providerId}' returned an empty response.`);
   }
 
   public async listModels(): Promise<ModelInfo[]> {

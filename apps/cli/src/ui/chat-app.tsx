@@ -1,4 +1,4 @@
-import React, { startTransition, useEffect, useMemo, useState } from 'react';
+import React, { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import Spinner from 'ink-spinner';
 import TextInput from 'ink-text-input';
@@ -15,6 +15,10 @@ import type {
 } from '@core/application/chat-session-service';
 import type { Conversation } from '@core/domain/conversation';
 import type { ProviderId } from '@core/ports/chat-model';
+import { renderMarkdown } from './render-markdown.js';
+import { filterCommands, parseCommandInput } from './commands.js';
+
+const MAX_COMMAND_ITEMS = 5;
 
 interface ChatAppProps {
   providerId: ProviderId;
@@ -26,21 +30,33 @@ interface ChatAppProps {
 
 export function ChatApp(props: ChatAppProps): React.ReactElement {
   const { exit } = useApp();
+  const [currentSessionId, setCurrentSessionId] = useState(props.sessionId);
   const [session, setSession] = useState<StartSessionResult | null>(null);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState('');
   const [status, setStatus] = useState<string>('Loading session...');
   const [isSending, setIsSending] = useState(false);
+  const [streamingContent, setStreamingContent] = useState<string>('');
+  const streamingBufferRef = useRef('');
   const [error, setError] = useState<string | null>(null);
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+
+  const isCommandMode = input.startsWith('/') && !input.includes(' ');
+  const commandQuery = isCommandMode ? parseCommandInput(input) ?? '' : '';
+  const filteredCommands = useMemo(
+    () => (isCommandMode ? filterCommands(commandQuery) : []),
+    [isCommandMode, commandQuery]
+  );
+  const visibleCommands = filteredCommands.slice(0, MAX_COMMAND_ITEMS);
 
   const activeMentionQuery = useMemo(
-    () => getActiveMentionQuery(input),
-    [input]
+    () => (isCommandMode ? null : getActiveMentionQuery(input)),
+    [isCommandMode, input]
   );
   const mentionSuggestions = useMemo(
-    () => filterMentionSuggestions(workspaceFiles, activeMentionQuery),
+    () => filterMentionSuggestions(workspaceFiles, activeMentionQuery ?? undefined),
     [activeMentionQuery, workspaceFiles]
   );
   const selectedSuggestion =
@@ -52,46 +68,61 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       return;
     }
 
-    if (!mentionSuggestions.length) {
-      return;
-    }
-
-    if (key.downArrow) {
-      setSelectedSuggestionIndex((currentIndex) =>
-        Math.min(currentIndex + 1, mentionSuggestions.length - 1)
-      );
-      return;
-    }
-
-    if (key.upArrow) {
-      setSelectedSuggestionIndex((currentIndex) =>
-        Math.max(currentIndex - 1, 0)
-      );
-      return;
-    }
-
-    if (key.tab) {
-      if (!selectedSuggestion) {
+    if (isCommandMode && visibleCommands.length) {
+      if (key.downArrow) {
+        setSelectedCommandIndex((i) =>
+          Math.min(i + 1, visibleCommands.length - 1)
+        );
         return;
       }
+      if (key.upArrow) {
+        setSelectedCommandIndex((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (key.tab) {
+        const cmd = visibleCommands[selectedCommandIndex];
+        if (cmd) setInput(`/${cmd.name}`);
+        return;
+      }
+      return;
+    }
 
-      setInput((currentInput) =>
-        applyMentionSuggestion(currentInput, selectedSuggestion)
+    if (!mentionSuggestions.length) return;
+
+    if (key.downArrow) {
+      setSelectedSuggestionIndex((i) =>
+        Math.min(i + 1, mentionSuggestions.length - 1)
       );
+      return;
+    }
+    if (key.upArrow) {
+      setSelectedSuggestionIndex((i) => Math.max(i - 1, 0));
+      return;
+    }
+    if (key.tab) {
+      if (selectedSuggestion) {
+        setInput((cur) => applyMentionSuggestion(cur, selectedSuggestion));
+      }
     }
   });
 
   useEffect(() => {
+    setSelectedCommandIndex(0);
+  }, [commandQuery]);
+
+  useEffect(() => {
+    setSelectedSuggestionIndex(0);
+  }, [activeMentionQuery]);
+
+  const loadSession = (sessionId: string): void => {
+    setStatus('Loading session...');
+    setSession(null);
+    setConversation(null);
     void props.chatSessionService
       .startSession(
         props.requestedModel
-          ? {
-              sessionId: props.sessionId,
-              requestedModel: props.requestedModel,
-            }
-          : {
-              sessionId: props.sessionId,
-            }
+          ? { sessionId, requestedModel: props.requestedModel }
+          : { sessionId }
       )
       .then((startedSession) => {
         startTransition(() => {
@@ -104,7 +135,12 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         setError(getErrorMessage(caughtError));
         setStatus('Failed to start session');
       });
-  }, [props.chatSessionService, props.requestedModel, props.sessionId]);
+  };
+
+  useEffect(() => {
+    loadSession(currentSessionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSessionId]);
 
   useEffect(() => {
     void props.promptAttachmentService
@@ -119,19 +155,44 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       });
   }, [props.promptAttachmentService]);
 
-  useEffect(() => {
-    setSelectedSuggestionIndex(0);
-  }, [activeMentionQuery]);
+  const executeCommand = (name: string): void => {
+    if (name === 'new-session') {
+      const newId = `session-${Date.now()}`;
+      setCurrentSessionId(newId);
+      setError(null);
+      setInput('');
+    }
+  };
 
   const submit = async (value: string): Promise<void> => {
-    if (!conversation || !session || isSending || !value.trim()) {
+    if (isSending || !value.trim()) return;
+
+    if (isCommandMode) {
+      const query = parseCommandInput(value) ?? '';
+      const exact = filteredCommands.find((c) => c.name === query);
+      const selected = exact ?? visibleCommands[selectedCommandIndex];
+      if (selected) {
+        executeCommand(selected.name);
+      }
+      setInput('');
       return;
     }
 
+    if (!conversation || !session) return;
+
     setError(null);
     setIsSending(true);
+    setStreamingContent('');
+    streamingBufferRef.current = '';
     setInput('');
     setStatus('Waiting for response...');
+
+    const flushInterval = setInterval(() => {
+      const buffered = streamingBufferRef.current;
+      if (buffered) {
+        setStreamingContent(buffered);
+      }
+    }, 50);
 
     try {
       const attachments =
@@ -141,13 +202,22 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         model: session.activeModel,
         content: value,
         attachments,
+        onToken: (token) => {
+          streamingBufferRef.current += token;
+        },
       });
 
+      clearInterval(flushInterval);
       startTransition(() => {
+        streamingBufferRef.current = '';
+        setStreamingContent('');
         setConversation(result.conversation);
         setStatus('Ready');
       });
     } catch (caughtError: unknown) {
+      clearInterval(flushInterval);
+      streamingBufferRef.current = '';
+      setStreamingContent('');
       setError(getErrorMessage(caughtError));
       setStatus('Request failed');
     } finally {
@@ -163,13 +233,36 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     <Box flexDirection="column" padding={1}>
       <Text color="cyan">justcode</Text>
       <Text>
-        provider: {props.providerId} | session: {props.sessionId} | model:{' '}
+        provider: {props.providerId} | session: {currentSessionId} | model:{' '}
         {session?.activeModel ?? 'loading'}
       </Text>
       <Text dimColor>available models: {modelsLine}</Text>
       <Text dimColor>
-        press Enter to send, Tab to complete @file, Esc or Ctrl+C to exit
+        press Enter to send, Tab to complete @file or /command, Esc or Ctrl+C to exit
       </Text>
+
+      {isCommandMode && visibleCommands.length ? (
+        <Box
+          marginTop={1}
+          flexDirection="column"
+          borderStyle="single"
+          borderColor="cyan"
+          paddingX={1}
+        >
+          <Text dimColor>commands</Text>
+          {visibleCommands.map((cmd, index) => (
+            <Box key={cmd.name}>
+              <Text {...(index === selectedCommandIndex ? { color: 'cyan' } : {})}>
+                {index === selectedCommandIndex ? '›' : ' '}{' '}
+                <Text bold={index === selectedCommandIndex}>/{cmd.name}</Text>
+                {'  '}
+                <Text dimColor>{cmd.description}</Text>
+              </Text>
+            </Box>
+          ))}
+        </Box>
+      ) : null}
+
       <Box marginTop={1} flexDirection="column">
         {conversation?.messages.length ? (
           conversation.messages.map((message) => (
@@ -186,7 +279,12 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
                 >
                   {message.role}
                 </Text>
-                <Text>: {message.content}</Text>
+                <Text>
+                  :{' '}
+                  {message.role === 'assistant'
+                    ? renderMarkdown(message.content)
+                    : message.content}
+                </Text>
               </Text>
               {message.attachments?.map((attachment) => (
                 <Text key={`${message.id}:${attachment.path}`} dimColor>
@@ -198,7 +296,16 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         ) : (
           <Text dimColor>No messages yet.</Text>
         )}
+        {streamingContent ? (
+          <Box flexDirection="column">
+            <Text>
+              <Text color="magenta">assistant</Text>
+              <Text>: {renderMarkdown(streamingContent)}</Text>
+            </Text>
+          </Box>
+        ) : null}
       </Box>
+
       <Box marginTop={1}>
         <Text>{isSending ? 'sending' : 'prompt'}&gt; </Text>
         <TextInput
@@ -208,7 +315,8 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
           focus={!isSending}
         />
       </Box>
-      {mentionSuggestions.length ? (
+
+      {!isCommandMode && mentionSuggestions.length ? (
         <Box marginTop={1} flexDirection="column">
           <Text dimColor>file suggestions:</Text>
           {mentionSuggestions.map((suggestion, index) => (
@@ -221,6 +329,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
           ))}
         </Box>
       ) : null}
+
       <Box marginTop={1}>
         {isSending ? (
           <Text color="yellow">

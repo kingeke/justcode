@@ -1,6 +1,6 @@
 import type { ChatRequest, ChatResult, ModelInfo, OpenRouterProviderClient } from '@core/ports/chat-model';
 import { renderMessageContentForModel } from '@core/domain/message';
-import { joinUrl, requestJson } from '@providers/http/http-client';
+import { joinUrl, requestJson, requestSseStream } from '@providers/http/http-client';
 
 interface OpenRouterModelsResponse {
   data?: Array<{
@@ -36,33 +36,52 @@ export class OpenRouterProvider implements OpenRouterProviderClient {
   }
 
   public async sendChat(request: ChatRequest): Promise<ChatResult> {
+    const messages = request.messages.map((message) => ({
+      role: message.role,
+      content: renderMessageContentForModel(message),
+    }));
+    const headers = {
+      authorization: `Bearer ${this.apiKey}`,
+      'content-type': 'application/json',
+    };
+
+    if (request.onToken) {
+      let accumulated = '';
+      await requestSseStream(
+        joinUrl(this.baseUrl, '/chat/completions'),
+        {
+          method: 'POST',
+          headers,
+          body: { model: request.model, messages, stream: true },
+        },
+        (token) => {
+          accumulated += token;
+          request.onToken!(token);
+        }
+      );
+
+      if (!accumulated.trim()) {
+        throw new Error(`Provider 'openrouter' returned an empty response.`);
+      }
+
+      return { content: accumulated };
+    }
+
     const response = await requestJson<OpenRouterChatResponse>(
       joinUrl(this.baseUrl, '/chat/completions'),
-       {
+      {
         method: 'POST',
-        headers: {
-          authorization: `Bearer ${this.apiKey}`,
-          'content-type': 'application/json',
-          },
-        body: {
-          model: request.model,
-          messages: request.messages.map((message) => ({
-            role: message.role,
-            content: renderMessageContentForModel(message),
-          })),
-          stream: false,
-        },
+        headers,
+        body: { model: request.model, messages, stream: false },
       }
     );
 
-   const content = response.choices?.[0]?.message?.content;
-   if (typeof content === 'string' && content.trim()) {
-     return { content };
+    const content = response.choices?.[0]?.message?.content;
+    if (typeof content === 'string' && content.trim()) {
+      return { content };
     }
 
-    throw new Error(
-      `Provider 'openrouter' returned an empty response.`
-    );
+    throw new Error(`Provider 'openrouter' returned an empty response.`);
   }
 
   public async listModels(): Promise<ModelInfo[]> {

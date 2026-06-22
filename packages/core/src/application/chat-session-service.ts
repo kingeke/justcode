@@ -22,6 +22,7 @@ export interface SubmitMessageInput {
   model: string;
   content: string;
   attachments?: MessageAttachment[];
+  onToken?: (token: string) => void;
 }
 
 export interface SubmitMessageResult {
@@ -70,6 +71,7 @@ export class ChatSessionService {
     const response = await this.provider.sendChat({
       model: input.model,
       messages: [...input.conversation.messages, userMessage],
+      ...(input.onToken ? { onToken: input.onToken } : {}),
     });
     const assistantMessage = createMessage('assistant', response.content);
     const updatedConversation: Conversation = {

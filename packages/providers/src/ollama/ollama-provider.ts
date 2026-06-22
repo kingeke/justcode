@@ -5,7 +5,7 @@ import type {
   ProviderClient,
 } from '@core/ports/chat-model';
 import { renderMessageContentForModel } from '@core/domain/message';
-import { joinUrl, requestJson } from '@providers/http/http-client';
+import { joinUrl, requestJson, requestNdjsonStream } from '@providers/http/http-client';
 
 interface OllamaTagsResponse {
   models?: Array<{
@@ -25,18 +25,37 @@ export class OllamaProvider implements ProviderClient {
   public constructor(private readonly baseUrl: string) {}
 
   public async sendChat(request: ChatRequest): Promise<ChatResult> {
+    const messages = request.messages.map((message) => ({
+      role: message.role,
+      content: renderMessageContentForModel(message),
+    }));
+
+    if (request.onToken) {
+      let accumulated = '';
+      await requestNdjsonStream(
+        joinUrl(this.baseUrl, '/api/chat'),
+        {
+          method: 'POST',
+          body: { model: request.model, messages, stream: true },
+        },
+        (token) => {
+          accumulated += token;
+          request.onToken!(token);
+        }
+      );
+
+      if (!accumulated.trim()) {
+        throw new Error('Ollama returned an empty response.');
+      }
+
+      return { content: accumulated };
+    }
+
     const response = await requestJson<OllamaChatResponse>(
       joinUrl(this.baseUrl, '/api/chat'),
       {
         method: 'POST',
-        body: {
-          model: request.model,
-          messages: request.messages.map((message) => ({
-            role: message.role,
-            content: renderMessageContentForModel(message),
-          })),
-          stream: false,
-        },
+        body: { model: request.model, messages, stream: false },
       }
     );
 

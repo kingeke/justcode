@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "chalk": "5",
     "commander": "^13.1.0",
     "ink": "^5.2.1",
     "ink-spinner": "^5.0.0",
