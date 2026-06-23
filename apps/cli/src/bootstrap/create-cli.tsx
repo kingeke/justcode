@@ -6,7 +6,10 @@ import { ChatApp } from '@cli/ui/chat-app';
 import type { ProviderId } from '@core/ports/chat-model';
 import { createRuntimeServices } from '@runtime/bootstrap/create-services';
 import { loadAppConfig, parseProviderId } from '@runtime/config/app-config';
-import { readGlobalConfig, writeGlobalConfig } from '@runtime/persistence/global-config';
+import {
+  readGlobalConfig,
+  writeGlobalConfig,
+} from '@runtime/persistence/global-config';
 
 interface SharedOptions {
   provider?: string;
@@ -102,9 +105,12 @@ async function runChat(options: SharedOptions): Promise<void> {
 
   // CLI flag > saved config > env default
   const explicitProviderId =
-    resolveProviderId(options.provider) ?? parseProviderId(savedConfig.lastProvider);
+    resolveProviderId(options.provider) ??
+    parseProviderId(savedConfig.lastProvider);
 
-  const runtime = createRuntimeServices(explicitProviderId ? { providerId: explicitProviderId } : {});
+  const runtime = createRuntimeServices(
+    explicitProviderId ? { providerId: explicitProviderId } : {}
+  );
 
   // Merge into the persisted config so each write preserves the other fields.
   let currentConfig = savedConfig;
@@ -123,11 +129,15 @@ async function runChat(options: SharedOptions): Promise<void> {
       allProviders: runtime.allProviders,
       createProvider: runtime.createProvider,
       initialThinkingCollapsed: savedConfig.thinkingCollapsed ?? false,
+      initialAutoApplyWrites: savedConfig.autoApplyWrites ?? false,
       onModelChange: (modelId: string, modelProviderId: string) => {
         persistConfig({ lastModel: modelId, lastProvider: modelProviderId });
       },
       onThinkingCollapsedChange: (collapsed: boolean) => {
         persistConfig({ thinkingCollapsed: collapsed });
+      },
+      onAutoApplyWritesChange: (autoApply: boolean) => {
+        persistConfig({ autoApplyWrites: autoApply });
       },
     })
   );

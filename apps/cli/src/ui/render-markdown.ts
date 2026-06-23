@@ -93,10 +93,13 @@ function computeColumnWidths(cells: string[][]): number[] {
     return floors;
   }
 
-  const want = natural.map((width, column) => Math.max(0, width - floors[column]!));
+  const want = natural.map((width, column) =>
+    Math.max(0, width - floors[column]!)
+  );
   const wantTotal = want.reduce((sum, width) => sum + width, 0) || 1;
   return natural.map(
-    (_, column) => floors[column]! + Math.floor((pool * want[column]!) / wantTotal)
+    (_, column) =>
+      floors[column]! + Math.floor((pool * want[column]!) / wantTotal)
   );
 }
 
@@ -136,10 +139,15 @@ function renderTextToken(
   this: { parser: { parseInline: (tokens: Token[]) => string } },
   token: Tokens.Text
 ): string {
-  return token.tokens?.length ? this.parser.parseInline(token.tokens) : token.text;
+  return token.tokens?.length
+    ? this.parser.parseInline(token.tokens)
+    : token.text;
 }
 
-function withTerminal(instance: Marked, options: Record<string, unknown>): Marked {
+function withTerminal(
+  instance: Marked,
+  options: Record<string, unknown>
+): Marked {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   instance.use(markedTerminal(options as any) as any);
   instance.use({
@@ -197,6 +205,8 @@ export function renderMarkdown(text: string): string {
 }
 
 export async function renderMarkdownAsync(text: string): Promise<string> {
-  const rendered = (await markedShikiInstance.parse(text, { async: true })) as string;
+  const rendered = (await markedShikiInstance.parse(text, {
+    async: true,
+  })) as string;
   return rendered.replace(/\n+$/, '');
 }

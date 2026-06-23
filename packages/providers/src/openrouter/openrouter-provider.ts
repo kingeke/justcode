@@ -5,8 +5,17 @@ import {
   type ModelInfo,
   type ProviderClient,
 } from '@core/ports/chat-model';
-import { renderMessageContentForModel } from '@core/domain/message';
-import { joinUrl, requestJson, requestSseStream } from '@providers/http/http-client';
+import {
+  joinUrl,
+  requestJson,
+  requestSseStream,
+} from '@providers/http/http-client';
+import {
+  parseOpenAiToolCalls,
+  toOpenAiToolDefinitions,
+  toOpenAiWireMessages,
+  type RawOpenAiToolCall,
+} from '@providers/openai-compatible/openai-wire';
 
 interface OpenRouterModelsResponse {
   data?: Array<{
@@ -26,6 +35,7 @@ interface OpenRouterChatResponse {
   choices?: Array<{
     message?: {
       content?: string;
+      tool_calls?: RawOpenAiToolCall[];
     };
   }>;
   usage?: {
@@ -49,10 +59,8 @@ export class OpenRouterProvider implements ProviderClient {
   }
 
   public async sendChat(request: ChatRequest): Promise<ChatResult> {
-    const messages = request.messages.map((message) => ({
-      role: message.role,
-      content: renderMessageContentForModel(message),
-    }));
+    const messages = toOpenAiWireMessages(request.messages);
+    const tools = toOpenAiToolDefinitions(request.tools);
     const headers = {
       authorization: `Bearer ${this.apiKey}`,
       'content-type': 'application/json',
@@ -60,7 +68,7 @@ export class OpenRouterProvider implements ProviderClient {
 
     if (request.onToken) {
       let accumulated = '';
-      const streamUsage = await requestSseStream(
+      const { usage: streamUsage, toolCalls } = await requestSseStream(
         joinUrl(this.baseUrl, '/chat/completions'),
         {
           method: 'POST',
@@ -70,6 +78,7 @@ export class OpenRouterProvider implements ProviderClient {
             messages,
             stream: true,
             stream_options: { include_usage: true },
+            ...(tools ? { tools, tool_choice: 'auto' } : {}),
           },
         },
         (token) => {
@@ -79,13 +88,14 @@ export class OpenRouterProvider implements ProviderClient {
         request.onThinkingToken
       );
 
-      if (!accumulated.trim()) {
+      if (!accumulated.trim() && toolCalls.length === 0) {
         throw new Error(`Provider 'openrouter' returned an empty response.`);
       }
 
       return {
         content: accumulated,
         ...(streamUsage.inputTokens > 0 ? { usage: streamUsage } : {}),
+        ...(toolCalls.length ? { toolCalls } : {}),
       };
     }
 
@@ -94,11 +104,19 @@ export class OpenRouterProvider implements ProviderClient {
       {
         method: 'POST',
         headers,
-        body: { model: request.model, messages, stream: false },
+        body: {
+          model: request.model,
+          messages,
+          stream: false,
+          ...(tools ? { tools, tool_choice: 'auto' } : {}),
+        },
       }
     );
 
     const content = response.choices?.[0]?.message?.content;
+    const toolCalls = parseOpenAiToolCalls(
+      response.choices?.[0]?.message?.tool_calls
+    );
     const usage = response.usage
       ? {
           inputTokens: response.usage.prompt_tokens ?? 0,
@@ -106,9 +124,17 @@ export class OpenRouterProvider implements ProviderClient {
           cachedTokens: 0,
         }
       : undefined;
+    const extraSpread = {
+      ...(usage ? { usage } : {}),
+      ...(toolCalls.length ? { toolCalls } : {}),
+    };
 
     if (typeof content === 'string' && content.trim()) {
-      return { content, ...(usage ? { usage } : {}) };
+      return { content, ...extraSpread };
+    }
+
+    if (toolCalls.length) {
+      return { content: '', ...extraSpread };
     }
 
     throw new Error(`Provider 'openrouter' returned an empty response.`);
@@ -131,17 +157,25 @@ export class OpenRouterProvider implements ProviderClient {
         id: model.id,
         displayName: model.name ?? model.id,
         providerId: ProviderId.OpenRouter,
-        ...(model.context_length != null ? { contextWindow: model.context_length } : {}),
+        ...(model.context_length != null
+          ? { contextWindow: model.context_length }
+          : {}),
         ...(model.pricing
           ? {
               pricing: {
                 inputPerToken: Number(model.pricing.prompt ?? 0),
                 outputPerToken: Number(model.pricing.completion ?? 0),
                 ...(model.pricing.input_cache_read != null
-                  ? { cacheReadPerToken: Number(model.pricing.input_cache_read) }
+                  ? {
+                      cacheReadPerToken: Number(model.pricing.input_cache_read),
+                    }
                   : {}),
                 ...(model.pricing.input_cache_write != null
-                  ? { cacheWritePerToken: Number(model.pricing.input_cache_write) }
+                  ? {
+                      cacheWritePerToken: Number(
+                        model.pricing.input_cache_write
+                      ),
+                    }
                   : {}),
               },
             }

@@ -32,8 +32,8 @@ export class PromptAttachmentService {
       })
     );
 
-    return resolved.filter((attachment): attachment is MessageAttachment =>
-      attachment !== undefined
+    return resolved.filter(
+      (attachment): attachment is MessageAttachment => attachment !== undefined
     );
   }
 }
@@ -71,11 +71,12 @@ export function filterMentionSuggestions(
   }
 
   const normalizedQuery = query.toLowerCase();
-  const scoredFiles = files.map((filePath) => {
-    const lowerPath = filePath.toLowerCase();
-    const score = calculateMatchScore(lowerPath, normalizedQuery);
-    return { filePath, score };
-  })
+  const scoredFiles = files
+    .map((filePath) => {
+      const lowerPath = filePath.toLowerCase();
+      const score = calculateMatchScore(lowerPath, normalizedQuery);
+      return { filePath, score };
+    })
     .filter(({ score }) => score > 0)
     .sort((a, b) => b.score - a.score || a.filePath.localeCompare(b.filePath))
     .slice(0, limit)

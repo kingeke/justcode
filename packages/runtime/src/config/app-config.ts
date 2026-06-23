@@ -27,7 +27,8 @@ export interface AppConfig {
 export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const requestedProvider = env.JUSTCODE_PROVIDER;
 
-  const configDirectory = env.JUSTCODE_CONFIG_DIR ?? join(homedir(), '.justcode');
+  const configDirectory =
+    env.JUSTCODE_CONFIG_DIR ?? join(homedir(), '.justcode');
   return {
     defaultProvider:
       parseProviderId(requestedProvider) ??
@@ -66,5 +67,7 @@ export function parseProviderId(
   if (match) return match;
 
   const valid = Object.values(ProviderId).join(', ');
-  throw new Error(`Unsupported provider '${value}'. Expected one of: ${valid}.`);
+  throw new Error(
+    `Unsupported provider '${value}'. Expected one of: ${valid}.`
+  );
 }

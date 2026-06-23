@@ -1,10 +1,20 @@
 import { randomUUID } from 'node:crypto';
 
-export type MessageRole = 'system' | 'user' | 'assistant';
+export type MessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
 export interface MessageAttachment {
   path: string;
   content: string;
+}
+
+/**
+ * A request from the model to invoke a tool. `arguments` is the raw JSON string
+ * exactly as the model produced it — parsing/validation is the tool's concern.
+ */
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: string;
 }
 
 export interface ChatMessage {
@@ -13,13 +23,26 @@ export interface ChatMessage {
   content: string;
   createdAt: string;
   attachments?: MessageAttachment[];
+  /** Set on `assistant` messages that request one or more tool invocations. */
+  toolCalls?: ToolCall[];
+  /** Set on `tool` messages: the id of the `ToolCall` this result answers. */
+  toolCallId?: string;
+  /** Set on `tool` messages: the name of the tool that produced this result. */
+  name?: string;
+}
+
+export interface CreateMessageExtras {
+  toolCalls?: ToolCall[];
+  toolCallId?: string;
+  name?: string;
 }
 
 export function createMessage(
   role: MessageRole,
   content: string,
   createdAt = new Date(),
-  attachments?: MessageAttachment[]
+  attachments?: MessageAttachment[],
+  extras?: CreateMessageExtras
 ): ChatMessage {
   return {
     id: randomUUID(),
@@ -27,6 +50,9 @@ export function createMessage(
     content,
     createdAt: createdAt.toISOString(),
     ...(attachments?.length ? { attachments } : {}),
+    ...(extras?.toolCalls?.length ? { toolCalls: extras.toolCalls } : {}),
+    ...(extras?.toolCallId ? { toolCallId: extras.toolCallId } : {}),
+    ...(extras?.name ? { name: extras.name } : {}),
   };
 }
 

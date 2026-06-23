@@ -24,6 +24,10 @@ class InMemoryWorkspaceFiles implements WorkspaceFilePort {
 
     return content;
   }
+
+  public async writeFile(relativePath: string, content: string): Promise<void> {
+    this.files[relativePath] = content;
+  }
 }
 
 describe('PromptAttachmentService', () => {

@@ -1,4 +1,5 @@
-import type { ChatMessage } from '@core/domain/message';
+import type { ChatMessage, ToolCall } from '@core/domain/message';
+import type { ToolDefinition } from '@core/ports/tool';
 
 export enum ProviderId {
   Openai = 'openai',
@@ -43,6 +44,7 @@ export interface TokenUsage {
 export interface ChatRequest {
   model: string;
   messages: ChatMessage[];
+  tools?: ToolDefinition[];
   onToken?: (token: string) => void;
   onThinkingToken?: (token: string) => void;
 }
@@ -50,6 +52,9 @@ export interface ChatRequest {
 export interface ChatResult {
   content: string;
   usage?: TokenUsage;
+  /** Tool invocations the model requested instead of (or alongside) a reply. */
+  toolCalls?: ToolCall[];
+  finishReason?: string;
 }
 
 export interface ProviderClient {

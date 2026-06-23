@@ -6,8 +6,17 @@ import type {
   ProviderClient,
   ProviderId,
 } from '@core/ports/chat-model';
-import { renderMessageContentForModel } from '@core/domain/message';
-import { joinUrl, requestJson, requestSseStream } from '@providers/http/http-client';
+import {
+  joinUrl,
+  requestJson,
+  requestSseStream,
+} from '@providers/http/http-client';
+import {
+  parseOpenAiToolCalls,
+  toOpenAiToolDefinitions,
+  toOpenAiWireMessages,
+  type RawOpenAiToolCall,
+} from '@providers/openai-compatible/openai-wire';
 
 interface OpenAiCompatibleProviderOptions {
   providerId: ProviderId;
@@ -26,7 +35,9 @@ interface OpenAiChatResponse {
   choices?: Array<{
     message?: {
       content?: string | Array<{ type: string; text?: string }>;
+      tool_calls?: RawOpenAiToolCall[];
     };
+    finish_reason?: string;
   }>;
   usage?: {
     prompt_tokens?: number;
@@ -37,29 +48,53 @@ interface OpenAiChatResponse {
 
 // Prices in USD per token. Source: https://openai.com/api/pricing/
 const OPENAI_PRICING: Record<string, ModelPricing> = {
-  'gpt-4o':               { inputPerToken: 0.0000025,  outputPerToken: 0.00001,    cacheReadPerToken: 0.00000125 },
-  'gpt-4o-mini':          { inputPerToken: 0.00000015, outputPerToken: 0.0000006,  cacheReadPerToken: 0.000000075 },
-  'gpt-4-turbo':          { inputPerToken: 0.00001,    outputPerToken: 0.00003 },
-  'gpt-4':                { inputPerToken: 0.00003,    outputPerToken: 0.00006 },
-  'gpt-3.5-turbo':        { inputPerToken: 0.0000005,  outputPerToken: 0.0000015 },
-  'o1':                   { inputPerToken: 0.000015,   outputPerToken: 0.00006,    cacheReadPerToken: 0.0000075 },
-  'o1-mini':              { inputPerToken: 0.000003,   outputPerToken: 0.000012,   cacheReadPerToken: 0.0000015 },
-  'o1-preview':           { inputPerToken: 0.000015,   outputPerToken: 0.00006 },
-  'o3-mini':              { inputPerToken: 0.0000011,  outputPerToken: 0.0000044,  cacheReadPerToken: 0.00000055 },
-  'o3':                   { inputPerToken: 0.00001,    outputPerToken: 0.00004,    cacheReadPerToken: 0.0000025 },
+  'gpt-4o': {
+    inputPerToken: 0.0000025,
+    outputPerToken: 0.00001,
+    cacheReadPerToken: 0.00000125,
+  },
+  'gpt-4o-mini': {
+    inputPerToken: 0.00000015,
+    outputPerToken: 0.0000006,
+    cacheReadPerToken: 0.000000075,
+  },
+  'gpt-4-turbo': { inputPerToken: 0.00001, outputPerToken: 0.00003 },
+  'gpt-4': { inputPerToken: 0.00003, outputPerToken: 0.00006 },
+  'gpt-3.5-turbo': { inputPerToken: 0.0000005, outputPerToken: 0.0000015 },
+  o1: {
+    inputPerToken: 0.000015,
+    outputPerToken: 0.00006,
+    cacheReadPerToken: 0.0000075,
+  },
+  'o1-mini': {
+    inputPerToken: 0.000003,
+    outputPerToken: 0.000012,
+    cacheReadPerToken: 0.0000015,
+  },
+  'o1-preview': { inputPerToken: 0.000015, outputPerToken: 0.00006 },
+  'o3-mini': {
+    inputPerToken: 0.0000011,
+    outputPerToken: 0.0000044,
+    cacheReadPerToken: 0.00000055,
+  },
+  o3: {
+    inputPerToken: 0.00001,
+    outputPerToken: 0.00004,
+    cacheReadPerToken: 0.0000025,
+  },
 };
 
 const OPENAI_CONTEXT_WINDOWS: Record<string, number> = {
-  'gpt-4o':        128_000,
-  'gpt-4o-mini':   128_000,
-  'gpt-4-turbo':   128_000,
-  'gpt-4':           8_192,
-  'gpt-3.5-turbo':  16_385,
-  'o1':            200_000,
-  'o1-mini':       128_000,
-  'o1-preview':    128_000,
-  'o3-mini':       200_000,
-  'o3':            200_000,
+  'gpt-4o': 128_000,
+  'gpt-4o-mini': 128_000,
+  'gpt-4-turbo': 128_000,
+  'gpt-4': 8_192,
+  'gpt-3.5-turbo': 16_385,
+  o1: 200_000,
+  'o1-mini': 128_000,
+  'o1-preview': 128_000,
+  'o3-mini': 200_000,
+  o3: 200_000,
 };
 
 export class OpenAiCompatibleProvider implements ProviderClient {
@@ -72,14 +107,12 @@ export class OpenAiCompatibleProvider implements ProviderClient {
   }
 
   public async sendChat(request: ChatRequest): Promise<ChatResult> {
-    const messages = request.messages.map((message) => ({
-      role: message.role,
-      content: renderMessageContentForModel(message),
-    }));
+    const messages = toOpenAiWireMessages(request.messages);
+    const tools = toOpenAiToolDefinitions(request.tools);
 
     if (request.onToken) {
       let accumulated = '';
-      const streamUsage = await requestSseStream(
+      const { usage: streamUsage, toolCalls } = await requestSseStream(
         joinUrl(this.options.baseUrl, '/chat/completions'),
         {
           method: 'POST',
@@ -89,6 +122,7 @@ export class OpenAiCompatibleProvider implements ProviderClient {
             messages,
             stream: true,
             stream_options: { include_usage: true },
+            ...(tools ? { tools, tool_choice: 'auto' } : {}),
           },
         },
         (token) => {
@@ -98,13 +132,16 @@ export class OpenAiCompatibleProvider implements ProviderClient {
         request.onThinkingToken
       );
 
-      if (!accumulated.trim()) {
-        throw new Error(`Provider '${this.providerId}' returned an empty response.`);
+      if (!accumulated.trim() && toolCalls.length === 0) {
+        throw new Error(
+          `Provider '${this.providerId}' returned an empty response.`
+        );
       }
 
       return {
         content: accumulated,
         ...(streamUsage.inputTokens > 0 ? { usage: streamUsage } : {}),
+        ...(toolCalls.length ? { toolCalls } : {}),
       };
     }
 
@@ -113,23 +150,35 @@ export class OpenAiCompatibleProvider implements ProviderClient {
       {
         method: 'POST',
         headers: this.createHeaders(),
-        body: { model: request.model, messages, stream: false },
+        body: {
+          model: request.model,
+          messages,
+          stream: false,
+          ...(tools ? { tools, tool_choice: 'auto' } : {}),
+        },
       }
     );
 
     const content = response.choices?.[0]?.message?.content;
+    const toolCalls = parseOpenAiToolCalls(
+      response.choices?.[0]?.message?.tool_calls
+    );
     const usage = response.usage
       ? {
           inputTokens: response.usage.prompt_tokens ?? 0,
           outputTokens: response.usage.completion_tokens ?? 0,
-          cachedTokens: response.usage.prompt_tokens_details?.cached_tokens ?? 0,
+          cachedTokens:
+            response.usage.prompt_tokens_details?.cached_tokens ?? 0,
         }
       : undefined;
 
-    const usageSpread = usage ? { usage } : {};
+    const extraSpread = {
+      ...(usage ? { usage } : {}),
+      ...(toolCalls.length ? { toolCalls } : {}),
+    };
 
     if (typeof content === 'string' && content.trim()) {
-      return { content, ...usageSpread };
+      return { content, ...extraSpread };
     }
 
     if (Array.isArray(content)) {
@@ -139,11 +188,17 @@ export class OpenAiCompatibleProvider implements ProviderClient {
         .trim();
 
       if (mergedContent) {
-        return { content: mergedContent, ...usageSpread };
+        return { content: mergedContent, ...extraSpread };
       }
     }
 
-    throw new Error(`Provider '${this.providerId}' returned an empty response.`);
+    if (toolCalls.length) {
+      return { content: '', ...extraSpread };
+    }
+
+    throw new Error(
+      `Provider '${this.providerId}' returned an empty response.`
+    );
   }
 
   public async listModels(): Promise<ModelInfo[]> {

@@ -20,6 +20,10 @@ export const COMMANDS: Command[] = [
     name: 'thinking',
     description: 'Toggle whether model reasoning is shown',
   },
+  {
+    name: 'auto-writes',
+    description: 'Toggle auto-applying file writes without confirmation',
+  },
 ];
 
 export function filterCommands(query: string): Command[] {

@@ -1,5 +1,5 @@
-import { readdir, readFile } from 'node:fs/promises';
-import { relative, resolve, sep } from 'node:path';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, relative, resolve, sep } from 'node:path';
 
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 
@@ -20,6 +20,12 @@ export class LocalWorkspaceFileService implements WorkspaceFilePort {
   public async readFile(relativePath: string): Promise<string> {
     const absolutePath = this.resolveWorkspacePath(relativePath);
     return readFile(absolutePath, 'utf8');
+  }
+
+  public async writeFile(relativePath: string, content: string): Promise<void> {
+    const absolutePath = this.resolveWorkspacePath(relativePath);
+    await mkdir(dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, content, 'utf8');
   }
 
   private async walkDirectory(directoryPath: string): Promise<string[]> {

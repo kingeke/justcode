@@ -1,3 +1,5 @@
+import type { ToolCall } from '@core/domain/message';
+
 export class HttpError extends Error {
   public constructor(
     message: string,
@@ -56,12 +58,62 @@ export interface SseUsage {
   cachedTokens: number;
 }
 
+export interface StreamResult {
+  usage: SseUsage;
+  toolCalls: ToolCall[];
+}
+
+/** Accumulates streamed OpenAI `tool_calls` deltas keyed by their `index`. */
+class ToolCallAccumulator {
+  private readonly byIndex = new Map<
+    number,
+    { id: string; name: string; arguments: string }
+  >();
+
+  public addDelta(
+    deltas:
+      | Array<{
+          index?: number;
+          id?: string;
+          function?: { name?: string; arguments?: string };
+        }>
+      | undefined
+  ): void {
+    if (!deltas) return;
+    for (const delta of deltas) {
+      const index = delta.index ?? 0;
+      const current = this.byIndex.get(index) ?? {
+        id: '',
+        name: '',
+        arguments: '',
+      };
+      if (delta.id) current.id = delta.id;
+      if (delta.function?.name) current.name = delta.function.name;
+      if (delta.function?.arguments) {
+        current.arguments += delta.function.arguments;
+      }
+      this.byIndex.set(index, current);
+    }
+  }
+
+  public toToolCalls(): ToolCall[] {
+    return [...this.byIndex.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([index, call]) => ({
+        id: call.id || `call_${index}`,
+        name: call.name,
+        arguments: call.arguments,
+      }))
+      .filter((call) => call.name);
+  }
+}
+
 export async function requestSseStream(
   url: string,
   options: JsonRequestOptions,
   onToken: (token: string) => void,
   onThinkingToken?: (token: string) => void
-): Promise<SseUsage> {
+): Promise<StreamResult> {
   const requestOptions: RequestInit = {
     method: options.method ?? 'POST',
     headers: {
@@ -95,6 +147,7 @@ export async function requestSseStream(
   const decoder = new TextDecoder();
   let buffer = '';
   const usage: SseUsage = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+  const toolCalls = new ToolCallAccumulator();
 
   while (true) {
     const { done, value } = await reader.read();
@@ -108,7 +161,9 @@ export async function requestSseStream(
       const trimmed = line.trim();
       if (!trimmed.startsWith('data: ')) continue;
       const data = trimmed.slice(6);
-      if (data === '[DONE]') return usage;
+      if (data === '[DONE]') {
+        return { usage, toolCalls: toolCalls.toToolCalls() };
+      }
 
       try {
         const parsed = JSON.parse(data) as {
@@ -117,6 +172,11 @@ export async function requestSseStream(
               content?: string;
               reasoning?: string;
               reasoning_content?: string;
+              tool_calls?: Array<{
+                index?: number;
+                id?: string;
+                function?: { name?: string; arguments?: string };
+              }>;
             };
           }>;
           usage?: {
@@ -134,6 +194,7 @@ export async function requestSseStream(
         if (thinking && onThinkingToken) {
           onThinkingToken(thinking);
         }
+        toolCalls.addDelta(delta?.tool_calls);
         if (parsed.usage) {
           usage.inputTokens = parsed.usage.prompt_tokens ?? 0;
           usage.outputTokens = parsed.usage.completion_tokens ?? 0;
@@ -146,7 +207,7 @@ export async function requestSseStream(
     }
   }
 
-  return usage;
+  return { usage, toolCalls: toolCalls.toToolCalls() };
 }
 
 export async function requestNdjsonStream(
@@ -154,7 +215,7 @@ export async function requestNdjsonStream(
   options: JsonRequestOptions,
   onToken: (token: string) => void,
   onThinkingToken?: (token: string) => void
-): Promise<SseUsage> {
+): Promise<StreamResult> {
   const requestOptions: RequestInit = {
     method: options.method ?? 'POST',
     headers: {
@@ -187,6 +248,9 @@ export async function requestNdjsonStream(
   const decoder = new TextDecoder();
   let buffer = '';
   const usage: SseUsage = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+  // Ollama emits each tool call complete within a single message chunk (no
+  // cross-chunk deltas), so we collect them as they arrive.
+  const toolCalls: ToolCall[] = [];
 
   while (true) {
     const { done, value } = await reader.read();
@@ -202,7 +266,13 @@ export async function requestNdjsonStream(
 
       try {
         const parsed = JSON.parse(trimmed) as {
-          message?: { content?: string; thinking?: string };
+          message?: {
+            content?: string;
+            thinking?: string;
+            tool_calls?: Array<{
+              function?: { name?: string; arguments?: unknown };
+            }>;
+          };
           done?: boolean;
           prompt_eval_count?: number;
           eval_count?: number;
@@ -215,10 +285,19 @@ export async function requestNdjsonStream(
         if (thinking && onThinkingToken) {
           onThinkingToken(thinking);
         }
+        for (const call of parsed.message?.tool_calls ?? []) {
+          const args = call.function?.arguments;
+          toolCalls.push({
+            id: `call_${toolCalls.length}`,
+            name: call.function?.name ?? '',
+            arguments:
+              typeof args === 'string' ? args : JSON.stringify(args ?? {}),
+          });
+        }
         if (parsed.done) {
           usage.inputTokens = parsed.prompt_eval_count ?? 0;
           usage.outputTokens = parsed.eval_count ?? 0;
-          return usage;
+          return { usage, toolCalls: toolCalls.filter((call) => call.name) };
         }
       } catch {
         // skip malformed NDJSON lines
@@ -226,5 +305,5 @@ export async function requestNdjsonStream(
     }
   }
 
-  return usage;
+  return { usage, toolCalls: toolCalls.filter((call) => call.name) };
 }

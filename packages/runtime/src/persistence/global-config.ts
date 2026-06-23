@@ -5,9 +5,13 @@ export interface GlobalConfig {
   lastModel?: string;
   lastProvider?: string;
   thinkingCollapsed?: boolean;
+  /** When true, file-writing tools run without per-call confirmation. */
+  autoApplyWrites?: boolean;
 }
 
-export async function readGlobalConfig(configDirectory: string): Promise<GlobalConfig> {
+export async function readGlobalConfig(
+  configDirectory: string
+): Promise<GlobalConfig> {
   try {
     const raw = await readFile(join(configDirectory, 'config.json'), 'utf8');
     return JSON.parse(raw) as GlobalConfig;

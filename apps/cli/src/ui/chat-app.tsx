@@ -1,4 +1,10 @@
-import React, { startTransition, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  startTransition,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import Spinner from 'ink-spinner';
 import TextInput from 'ink-text-input';
@@ -12,10 +18,16 @@ import {
 import type {
   ChatSessionService,
   StartSessionResult,
+  ToolActivityEvent,
+  ToolApprovalRequest,
 } from '@core/application/chat-session-service';
 import type { Conversation } from '@core/domain/conversation';
 import { createMessage } from '@core/domain/message';
-import type { ModelInfo, ProviderId, ProviderClient } from '@core/ports/chat-model';
+import type {
+  ModelInfo,
+  ProviderId,
+  ProviderClient,
+} from '@core/ports/chat-model';
 import { renderMarkdown, renderMarkdownAsync } from './render-markdown.js';
 import { filterCommands, parseCommandInput } from './commands.js';
 import { ModelPicker } from './model-picker.js';
@@ -33,7 +45,23 @@ interface ChatAppProps {
   onModelChange?: (modelId: string, providerId: string) => void;
   initialThinkingCollapsed?: boolean;
   onThinkingCollapsedChange?: (collapsed: boolean) => void;
+  initialAutoApplyWrites?: boolean;
+  onAutoApplyWritesChange?: (autoApply: boolean) => void;
 }
+
+interface PendingApproval {
+  request: ToolApprovalRequest;
+  resolve: (approved: boolean) => void;
+}
+
+interface ToolEvent {
+  key: number;
+  toolName: string;
+  title: string;
+  status: 'running' | 'done' | 'error';
+}
+
+const MAX_PREVIEW_LINES = 16;
 
 export function ChatApp(props: ChatAppProps): React.ReactElement {
   const { exit } = useApp();
@@ -42,7 +70,9 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   const [currentSessionId, setCurrentSessionId] = useState(props.sessionId);
   const [session, setSession] = useState<StartSessionResult | null>(null);
   const [activeModel, setActiveModel] = useState<string>('');
-  const [activeModelInfo, setActiveModelInfo] = useState<ModelInfo | null>(null);
+  const [activeModelInfo, setActiveModelInfo] = useState<ModelInfo | null>(
+    null
+  );
   const [metrics, setMetrics] = useState({
     inputTokens: 0,
     outputTokens: 0,
@@ -67,7 +97,11 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   const streamingBufferRef = useRef('');
   const [streamingThinking, setStreamingThinking] = useState<string>('');
   const [thinkingDuration, setThinkingDuration] = useState<number | null>(null);
-  const thinkingRef = useRef<{ buffer: string; startMs: number; durationMs: number | null }>({
+  const thinkingRef = useRef<{
+    buffer: string;
+    startMs: number;
+    durationMs: number | null;
+  }>({
     buffer: '',
     startMs: 0,
     durationMs: null,
@@ -78,16 +112,26 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   const [error, setError] = useState<string | null>(null);
   // Shiki highlighting is async, so finalized assistant messages are rendered
   // off the render path and cached here by message id.
-  const [renderedContent, setRenderedContent] = useState<Record<string, string>>({});
+  const [renderedContent, setRenderedContent] = useState<
+    Record<string, string>
+  >({});
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [thinkingCollapsed, setThinkingCollapsed] = useState(
     props.initialThinkingCollapsed ?? false
   );
+  const [autoApplyWrites, setAutoApplyWrites] = useState(
+    props.initialAutoApplyWrites ?? false
+  );
+  const autoApplyWritesRef = useRef(props.initialAutoApplyWrites ?? false);
+  const [pendingApproval, setPendingApproval] =
+    useState<PendingApproval | null>(null);
+  const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
+  const toolEventKeyRef = useRef(0);
 
   const isCommandMode = input.startsWith('/') && !input.includes(' ');
-  const commandQuery = isCommandMode ? parseCommandInput(input) ?? '' : '';
+  const commandQuery = isCommandMode ? (parseCommandInput(input) ?? '') : '';
   const filteredCommands = useMemo(
     () => (isCommandMode ? filterCommands(commandQuery) : []),
     [isCommandMode, commandQuery]
@@ -99,7 +143,8 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     [isCommandMode, input]
   );
   const mentionSuggestions = useMemo(
-    () => filterMentionSuggestions(workspaceFiles, activeMentionQuery ?? undefined),
+    () =>
+      filterMentionSuggestions(workspaceFiles, activeMentionQuery ?? undefined),
     [activeMentionQuery, workspaceFiles]
   );
   const selectedSuggestion =
@@ -108,6 +153,22 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   useInput((value, key) => {
     if (showModelPicker) return;
 
+    if (pendingApproval) {
+      const choice = value.toLowerCase();
+      if (key.ctrl && choice === 'c') {
+        exit();
+        return;
+      }
+      if (choice === 'y' || key.return) {
+        resolveApproval(true, false);
+      } else if (choice === 'a') {
+        resolveApproval(true, true);
+      } else if (choice === 'n' || key.escape) {
+        resolveApproval(false, false);
+      }
+      return;
+    }
+
     if (key.escape || (key.ctrl && value.toLowerCase() === 'c')) {
       exit();
       return;
@@ -115,7 +176,9 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
     if (isCommandMode && visibleCommands.length) {
       if (key.downArrow) {
-        setSelectedCommandIndex((i) => Math.min(i + 1, visibleCommands.length - 1));
+        setSelectedCommandIndex((i) =>
+          Math.min(i + 1, visibleCommands.length - 1)
+        );
         return;
       }
       if (key.upArrow) {
@@ -133,7 +196,9 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     if (!mentionSuggestions.length) return;
 
     if (key.downArrow) {
-      setSelectedSuggestionIndex((i) => Math.min(i + 1, mentionSuggestions.length - 1));
+      setSelectedSuggestionIndex((i) =>
+        Math.min(i + 1, mentionSuggestions.length - 1)
+      );
       return;
     }
     if (key.upArrow) {
@@ -160,7 +225,13 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     setSession(null);
     setConversation(null);
     setActiveModelInfo(null);
-    setMetrics({ inputTokens: 0, outputTokens: 0, cachedTokens: 0, cost: 0, lastInputTokens: 0 });
+    setMetrics({
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+      cost: 0,
+      lastInputTokens: 0,
+    });
     void props.chatSessionService
       .startSession(
         props.requestedModel
@@ -250,12 +321,33 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     props.onModelChange?.(model.id, model.providerId);
   };
 
+  const resolveApproval = (approved: boolean, always: boolean): void => {
+    if (always) {
+      setAutoApplyWrites(true);
+      autoApplyWritesRef.current = true;
+      props.onAutoApplyWritesChange?.(true);
+    }
+    setPendingApproval((current) => {
+      current?.resolve(approved);
+      return null;
+    });
+  };
+
   const executeCommand = (name: string): void => {
     setInput('');
     setError(null);
 
     if (name === 'models') {
       setShowModelPicker(true);
+      return;
+    }
+
+    if (name === 'auto-writes') {
+      const next = !autoApplyWritesRef.current;
+      setAutoApplyWrites(next);
+      autoApplyWritesRef.current = next;
+      props.onAutoApplyWritesChange?.(next);
+      setStatus(next ? 'Auto-applying writes' : 'Confirming each write');
       return;
     }
 
@@ -314,6 +406,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     setStreamingContent('');
     setStreamingThinking('');
     setThinkingDuration(null);
+    setToolEvents([]);
     streamingBufferRef.current = '';
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
     responseTimingRef.current = { startMs: Date.now(), firstTokenMs: null };
@@ -329,19 +422,70 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       if (cBuf) setStreamingContent(cBuf);
     }, 50);
 
+    const requestApproval = (
+      request: ToolApprovalRequest
+    ): Promise<boolean> => {
+      if (autoApplyWritesRef.current) return Promise.resolve(true);
+      return new Promise<boolean>((resolve) => {
+        setStatus('Awaiting approval...');
+        setPendingApproval({ request, resolve });
+      });
+    };
+
+    const onToolActivity = (event: ToolActivityEvent): void => {
+      if (event.phase === 'start') {
+        // A turn finished and tools are running; drop the streamed preamble so
+        // the next turn's text renders cleanly.
+        streamingBufferRef.current = '';
+        setStreamingContent('');
+        const key = (toolEventKeyRef.current += 1);
+        setToolEvents((prev) => [
+          ...prev,
+          {
+            key,
+            toolName: event.toolName,
+            title: event.view.title,
+            status: 'running',
+          },
+        ]);
+        return;
+      }
+      setToolEvents((prev) => {
+        const next = [...prev];
+        for (let index = next.length - 1; index >= 0; index -= 1) {
+          const entry = next[index];
+          if (entry?.status === 'running') {
+            next[index] = {
+              ...entry,
+              status: event.result?.isError ? 'error' : 'done',
+            };
+            break;
+          }
+        }
+        return next;
+      });
+    };
+
     try {
-      const attachments = await props.promptAttachmentService.resolveAttachments(value);
+      const attachments =
+        await props.promptAttachmentService.resolveAttachments(value);
       const result = await props.chatSessionService.submitMessage({
         conversation: baseConversation,
         model: activeModel || session.activeModel,
         content: value,
         attachments,
+        requestApproval,
+        onToolActivity,
         onToken: (token) => {
           if (responseTimingRef.current.firstTokenMs === null) {
             responseTimingRef.current.firstTokenMs = Date.now();
           }
-          if (thinkingRef.current.startMs && thinkingRef.current.durationMs === null) {
-            thinkingRef.current.durationMs = Date.now() - thinkingRef.current.startMs;
+          if (
+            thinkingRef.current.startMs &&
+            thinkingRef.current.durationMs === null
+          ) {
+            thinkingRef.current.durationMs =
+              Date.now() - thinkingRef.current.startMs;
           }
           streamingBufferRef.current += token;
         },
@@ -358,11 +502,14 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
       const endMs = Date.now();
       const timing = responseTimingRef.current;
-      const lastMsg = result.conversation.messages[result.conversation.messages.length - 1];
+      const lastMsg =
+        result.conversation.messages[result.conversation.messages.length - 1];
       const capturedThinking = thinkingRef.current.buffer;
       const capturedDuration =
         thinkingRef.current.durationMs ??
-        (thinkingRef.current.startMs ? Date.now() - thinkingRef.current.startMs : 0);
+        (thinkingRef.current.startMs
+          ? Date.now() - thinkingRef.current.startMs
+          : 0);
 
       clearInterval(flushInterval);
       streamingBufferRef.current = '';
@@ -377,7 +524,10 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         if (lastMsg && capturedThinking) {
           setMessageThinking((prev) => ({
             ...prev,
-            [lastMsg.id]: { content: capturedThinking, durationMs: capturedDuration },
+            [lastMsg.id]: {
+              content: capturedThinking,
+              durationMs: capturedDuration,
+            },
           }));
         }
         if (result.usage && timing.firstTokenMs !== null) {
@@ -396,7 +546,8 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
           const requestCost = pricing
             ? u.inputTokens * pricing.inputPerToken +
               u.outputTokens * pricing.outputPerToken +
-              u.cachedTokens * (pricing.cacheReadPerToken ?? pricing.inputPerToken)
+              u.cachedTokens *
+                (pricing.cacheReadPerToken ?? pricing.inputPerToken)
             : 0;
           setMetrics((prev) => ({
             inputTokens: prev.inputTokens + u.inputTokens,
@@ -445,49 +596,70 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       <Box marginTop={1} flexDirection="column">
         {conversation?.messages.length ? (
           conversation.messages.map((message) => {
-            const thinking = message.role === 'assistant' ? messageThinking[message.id] : undefined;
+            const thinking =
+              message.role === 'assistant'
+                ? messageThinking[message.id]
+                : undefined;
             return (
-            <Box key={message.id} flexDirection="column">
-              {thinking ? (
-                <Box flexDirection="column" marginBottom={0}>
-                  <Text color="yellow">
-                    {thinkingCollapsed ? '+ ' : ''}Thought: {formatDuration(thinking.durationMs)}
+              <Box key={message.id} flexDirection="column">
+                {thinking ? (
+                  <Box flexDirection="column" marginBottom={0}>
+                    <Text color="yellow">
+                      {thinkingCollapsed ? '+ ' : ''}Thought:{' '}
+                      {formatDuration(thinking.durationMs)}
+                    </Text>
+                    {thinkingCollapsed ? null : (
+                      <Text dimColor>{thinking.content}</Text>
+                    )}
+                  </Box>
+                ) : null}
+                {message.role === 'user' ? (
+                  <Box
+                    flexDirection="column"
+                    borderStyle="round"
+                    borderColor="cyan"
+                    borderTop={false}
+                    borderRight={false}
+                    borderBottom={false}
+                    paddingLeft={1}
+                    marginY={1}
+                  >
+                    <Text bold color="white">
+                      {message.content}
+                    </Text>
+                    <Text dimColor>{formatTime(message.createdAt)}</Text>
+                  </Box>
+                ) : message.role === 'assistant' ? (
+                  <Box flexDirection="column">
+                    {message.content ? (
+                      <Text>
+                        {renderedContent[message.id] ??
+                          renderMarkdown(message.content)}
+                      </Text>
+                    ) : null}
+                    {message.toolCalls?.map((call) => (
+                      <Text key={call.id} color="magenta">
+                        ⚙ {call.name}({summarizeToolArgs(call.arguments)})
+                      </Text>
+                    ))}
+                  </Box>
+                ) : message.role === 'tool' ? (
+                  <Text dimColor>
+                    {'  ↳ '}
+                    {firstLine(message.content)}
                   </Text>
-                  {thinkingCollapsed ? null : (
-                    <Text dimColor>{thinking.content}</Text>
-                  )}
-                </Box>
-              ) : null}
-              {message.role === 'user' ? (
-                <Box
-                  flexDirection="column"
-                  borderStyle="round"
-                  borderColor="cyan"
-                  borderTop={false}
-                  borderRight={false}
-                  borderBottom={false}
-                  paddingLeft={1}
-                  marginY={1}
-                >
-                  <Text bold color="white">
-                    {message.content}
+                ) : (
+                  <Text>
+                    <Text color="yellow">{message.role}</Text>
+                    <Text>: {message.content}</Text>
                   </Text>
-                  <Text dimColor>{formatTime(message.createdAt)}</Text>
-                </Box>
-              ) : message.role === 'assistant' ? (
-                <Text>{renderedContent[message.id] ?? renderMarkdown(message.content)}</Text>
-              ) : (
-                <Text>
-                  <Text color="yellow">{message.role}</Text>
-                  <Text>: {message.content}</Text>
-                </Text>
-              )}
-              {message.attachments?.map((attachment) => (
-                <Text key={`${message.id}:${attachment.path}`} dimColor>
-                  attached: @{attachment.path}
-                </Text>
-              ))}
-            </Box>
+                )}
+                {message.attachments?.map((attachment) => (
+                  <Text key={`${message.id}:${attachment.path}`} dimColor>
+                    attached: @{attachment.path}
+                  </Text>
+                ))}
+              </Box>
             );
           })
         ) : (
@@ -512,6 +684,57 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
             ) : null}
           </Box>
         ) : null}
+        {toolEvents.length ? (
+          <Box flexDirection="column" marginTop={1}>
+            {toolEvents.map((event) => (
+              <Text
+                key={event.key}
+                color={
+                  event.status === 'error'
+                    ? 'red'
+                    : event.status === 'done'
+                      ? 'green'
+                      : 'yellow'
+                }
+              >
+                {event.status === 'running'
+                  ? '⚙ '
+                  : event.status === 'done'
+                    ? '✓ '
+                    : '✗ '}
+                {event.title}
+              </Text>
+            ))}
+          </Box>
+        ) : null}
+        {pendingApproval ? (
+          <Box
+            flexDirection="column"
+            marginTop={1}
+            borderStyle="round"
+            borderColor="yellow"
+            paddingX={1}
+          >
+            <Text bold color="yellow">
+              Run {pendingApproval.request.toolName}?
+            </Text>
+            <Text>{pendingApproval.request.title}</Text>
+            {pendingApproval.request.preview ? (
+              <Box marginTop={1}>
+                <Text dimColor>
+                  {truncatePreview(pendingApproval.request.preview)}
+                </Text>
+              </Box>
+            ) : null}
+            <Box marginTop={1}>
+              <Text>
+                <Text color="green">[y]</Text>es{'  '}
+                <Text color="cyan">[a]</Text>lways{'  '}
+                <Text color="red">[n]</Text>o
+              </Text>
+            </Box>
+          </Box>
+        ) : null}
       </Box>
 
       {isCommandMode && visibleCommands.length ? (
@@ -525,7 +748,9 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
           <Text dimColor>commands</Text>
           {visibleCommands.map((cmd, index) => (
             <Box key={cmd.name}>
-              <Text {...(index === selectedCommandIndex ? { color: 'cyan' } : {})}>
+              <Text
+                {...(index === selectedCommandIndex ? { color: 'cyan' } : {})}
+              >
                 {index === selectedCommandIndex ? '›' : ' '}{' '}
                 <Text bold={index === selectedCommandIndex}>/{cmd.name}</Text>
                 {'  '}
@@ -582,21 +807,43 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
           {metrics.inputTokens > 0 ? (
             <>
               <Text dimColor>
-                in <Text color="white">{metrics.inputTokens.toLocaleString()}</Text>
+                in{' '}
+                <Text color="white">
+                  {metrics.inputTokens.toLocaleString()}
+                </Text>
               </Text>
               <Text dimColor>
-                out <Text color="white">{metrics.outputTokens.toLocaleString()}</Text>
+                out{' '}
+                <Text color="white">
+                  {metrics.outputTokens.toLocaleString()}
+                </Text>
               </Text>
               {metrics.cachedTokens > 0 ? (
                 <Text dimColor>
-                  cached <Text color="white">{metrics.cachedTokens.toLocaleString()}</Text>
+                  cached{' '}
+                  <Text color="white">
+                    {metrics.cachedTokens.toLocaleString()}
+                  </Text>
                 </Text>
               ) : null}
               {activeModelInfo?.contextWindow ? (
                 <Text dimColor>
                   ctx{' '}
-                  <Text color={contextPct(metrics.lastInputTokens, activeModelInfo.contextWindow) > 80 ? 'yellow' : 'white'}>
-                    {contextPct(metrics.lastInputTokens, activeModelInfo.contextWindow)}%
+                  <Text
+                    color={
+                      contextPct(
+                        metrics.lastInputTokens,
+                        activeModelInfo.contextWindow
+                      ) > 80
+                        ? 'yellow'
+                        : 'white'
+                    }
+                  >
+                    {contextPct(
+                      metrics.lastInputTokens,
+                      activeModelInfo.contextWindow
+                    )}
+                    %
                   </Text>
                 </Text>
               ) : null}
@@ -608,10 +855,16 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
               {lastStats ? (
                 <>
                   <Text dimColor>
-                    ttft <Text color="white">{formatDuration(lastStats.ttftMs)}</Text>
+                    ttft{' '}
+                    <Text color="white">
+                      {formatDuration(lastStats.ttftMs)}
+                    </Text>
                   </Text>
                   <Text dimColor>
-                    <Text color="white">{lastStats.tokensPerSecond.toFixed(1)}</Text> tok/s
+                    <Text color="white">
+                      {lastStats.tokensPerSecond.toFixed(1)}
+                    </Text>{' '}
+                    tok/s
                   </Text>
                 </>
               ) : null}
@@ -633,6 +886,35 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return 'Unknown error';
+}
+
+function summarizeToolArgs(rawArguments: string): string {
+  try {
+    const parsed = JSON.parse(rawArguments) as Record<string, unknown>;
+    if (typeof parsed.path === 'string') return parsed.path;
+    const keys = Object.keys(parsed);
+    return keys.length ? keys.join(', ') : '';
+  } catch {
+    return truncate(rawArguments, 40);
+  }
+}
+
+function firstLine(content: string): string {
+  const [line = ''] = content.split('\n');
+  return truncate(line, 100);
+}
+
+function truncate(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+function truncatePreview(preview: string): string {
+  const lines = preview.split('\n');
+  if (lines.length <= MAX_PREVIEW_LINES) return preview;
+  return [
+    ...lines.slice(0, MAX_PREVIEW_LINES),
+    `… (${lines.length - MAX_PREVIEW_LINES} more lines)`,
+  ].join('\n');
 }
 
 function contextPct(inputTokens: number, contextWindow: number): number {

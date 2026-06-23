@@ -1,7 +1,9 @@
 import { PromptAttachmentService } from '@core/application/prompt-attachment-service';
 import { ChatSessionService } from '@core/application/chat-session-service';
 import { ListModelsService } from '@core/application/list-models-service';
+import { ToolRegistry } from '@core/application/tool-registry';
 import { ProviderId, type ProviderClient } from '@core/ports/chat-model';
+import { WriteFileTool } from '@runtime/tools/write-file-tool';
 import { ProviderRegistry } from '@runtime/bootstrap/provider-registry';
 import { loadAppConfig } from '@runtime/config/app-config';
 import { FileConversationRepository } from '@runtime/persistence/file-conversation-repository';
@@ -34,12 +36,17 @@ export function createRuntimeServices(
   const registry = new ProviderRegistry(config);
   const provider = registry.create(providerId);
   const repository = new FileConversationRepository(config.sessionsDirectory);
-  const workspaceFiles = new LocalWorkspaceFileService(process.cwd());
+  const workspaceRoot = process.cwd();
+  const workspaceFiles = new LocalWorkspaceFileService(workspaceRoot);
+  const toolRegistry = new ToolRegistry([new WriteFileTool(workspaceFiles)]);
   const allProviders = createAllProviders(config);
 
   return {
     providerId,
-    chatSessionService: new ChatSessionService(repository, provider),
+    chatSessionService: new ChatSessionService(repository, provider, {
+      toolRegistry,
+      workspaceRoot,
+    }),
     listModelsService: new ListModelsService(provider),
     promptAttachmentService: new PromptAttachmentService(workspaceFiles),
     allProviders,
@@ -65,7 +72,10 @@ function createAllProviders(config: AppConfig): ProviderClient[] {
 
   if (config.openrouter.apiKey) {
     providers.push(
-      new OpenRouterProvider(config.openrouter.apiKey, config.openrouter.baseUrl)
+      new OpenRouterProvider(
+        config.openrouter.apiKey,
+        config.openrouter.baseUrl
+      )
     );
   }
 
