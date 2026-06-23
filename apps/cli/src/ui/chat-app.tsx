@@ -539,6 +539,11 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   const submit = async (value: string): Promise<void> => {
     if (isSending || !value.trim()) return;
 
+    if (showMentionSuggestions && selectedSuggestion) {
+      setInputWithCursorAtEnd(applyMentionSuggestion(value, selectedSuggestion));
+      return;
+    }
+
     const commandInput = parseCommandInput(value);
     if (commandInput !== null) {
       const spaceIndex = commandInput.indexOf(' ');
