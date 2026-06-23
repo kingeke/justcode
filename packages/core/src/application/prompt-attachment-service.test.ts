@@ -25,6 +25,10 @@ class InMemoryWorkspaceFiles implements WorkspaceFilePort {
     return content;
   }
 
+  public async readFileBytes(relativePath: string): Promise<Uint8Array> {
+    return Buffer.from(await this.readFile(relativePath), 'utf8');
+  }
+
   public async writeFile(relativePath: string, content: string): Promise<void> {
     this.files[relativePath] = content;
   }

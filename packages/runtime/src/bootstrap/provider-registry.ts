@@ -24,7 +24,10 @@ export class ProviderRegistry {
         );
       }
       case ProviderId.Ollama:
-        return new OllamaProvider(this.config.ollama.baseUrl);
+        return new OllamaProvider(
+          this.config.ollama.baseUrl,
+          this.config.ollama.apiKey
+        );
       case ProviderId.LmStudio:
         return new LmStudioProvider(this.config.lmstudio.baseUrl);
       case ProviderId.OpenRouter: {

@@ -18,10 +18,10 @@ describe('provider clients', () => {
     vi.unstubAllGlobals();
   });
 
-  it('lists Ollama models from the local catalog', async () => {
+  it('lists Ollama models from the OpenAI-compatible endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       createJsonResponse({
-        models: [{ name: 'codellama:13b' }, { name: 'llama3.1:8b' }],
+        data: [{ id: 'codellama:13b' }, { id: 'llama3.1:8b' }],
       })
     );
 
@@ -31,9 +31,17 @@ describe('provider clients', () => {
       'http://127.0.0.1:11434'
     ).listModels();
 
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:11434/v1/models',
+      expect.anything()
+    );
     expect(models).toEqual([
-      { id: 'codellama:13b', displayName: 'codellama:13b' },
-      { id: 'llama3.1:8b', displayName: 'llama3.1:8b' },
+      {
+        id: 'codellama:13b',
+        displayName: 'codellama:13b',
+        providerId: 'ollama',
+      },
+      { id: 'llama3.1:8b', displayName: 'llama3.1:8b', providerId: 'ollama' },
     ]);
   });
 

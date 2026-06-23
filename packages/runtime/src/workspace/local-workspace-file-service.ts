@@ -22,6 +22,11 @@ export class LocalWorkspaceFileService implements WorkspaceFilePort {
     return readFile(absolutePath, 'utf8');
   }
 
+  public async readFileBytes(relativePath: string): Promise<Uint8Array> {
+    const absolutePath = this.resolveWorkspacePath(relativePath);
+    return readFile(absolutePath);
+  }
+
   public async writeFile(relativePath: string, content: string): Promise<void> {
     const absolutePath = this.resolveWorkspacePath(relativePath);
     await mkdir(dirname(absolutePath), { recursive: true });

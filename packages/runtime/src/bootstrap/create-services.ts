@@ -4,6 +4,10 @@ import { ListModelsService } from '@core/application/list-models-service';
 import { ToolRegistry } from '@core/application/tool-registry';
 import { ProviderId, type ProviderClient } from '@core/ports/chat-model';
 import { WriteFileTool } from '@runtime/tools/write-file-tool';
+import {
+  ReadFileTool,
+  DEFAULT_MAX_READ_BYTES,
+} from '@runtime/tools/read-file-tool';
 import { ProviderRegistry } from '@runtime/bootstrap/provider-registry';
 import { loadAppConfig } from '@runtime/config/app-config';
 import { FileConversationRepository } from '@runtime/persistence/file-conversation-repository';
@@ -21,11 +25,15 @@ export interface RuntimeServices {
   promptAttachmentService: PromptAttachmentService;
   allProviders: ProviderClient[];
   createProvider: (id: ProviderId) => ProviderClient;
+  /** Update, at runtime, how many bytes a single file read returns. */
+  setMaxReadBytes: (bytes: number) => void;
 }
 
 export interface CreateRuntimeOptions {
   providerId?: ProviderId;
   env?: NodeJS.ProcessEnv;
+  /** Initial per-read byte cap; falls back to the default when unset. */
+  maxReadBytes?: number;
 }
 
 export function createRuntimeServices(
@@ -38,7 +46,13 @@ export function createRuntimeServices(
   const repository = new FileConversationRepository(config.sessionsDirectory);
   const workspaceRoot = process.cwd();
   const workspaceFiles = new LocalWorkspaceFileService(workspaceRoot);
-  const toolRegistry = new ToolRegistry([new WriteFileTool(workspaceFiles)]);
+  const readSettings = {
+    maxReadBytes: options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES,
+  };
+  const toolRegistry = new ToolRegistry([
+    new WriteFileTool(workspaceFiles),
+    new ReadFileTool(workspaceFiles, () => readSettings.maxReadBytes),
+  ]);
   const allProviders = createAllProviders(config);
 
   return {
@@ -51,12 +65,15 @@ export function createRuntimeServices(
     promptAttachmentService: new PromptAttachmentService(workspaceFiles),
     allProviders,
     createProvider: (id: ProviderId) => registry.create(id),
+    setMaxReadBytes: (bytes: number) => {
+      readSettings.maxReadBytes = bytes;
+    },
   };
 }
 
 function createAllProviders(config: AppConfig): ProviderClient[] {
   const providers: ProviderClient[] = [
-    new OllamaProvider(config.ollama.baseUrl),
+    new OllamaProvider(config.ollama.baseUrl, config.ollama.apiKey),
     new LmStudioProvider(config.lmstudio.baseUrl),
   ];
 

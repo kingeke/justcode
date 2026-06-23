@@ -24,6 +24,11 @@ export const COMMANDS: Command[] = [
     name: 'auto-writes',
     description: 'Toggle auto-applying file writes without confirmation',
   },
+  {
+    name: 'read-limit',
+    description:
+      'Set how much of a file the model reads at once, e.g. /read-limit 64 (KB)',
+  },
 ];
 
 export function filterCommands(query: string): Command[] {

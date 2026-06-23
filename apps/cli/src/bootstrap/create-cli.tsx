@@ -5,6 +5,7 @@ import React from 'react';
 import { ChatApp } from '@cli/ui/chat-app';
 import type { ProviderId } from '@core/ports/chat-model';
 import { createRuntimeServices } from '@runtime/bootstrap/create-services';
+import { DEFAULT_MAX_READ_BYTES } from '@runtime/tools/read-file-tool';
 import { loadAppConfig, parseProviderId } from '@runtime/config/app-config';
 import {
   readGlobalConfig,
@@ -108,9 +109,12 @@ async function runChat(options: SharedOptions): Promise<void> {
     resolveProviderId(options.provider) ??
     parseProviderId(savedConfig.lastProvider);
 
-  const runtime = createRuntimeServices(
-    explicitProviderId ? { providerId: explicitProviderId } : {}
-  );
+  const runtime = createRuntimeServices({
+    ...(explicitProviderId ? { providerId: explicitProviderId } : {}),
+    ...(savedConfig.cache?.maxReadBytes
+      ? { maxReadBytes: savedConfig.cache.maxReadBytes }
+      : {}),
+  });
 
   // Merge into the persisted config so each write preserves the other fields.
   let currentConfig = savedConfig;
@@ -130,6 +134,8 @@ async function runChat(options: SharedOptions): Promise<void> {
       createProvider: runtime.createProvider,
       initialThinkingCollapsed: savedConfig.thinkingCollapsed ?? false,
       initialAutoApplyWrites: savedConfig.autoApplyWrites ?? false,
+      initialMaxReadBytes:
+        savedConfig.cache?.maxReadBytes ?? DEFAULT_MAX_READ_BYTES,
       onModelChange: (modelId: string, modelProviderId: string) => {
         persistConfig({ lastModel: modelId, lastProvider: modelProviderId });
       },
@@ -138,6 +144,12 @@ async function runChat(options: SharedOptions): Promise<void> {
       },
       onAutoApplyWritesChange: (autoApply: boolean) => {
         persistConfig({ autoApplyWrites: autoApply });
+      },
+      onMaxReadBytesChange: (bytes: number) => {
+        runtime.setMaxReadBytes(bytes);
+        persistConfig({
+          cache: { ...currentConfig.cache, maxReadBytes: bytes },
+        });
       },
     })
   );

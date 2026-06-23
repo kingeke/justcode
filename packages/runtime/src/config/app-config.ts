@@ -14,6 +14,7 @@ export interface AppConfig {
   };
   ollama: {
     baseUrl: string;
+    apiKey?: string | undefined;
   };
   lmstudio: {
     baseUrl: string;
@@ -47,6 +48,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     ollama: {
       baseUrl: env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
+      apiKey: env.OLLAMA_API_KEY,
     },
     lmstudio: {
       baseUrl: env.LMSTUDIO_BASE_URL ?? 'http://127.0.0.1:1234/v1',

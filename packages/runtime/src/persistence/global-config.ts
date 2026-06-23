@@ -7,6 +7,11 @@ export interface GlobalConfig {
   thinkingCollapsed?: boolean;
   /** When true, file-writing tools run without per-call confirmation. */
   autoApplyWrites?: boolean;
+  /** Tunables for how the agent reads from the workspace. */
+  cache?: {
+    /** Max bytes returned by a single file read before it is windowed. */
+    maxReadBytes?: number;
+  };
 }
 
 export async function readGlobalConfig(

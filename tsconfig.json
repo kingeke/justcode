@@ -6,6 +6,7 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2023", "DOM"],
     "jsx": "react-jsx",
+    "noEmit": true,
     "strict": true,
     "noImplicitOverride": true,
     "noUncheckedIndexedAccess": true,

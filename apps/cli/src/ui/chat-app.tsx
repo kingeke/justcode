@@ -29,10 +29,10 @@ import type {
   ProviderClient,
 } from '@core/ports/chat-model';
 import { renderMarkdown, renderMarkdownAsync } from './render-markdown.js';
-import { filterCommands, parseCommandInput } from './commands.js';
+import { COMMANDS, filterCommands, parseCommandInput } from './commands.js';
 import { ModelPicker } from './model-picker.js';
 
-const MAX_COMMAND_ITEMS = 5;
+const MAX_COMMAND_ITEMS = 8;
 
 interface ChatAppProps {
   providerId: ProviderId;
@@ -47,6 +47,8 @@ interface ChatAppProps {
   onThinkingCollapsedChange?: (collapsed: boolean) => void;
   initialAutoApplyWrites?: boolean;
   onAutoApplyWritesChange?: (autoApply: boolean) => void;
+  initialMaxReadBytes?: number;
+  onMaxReadBytesChange?: (bytes: number) => void;
 }
 
 interface PendingApproval {
@@ -91,6 +93,15 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   }>({ startMs: 0, firstTokenMs: null });
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState('');
+  // Bumping this remounts the text input so its cursor jumps to the end after
+  // we replace the value programmatically (tab-completion); ink-text-input
+  // otherwise keeps its own cursor offset.
+  const [inputKey, setInputKey] = useState(0);
+
+  const setInputWithCursorAtEnd = (next: string): void => {
+    setInput(next);
+    setInputKey((key) => key + 1);
+  };
   const [status, setStatus] = useState<string>('Loading session...');
   const [isSending, setIsSending] = useState(false);
   const [streamingContent, setStreamingContent] = useState<string>('');
@@ -125,6 +136,10 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     props.initialAutoApplyWrites ?? false
   );
   const autoApplyWritesRef = useRef(props.initialAutoApplyWrites ?? false);
+  const maxReadBytesRef = useRef(props.initialMaxReadBytes ?? 50 * 1024);
+  const [maxReadBytes, setMaxReadBytes] = useState(
+    props.initialMaxReadBytes ?? 50 * 1024
+  );
   const [pendingApproval, setPendingApproval] =
     useState<PendingApproval | null>(null);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
@@ -187,7 +202,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       }
       if (key.tab) {
         const cmd = visibleCommands[selectedCommandIndex];
-        if (cmd) setInput(`/${cmd.name}`);
+        if (cmd) setInputWithCursorAtEnd(`/${cmd.name} `);
         return;
       }
       return;
@@ -208,6 +223,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     if (key.tab) {
       if (selectedSuggestion) {
         setInput((cur) => applyMentionSuggestion(cur, selectedSuggestion));
+        setInputKey((key) => key + 1);
       }
     }
   });
@@ -333,12 +349,36 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     });
   };
 
-  const executeCommand = (name: string): void => {
+  const executeCommand = (name: string, arg?: string): void => {
     setInput('');
     setError(null);
 
     if (name === 'models') {
       setShowModelPicker(true);
+      return;
+    }
+
+    if (name === 'read-limit') {
+      const trimmed = (arg ?? '').trim();
+      const currentKb = Math.round(maxReadBytesRef.current / 1024);
+      if (!trimmed) {
+        setStatus(
+          `Read limit is ${currentKb} KB (use /read-limit <KB> to change)`
+        );
+        return;
+      }
+      const kb = Number.parseInt(trimmed, 10);
+      if (!Number.isFinite(kb) || kb <= 0) {
+        setError(
+          `Invalid read limit '${trimmed}'. Provide a positive number of KB.`
+        );
+        return;
+      }
+      const bytes = kb * 1024;
+      maxReadBytesRef.current = bytes;
+      setMaxReadBytes(bytes);
+      props.onMaxReadBytesChange?.(bytes);
+      setStatus(`Read limit set to ${kb} KB`);
       return;
     }
 
@@ -382,11 +422,29 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   const submit = async (value: string): Promise<void> => {
     if (isSending || !value.trim()) return;
 
-    if (isCommandMode) {
-      const query = parseCommandInput(value) ?? '';
-      const exact = filteredCommands.find((c) => c.name === query);
-      const selected = exact ?? visibleCommands[selectedCommandIndex];
-      if (selected) executeCommand(selected.name);
+    const commandInput = parseCommandInput(value);
+    if (commandInput !== null) {
+      const spaceIndex = commandInput.indexOf(' ');
+      const hasArg = spaceIndex !== -1;
+      const commandName = hasArg
+        ? commandInput.slice(0, spaceIndex)
+        : commandInput;
+      const arg = hasArg ? commandInput.slice(spaceIndex + 1) : undefined;
+
+      if (hasArg) {
+        // Explicit name + argument (e.g. "/read-limit 64").
+        if (COMMANDS.some((c) => c.name === commandName)) {
+          executeCommand(commandName, arg);
+        } else {
+          setError(`Unknown command '/${commandName}'.`);
+        }
+      } else {
+        // No argument: prefer an exact name (e.g. after tab-completing and
+        // submitting), otherwise honour the highlighted suggestion.
+        const exact = COMMANDS.find((c) => c.name === commandName);
+        const selected = exact ?? visibleCommands[selectedCommandIndex];
+        if (selected) executeCommand(selected.name);
+      }
       setInput('');
       return;
     }
@@ -761,6 +819,22 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
                       : 'Collapse thinking'
                     : cmd.description}
                 </Text>
+                {cmd.name === 'auto-writes' ? (
+                  <Text>
+                    {'  '}
+                    <Text color={autoApplyWrites ? 'green' : 'yellow'}>
+                      [{autoApplyWrites ? 'on' : 'off'}]
+                    </Text>
+                  </Text>
+                ) : null}
+                {cmd.name === 'read-limit' ? (
+                  <Text>
+                    {'  '}
+                    <Text color="green">
+                      [{Math.round(maxReadBytes / 1024)} KB]
+                    </Text>
+                  </Text>
+                ) : null}
               </Text>
             </Box>
           ))}
@@ -770,6 +844,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       <Box marginTop={1}>
         <Text>{isSending ? 'sending' : 'prompt'}&gt; </Text>
         <TextInput
+          key={inputKey}
           value={input}
           onChange={setInput}
           onSubmit={submit}
