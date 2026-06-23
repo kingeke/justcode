@@ -29,12 +29,21 @@ export interface ChatMessage {
   toolCallId?: string;
   /** Set on `tool` messages: the name of the tool that produced this result. */
   name?: string;
+  /** Optional assistant thinking text persisted for interrupted responses. */
+  thinking?: {
+    content: string;
+    durationMs: number;
+  };
 }
 
 export interface CreateMessageExtras {
   toolCalls?: ToolCall[];
   toolCallId?: string;
   name?: string;
+  thinking?: {
+    content: string;
+    durationMs: number;
+  };
 }
 
 export function createMessage(
@@ -53,6 +62,7 @@ export function createMessage(
     ...(extras?.toolCalls?.length ? { toolCalls: extras.toolCalls } : {}),
     ...(extras?.toolCallId ? { toolCallId: extras.toolCallId } : {}),
     ...(extras?.name ? { name: extras.name } : {}),
+    ...(extras?.thinking ? { thinking: extras.thinking } : {}),
   };
 }
 

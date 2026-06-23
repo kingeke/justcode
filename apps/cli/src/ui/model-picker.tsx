@@ -6,6 +6,25 @@ import { PROVIDERS, ProviderId, type ModelInfo } from '@core/ports/chat-model';
 import { fuzzyFilter } from './fuzzy-filter.js';
 
 const VISIBLE_ROWS = 18;
+const SORT_MODES = ['provider', 'input-cost', 'output-cost', 'context-window'] as const;
+type SortMode = (typeof SORT_MODES)[number];
+type SortDirection = 'asc' | 'desc';
+type SortState = {
+  mode: SortMode;
+  direction: SortDirection;
+};
+
+const SORT_MODE_LABELS: Record<SortMode, string> = {
+  provider: 'provider',
+  'input-cost': 'input cost',
+  'output-cost': 'output cost',
+  'context-window': 'context length',
+};
+
+const SORT_STATES: SortState[] = SORT_MODES.flatMap((mode) => [
+  { mode, direction: 'asc' },
+  { mode, direction: 'desc' },
+]);
 
 // SGR mouse reports (ESC[<b;x;yM) get fed into stdin while mouse tracking is on.
 // Ink passes them through to TextInput as typed text, so strip them from the query.
@@ -28,6 +47,7 @@ interface GroupedModel {
 
 export function ModelPicker(props: ModelPickerProps): React.ReactElement {
   const [query, setQuery] = useState('');
+  const [sortState, setSortState] = useState<SortState>({ mode: 'provider', direction: 'asc' });
   const [focusedIndex, setFocusedIndex] = useState(0);
   const scrollOffsetRef = useRef(0);
 
@@ -43,34 +63,20 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
 
   const grouped: GroupedModel[] = useMemo(() => {
     const result: GroupedModel[] = [];
-    let lastProvider: ProviderId | null = null;
-
-    const providerOrder = [
-      ProviderId.OpenRouter,
-      ProviderId.Openai,
-      ProviderId.Ollama,
-      ProviderId.LmStudio,
-    ];
-
-    const sorted = [...filteredModels].sort((a, b) => {
-      const ai = providerOrder.indexOf(a.providerId);
-      const bi = providerOrder.indexOf(b.providerId);
-      if (ai !== bi) return ai - bi;
-      return a.displayName.localeCompare(b.displayName);
-    });
+    const sorted = [...filteredModels].sort((a, b) => compareModels(a, b, sortState));
 
     for (const model of sorted) {
-      const isFirstInGroup = model.providerId !== lastProvider;
+      const isFirstInGroup =
+        sortState.mode === 'provider' && model.providerId !== result.at(-1)?.model.providerId;
       result.push({
         model,
         isFirstInGroup,
         groupName: PROVIDERS[model.providerId]?.name ?? model.providerId,
       });
-      lastProvider = model.providerId;
     }
 
     return result;
-  }, [filteredModels]);
+  }, [filteredModels, sortState]);
 
   const clampFocus = (next: number) =>
     Math.max(0, Math.min(next, grouped.length - 1));
@@ -78,7 +84,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
   useEffect(() => {
     setFocusedIndex(0);
     scrollOffsetRef.current = 0;
-  }, [query]);
+  }, [query, sortState]);
 
   const groupedLengthRef = useRef(grouped.length);
   useEffect(() => {
@@ -131,6 +137,11 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
       return;
     }
 
+    if (key.tab) {
+      setSortState((prev) => cycleSortState(prev, key.shift ? -1 : 1));
+      return;
+    }
+
     if (key.downArrow) {
       const next = clampFocus(focusedIndex + 1);
       setFocusedIndex(next);
@@ -166,7 +177,9 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
         <Text bold color="cyan">
           Select model
         </Text>
-        <Text dimColor>esc to cancel</Text>
+        <Text dimColor>
+          tab sort · {formatSortState(sortState)} · esc to cancel
+        </Text>
       </Box>
 
       <Box marginBottom={1}>
@@ -209,9 +222,15 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
                   >
                     {isFocused ? '› ' : '  '}
                     {entry.model.displayName}
+                    {sortState.mode === 'provider' ? null : (
+                      <Text dimColor>
+                        {' '}
+                        · {PROVIDERS[entry.model.providerId]?.name ?? entry.model.providerId}
+                      </Text>
+                    )}
                     {isCurrent ? <Text dimColor> ✓</Text> : null}
                   </Text>
-                  <Text dimColor>{formatPricing(entry.model)}</Text>
+                  <Text dimColor>{formatModelMeta(entry.model)}</Text>
                 </Box>
               </Box>
             );
@@ -230,10 +249,72 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
   );
 }
 
-function formatPricing(model: ModelInfo): string {
-  if (!model.pricing) return 'local';
-  const { inputPerToken, outputPerToken } = model.pricing;
-  if (inputPerToken === 0 && outputPerToken === 0) return 'free';
-  const fmt = (n: number) => `$${(n * 1_000_000).toFixed(2)}/M`;
-  return [`${fmt(inputPerToken)} in`, `${fmt(outputPerToken)} out`].join(' · ');
+function compareModels(a: ModelInfo, b: ModelInfo, sortState: SortState): number {
+  if (sortState.mode === 'provider') {
+    const providerOrder = [
+      ProviderId.OpenRouter,
+      ProviderId.Openai,
+      ProviderId.Ollama,
+      ProviderId.LmStudio,
+    ];
+    const orderedProviders = sortState.direction === 'asc' ? providerOrder : [...providerOrder].reverse();
+    const ai = orderedProviders.indexOf(a.providerId);
+    const bi = orderedProviders.indexOf(b.providerId);
+    if (ai !== bi) return ai - bi;
+    return compareStrings(a.displayName, b.displayName, sortState.direction);
+  }
+
+  if (sortState.mode === 'context-window') {
+    const aContext = a.contextWindow ?? Number.NEGATIVE_INFINITY;
+    const bContext = b.contextWindow ?? Number.NEGATIVE_INFINITY;
+    if (aContext !== bContext) return sortState.direction === 'asc' ? aContext - bContext : bContext - aContext;
+    return compareStrings(a.displayName, b.displayName, sortState.direction);
+  }
+
+  const key = sortState.mode === 'input-cost' ? 'inputPerToken' : 'outputPerToken';
+  const aCost = a.pricing?.[key] ?? Number.POSITIVE_INFINITY;
+  const bCost = b.pricing?.[key] ?? Number.POSITIVE_INFINITY;
+  if (aCost !== bCost) return sortState.direction === 'asc' ? aCost - bCost : bCost - aCost;
+  return compareStrings(a.displayName, b.displayName, sortState.direction);
+}
+
+function cycleSortState(current: SortState, step: 1 | -1): SortState {
+  const index = SORT_STATES.findIndex(
+    (candidate) => candidate.mode === current.mode && candidate.direction === current.direction
+  );
+  return SORT_STATES[(index + step + SORT_STATES.length) % SORT_STATES.length]!;
+}
+
+function formatSortState(sortState: SortState): string {
+  return `${SORT_MODE_LABELS[sortState.mode]} ${sortState.direction}`;
+}
+
+function compareStrings(a: string, b: string, direction: SortDirection): number {
+  return direction === 'asc' ? a.localeCompare(b) : b.localeCompare(a);
+}
+
+function formatModelMeta(model: ModelInfo): string {
+  const parts: string[] = [];
+
+  if (!model.pricing) {
+    parts.push('local');
+  } else {
+    const { inputPerToken, outputPerToken } = model.pricing;
+    if (inputPerToken === 0 && outputPerToken === 0) {
+      parts.push('free');
+    } else {
+      const fmt = (n: number) => `$${(n * 1_000_000).toFixed(2)}/M`;
+      parts.push(`${fmt(inputPerToken)} in`, `${fmt(outputPerToken)} out`);
+    }
+  }
+
+  if (model.contextWindow != null) {
+    parts.push(`${formatCompactNumber(model.contextWindow)} ctx`);
+  }
+
+  return parts.join(' · ');
+}
+
+function formatCompactNumber(value: number): string {
+  return new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
 }

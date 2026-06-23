@@ -32,12 +32,21 @@ describe('FileConversationRepository', () => {
     const repository = new FileConversationRepository(directory);
     const conversation = createConversation('my/session');
     conversation.messages.push(createMessage('user', 'Hello'));
+    conversation.messages.push(
+      createMessage('assistant', 'partial answer', new Date(), undefined, {
+        thinking: { content: 'thinking aloud', durationMs: 123 },
+      })
+    );
 
     await repository.save(conversation);
 
     const reloadedConversation = await repository.load('my/session');
 
-    expect(reloadedConversation.messages).toHaveLength(1);
+    expect(reloadedConversation.messages).toHaveLength(2);
     expect(reloadedConversation.messages[0]?.content).toBe('Hello');
+    expect(reloadedConversation.messages[1]?.thinking).toEqual({
+      content: 'thinking aloud',
+      durationMs: 123,
+    });
   });
 });

@@ -761,17 +761,56 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       });
     } catch (caughtError: unknown) {
       clearInterval(flushInterval);
-      streamingBufferRef.current = '';
-      thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
-      setStreamingContent('');
-      setStreamingThinking('');
-      setThinkingDuration(null);
       setPendingApproval(null);
 
       if (isAbortError(caughtError)) {
+        const capturedThinking = thinkingRef.current.buffer;
+        const capturedContent = streamingBufferRef.current;
+        const capturedDuration =
+          thinkingRef.current.durationMs ??
+          (thinkingRef.current.startMs
+            ? Date.now() - thinkingRef.current.startMs
+            : 0);
+
+        if (capturedThinking || capturedContent) {
+          const interruptedMessage = createMessage(
+            'assistant',
+            capturedContent,
+            new Date(),
+            undefined,
+            capturedThinking
+              ? {
+                  thinking: {
+                    content: capturedThinking,
+                    durationMs: capturedDuration,
+                  },
+                }
+              : undefined
+          );
+
+          setConversation((current) =>
+            current
+              ? {
+                  ...current,
+                  messages: [...current.messages, interruptedMessage],
+                }
+              : current
+          );
+        }
+
+        streamingBufferRef.current = '';
+        thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
+        setStreamingContent('');
+        setStreamingThinking('');
+        setThinkingDuration(null);
         setError(null);
         setStatus('Interrupted');
       } else {
+        streamingBufferRef.current = '';
+        thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
+        setStreamingContent('');
+        setStreamingThinking('');
+        setThinkingDuration(null);
         setError(getErrorMessage(caughtError));
         setStatus('Request failed');
       }
@@ -808,7 +847,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
           conversation.messages.map((message) => {
             const thinking =
               message.role === 'assistant'
-                ? messageThinking[message.id]
+                ? message.thinking ?? messageThinking[message.id]
                 : undefined;
             return (
               <Box key={message.id} flexDirection="column">
