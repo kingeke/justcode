@@ -67,6 +67,22 @@ interface ToolEvent {
 const MAX_PREVIEW_LINES = 16;
 const EXIT_HINT = 'Press Ctrl+C again to exit';
 
+function getInitialMetrics(): {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  cost: number;
+  lastInputTokens: number;
+} {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedTokens: 0,
+    cost: 0,
+    lastInputTokens: 0,
+  };
+}
+
 export function ChatApp(props: ChatAppProps): React.ReactElement {
   const { exit } = useApp();
   const [showModelPicker, setShowModelPicker] = useState(false);
@@ -77,13 +93,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   const [activeModelInfo, setActiveModelInfo] = useState<ModelInfo | null>(
     null
   );
-  const [metrics, setMetrics] = useState({
-    inputTokens: 0,
-    outputTokens: 0,
-    cachedTokens: 0,
-    cost: 0,
-    lastInputTokens: 0,
-  });
+  const [metrics, setMetrics] = useState(getInitialMetrics);
   const [lastStats, setLastStats] = useState<{
     ttftMs: number;
     tokensPerSecond: number;
@@ -113,6 +123,29 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
   const cancelActiveRequest = (): void => {
     activeRequestControllerRef.current?.abort();
+  };
+
+  const resetFreshSessionState = (): void => {
+    cancelActiveRequest();
+    setPendingApproval((current) => {
+      current?.resolve(false);
+      return null;
+    });
+    setIsSending(false);
+    setConversation(null);
+    setError(null);
+    setLastStats(null);
+    setMetrics(getInitialMetrics());
+    setStreamingContent('');
+    setStreamingThinking('');
+    setThinkingDuration(null);
+    setToolEvents([]);
+    setMessageThinking({});
+    setRenderedContent({});
+    streamingBufferRef.current = '';
+    thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
+    responseTimingRef.current = { startMs: 0, firstTokenMs: null };
+    sessionStatsRef.current = { outputTokens: 0, generationMs: 0 };
   };
   const [status, setStatus] = useState<string>('Loading session...');
   const [isSending, setIsSending] = useState(false);
@@ -321,17 +354,12 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     sessionId: string,
     requestedModel?: string
   ): void => {
+    resetFreshSessionState();
     setStatus('Loading session...');
     setSession(null);
     setConversation(null);
+    setActiveModel('');
     setActiveModelInfo(null);
-    setMetrics({
-      inputTokens: 0,
-      outputTokens: 0,
-      cachedTokens: 0,
-      cost: 0,
-      lastInputTokens: 0,
-    });
     const modelForSession = requestedModel ?? props.requestedModel;
     void props.chatSessionService
       .startSession(
@@ -484,6 +512,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     }
 
     if (name === 'new-session') {
+      resetFreshSessionState();
       const newId = `session-${Date.now()}`;
       const nextRequestedModel = activeModel || props.requestedModel;
       nextSessionRequestedModelRef.current = nextRequestedModel;
@@ -492,6 +521,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     }
 
     if (name === 'clear') {
+      resetFreshSessionState();
       void props.chatSessionService
         .clearSession(currentSessionId)
         .then((fresh) => {
