@@ -1,4 +1,5 @@
 import { ProviderId, type ProviderClient } from '@core/ports/chat-model';
+import { AlibabaProvider } from '@providers/alibaba/alibaba-provider';
 import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
 import { OpenAiProvider } from '@providers/openai/openai-provider';
 import { OllamaProvider } from '@providers/ollama/ollama-provider';
@@ -29,7 +30,10 @@ export class ProviderRegistry {
           this.config.ollama.apiKey
         );
       case ProviderId.LmStudio:
-        return new LmStudioProvider(this.config.lmstudio.baseUrl);
+        return new LmStudioProvider(
+          this.config.lmstudio.baseUrl,
+          this.config.lmstudio.apiKey
+        );
       case ProviderId.OpenRouter: {
         const { apiKey } = this.config.openrouter;
         if (!apiKey) {
@@ -38,6 +42,15 @@ export class ProviderRegistry {
           );
         }
         return new OpenRouterProvider(apiKey, this.config.openrouter.baseUrl);
+      }
+      case ProviderId.Alibaba: {
+        const { apiKey } = this.config.alibaba;
+        if (!apiKey) {
+          throw new Error(
+            'ALIBABA_API_KEY is required when using the Alibaba provider.'
+          );
+        }
+        return new AlibabaProvider(apiKey, this.config.alibaba.baseUrl);
       }
       default:
         return assertUnreachable(providerId);

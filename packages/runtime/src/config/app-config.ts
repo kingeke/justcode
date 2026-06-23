@@ -18,8 +18,13 @@ export interface AppConfig {
   };
   lmstudio: {
     baseUrl: string;
+    apiKey?: string | undefined;
   };
   openrouter: {
+    apiKey: string | undefined;
+    baseUrl: string;
+  };
+  alibaba: {
     apiKey: string | undefined;
     baseUrl: string;
   };
@@ -37,7 +42,9 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         ? ProviderId.Openai
         : env.OPENROUTER_API_KEY
           ? ProviderId.OpenRouter
-          : ProviderId.Ollama),
+          : env.ALIBABA_API_KEY
+            ? ProviderId.Alibaba
+            : ProviderId.Ollama),
     configDirectory,
     sessionsDirectory:
       env.JUSTCODE_SESSIONS_DIR ?? join(configDirectory, 'sessions'),
@@ -52,10 +59,17 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     lmstudio: {
       baseUrl: env.LMSTUDIO_BASE_URL ?? 'http://127.0.0.1:1234/v1',
+      apiKey: env.LMSTUDIO_API_KEY,
     },
     openrouter: {
       apiKey: env.OPENROUTER_API_KEY,
       baseUrl: env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1',
+    },
+    alibaba: {
+      apiKey: env.ALIBABA_API_KEY,
+      baseUrl:
+        env.ALIBABA_BASE_URL ??
+        'https://dashscope.aliyuncs.com/compatible-mode/v1',
     },
   };
 }

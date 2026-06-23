@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 
-import { PROVIDERS, ProviderId, type ModelInfo } from '@core/ports/chat-model';
+import { ProviderId, type ModelInfo } from '@core/ports/chat-model';
+import { PROVIDER_BY_ID } from '@core/ports/provider-catalog';
 import { fuzzyFilter } from './fuzzy-filter.js';
 
 const VISIBLE_ROWS = 18;
@@ -56,7 +57,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
       fuzzyFilter(
         props.models,
         query,
-        (m) => `${PROVIDERS[m.providerId]?.name ?? ''} ${m.id} ${m.displayName}`
+        (m) => `${PROVIDER_BY_ID[m.providerId]?.name ?? ''} ${m.id} ${m.displayName}`
       ),
     [props.models, query]
   );
@@ -71,7 +72,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
       result.push({
         model,
         isFirstInGroup,
-        groupName: PROVIDERS[model.providerId]?.name ?? model.providerId,
+        groupName: PROVIDER_BY_ID[model.providerId]?.name ?? model.providerId,
       });
     }
 
@@ -225,7 +226,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
                     {sortState.mode === 'provider' ? null : (
                       <Text dimColor>
                         {' '}
-                        · {PROVIDERS[entry.model.providerId]?.name ?? entry.model.providerId}
+                        · {PROVIDER_BY_ID[entry.model.providerId]?.name ?? entry.model.providerId}
                       </Text>
                     )}
                     {isCurrent ? <Text dimColor> ✓</Text> : null}
@@ -254,6 +255,7 @@ function compareModels(a: ModelInfo, b: ModelInfo, sortState: SortState): number
     const providerOrder = [
       ProviderId.OpenRouter,
       ProviderId.Openai,
+      ProviderId.Alibaba,
       ProviderId.Ollama,
       ProviderId.LmStudio,
     ];

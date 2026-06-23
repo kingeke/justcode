@@ -6,19 +6,14 @@ export enum ProviderId {
   Ollama = 'ollama',
   LmStudio = 'lmstudio',
   OpenRouter = 'openrouter',
+  Alibaba = 'alibaba',
 }
 
-export interface ProviderInfo {
-  id: ProviderId;
-  name: string;
-}
-
-export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
-  [ProviderId.Openai]: { id: ProviderId.Openai, name: 'OpenAI' },
-  [ProviderId.Ollama]: { id: ProviderId.Ollama, name: 'Ollama' },
-  [ProviderId.LmStudio]: { id: ProviderId.LmStudio, name: 'LM Studio' },
-  [ProviderId.OpenRouter]: { id: ProviderId.OpenRouter, name: 'OpenRouter' },
-};
+export type {
+  ProviderConnectionInfo,
+  ProviderCredentialRequirement,
+  ProviderInfo,
+} from './provider-catalog.js';
 
 export interface ModelPricing {
   inputPerToken: number;

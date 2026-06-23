@@ -24,6 +24,16 @@ describe('loadAppConfig', () => {
     expect(config.defaultProvider).toBe('lmstudio');
     expect(config.lmstudio.baseUrl).toBe('http://127.0.0.1:1234/v1');
   });
+
+  it('defaults to Alibaba when its API key is present', () => {
+    const config = loadAppConfig({ ALIBABA_API_KEY: 'test-key' });
+
+    expect(config.defaultProvider).toBe('alibaba');
+    expect(config.alibaba.apiKey).toBe('test-key');
+    expect(config.alibaba.baseUrl).toBe(
+      'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    );
+  });
 });
 
 describe('parseProviderId', () => {

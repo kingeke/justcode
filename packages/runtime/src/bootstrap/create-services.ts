@@ -3,6 +3,8 @@ import { ChatSessionService } from '@core/application/chat-session-service';
 import { ListModelsService } from '@core/application/list-models-service';
 import { ToolRegistry } from '@core/application/tool-registry';
 import { ProviderId, type ProviderClient } from '@core/ports/chat-model';
+import { PROVIDER_BY_ID } from '@core/ports/provider-catalog';
+import { AlibabaProvider } from '@providers/alibaba/alibaba-provider';
 import { WriteFileTool } from '@runtime/tools/write-file-tool';
 import {
   ReadFileTool,
@@ -17,6 +19,48 @@ import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
 import { OpenAiProvider } from '@providers/openai/openai-provider';
 import { OpenRouterProvider } from '@providers/openrouter/openrouter-provider';
 import type { AppConfig } from '@runtime/config/app-config';
+
+interface ProviderSpec {
+  id: ProviderId;
+  getApiKey: (config: AppConfig) => string | undefined;
+  create: (config: AppConfig) => ProviderClient;
+}
+
+const PROVIDER_SPECS: ProviderSpec[] = [
+  {
+    id: ProviderId.Ollama,
+    getApiKey: (config) => config.ollama.apiKey,
+    create: (config) => new OllamaProvider(config.ollama.baseUrl, config.ollama.apiKey),
+  },
+  {
+    id: ProviderId.LmStudio,
+    getApiKey: (config) => config.lmstudio.apiKey,
+    create: (config) =>
+      new LmStudioProvider(config.lmstudio.baseUrl, config.lmstudio.apiKey),
+  },
+  {
+    id: ProviderId.Openai,
+    getApiKey: (config) => config.openai.apiKey,
+    create: (config) =>
+      new OpenAiProvider(
+        config.openai.apiKey!,
+        config.openai.baseUrl,
+        config.openai.defaultModel
+      ),
+  },
+  {
+    id: ProviderId.OpenRouter,
+    getApiKey: (config) => config.openrouter.apiKey,
+    create: (config) =>
+      new OpenRouterProvider(config.openrouter.apiKey!, config.openrouter.baseUrl),
+  },
+  {
+    id: ProviderId.Alibaba,
+    getApiKey: (config) => config.alibaba.apiKey,
+    create: (config) =>
+      new AlibabaProvider(config.alibaba.apiKey!, config.alibaba.baseUrl),
+  },
+];
 
 export interface RuntimeServices {
   providerId: ProviderId;
@@ -75,29 +119,14 @@ export function createRuntimeServices(
 }
 
 function createAllProviders(config: AppConfig): ProviderClient[] {
-  const providers: ProviderClient[] = [
-    new OllamaProvider(config.ollama.baseUrl, config.ollama.apiKey),
-    new LmStudioProvider(config.lmstudio.baseUrl),
-  ];
+  return PROVIDER_SPECS.flatMap((spec) => {
+    const providerCatalog = PROVIDER_BY_ID[spec.id];
+    const apiKey = spec.getApiKey(config);
 
-  if (config.openai.apiKey) {
-    providers.push(
-      new OpenAiProvider(
-        config.openai.apiKey,
-        config.openai.baseUrl,
-        config.openai.defaultModel
-      )
-    );
-  }
+    if (providerCatalog.apiKeyRequired && !apiKey) {
+      return [];
+    }
 
-  if (config.openrouter.apiKey) {
-    providers.push(
-      new OpenRouterProvider(
-        config.openrouter.apiKey,
-        config.openrouter.baseUrl
-      )
-    );
-  }
-
-  return providers;
+    return [spec.create(config)];
+  });
 }

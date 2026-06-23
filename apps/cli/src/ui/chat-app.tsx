@@ -29,8 +29,10 @@ import type {
   ProviderId,
   ProviderClient,
 } from '@core/ports/chat-model';
+import type { ProviderConnectionInfo } from '@core/ports/provider-catalog';
 import { renderMarkdown, renderMarkdownAsync } from './render-markdown.js';
 import { COMMANDS, filterCommands, parseCommandInput } from './commands.js';
+import { ConnectPicker } from './connect-picker.js';
 import { ModelPicker } from './model-picker.js';
 
 const MAX_COMMAND_ITEMS = 8;
@@ -85,6 +87,7 @@ function getInitialMetrics(): {
 
 export function ChatApp(props: ChatAppProps): React.ReactElement {
   const { exit } = useApp();
+  const [showConnectPicker, setShowConnectPicker] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [allModels, setAllModels] = useState<ModelInfo[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState(props.sessionId);
@@ -93,6 +96,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   const [activeModelInfo, setActiveModelInfo] = useState<ModelInfo | null>(
     null
   );
+  const [activeProviderId, setActiveProviderId] = useState(props.providerId);
   const [metrics, setMetrics] = useState(getInitialMetrics);
   const [lastStats, setLastStats] = useState<{
     ttftMs: number;
@@ -234,7 +238,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     mentionSuggestions[selectedSuggestionIndex] ?? mentionSuggestions[0];
 
   useInput((value, key) => {
-    if (showModelPicker) return;
+    if (showModelPicker || showConnectPicker) return;
 
     if (pendingApproval) {
       const choice = value.toLowerCase();
@@ -434,10 +438,11 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
   const handleModelSelect = (model: ModelInfo): void => {
     setShowModelPicker(false);
-    if (model.providerId !== props.chatSessionService['provider']?.providerId) {
+    if (model.providerId !== activeProviderId) {
       try {
         const newProvider = props.createProvider(model.providerId);
         props.chatSessionService.switchProvider(newProvider);
+        setActiveProviderId(model.providerId);
       } catch (e) {
         setError(getErrorMessage(e));
         return;
@@ -447,6 +452,51 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     setActiveModelInfo(model);
     setStatus(`Switched to ${model.displayName}`);
     props.onModelChange?.(model.id, model.providerId);
+  };
+
+  const handleConnectSelect = async (
+    providerInfo: ProviderConnectionInfo
+  ): Promise<void> => {
+    let provider: ProviderClient;
+
+    try {
+      provider = props.createProvider(providerInfo.id);
+    } catch (e) {
+      setError(getErrorMessage(e));
+      setStatus('Connect failed');
+      return;
+    }
+
+    try {
+      const models = await provider.listModels();
+      if (models.length === 0) {
+        setError(`No models are available for provider '${providerInfo.name}'.`);
+        setStatus('Connect failed');
+        return;
+      }
+
+      const selectedModel =
+        models.find((model) => model.id === provider.getDefaultModel()) ??
+        models[0];
+      if (!selectedModel) {
+        setError(`No models are available for provider '${providerInfo.name}'.`);
+        setStatus('Connect failed');
+        return;
+      }
+
+      props.chatSessionService.switchProvider(provider);
+      startTransition(() => {
+        setActiveProviderId(providerInfo.id);
+        setActiveModel(selectedModel.id);
+        setActiveModelInfo(selectedModel);
+        setStatus(`Connected to ${providerInfo.name}`);
+      });
+      props.onModelChange?.(selectedModel.id, providerInfo.id);
+      setShowConnectPicker(false);
+    } catch (e) {
+      setError(getErrorMessage(e));
+      setStatus('Connect failed');
+    }
   };
 
   const resolveApproval = (approved: boolean, always: boolean): void => {
@@ -467,6 +517,12 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
     if (name === 'models') {
       setShowModelPicker(true);
+      return;
+    }
+
+    if (name === 'connect') {
+      setStatus('Select a provider to connect');
+      setShowConnectPicker(true);
       return;
     }
 
@@ -836,11 +892,21 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     );
   }
 
+  if (showConnectPicker) {
+    return (
+      <ConnectPicker
+        activeProviderId={activeProviderId}
+        onSelect={(providerInfo) => void handleConnectSelect(providerInfo)}
+        onCancel={() => setShowConnectPicker(false)}
+      />
+    );
+  }
+
   return (
     <Box flexDirection="column" padding={1}>
       <Text color="cyan">justcode</Text>
       <Text dimColor>
-        provider: {props.providerId} | session: {currentSessionId}
+        provider: {activeProviderId} | session: {currentSessionId}
       </Text>
       <Text dimColor>
         Enter to send · Tab to complete @file or /command · Esc to cancel or

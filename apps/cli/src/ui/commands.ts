@@ -9,6 +9,10 @@ export const COMMANDS: Command[] = [
     description: 'Browse and switch the active model',
   },
   {
+    name: 'connect',
+    description: 'Search providers and connect to one',
+  },
+  {
     name: 'new-session',
     description: 'Start a fresh conversation in a new session',
   },

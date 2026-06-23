@@ -26,7 +26,7 @@ export function createCli(): Command {
     .description('Just Code CLI')
     .option(
       '-p, --provider <provider>',
-      'Provider to use: openai, ollama, lmstudio'
+      'Provider to use: openai, openrouter, alibaba, ollama, lmstudio'
     )
     .option('-m, --model <model>', 'Model to use')
     .option('-s, --session <session>', 'Session identifier')
@@ -40,7 +40,7 @@ export function createCli(): Command {
     .description('Launch the interactive chat UI')
     .option(
       '-p, --provider <provider>',
-      'Provider to use: openai, ollama, lmstudio'
+      'Provider to use: openai, openrouter, alibaba, ollama, lmstudio'
     )
     .option('-m, --model <model>', 'Model to use')
     .option('-s, --session <session>', 'Session identifier')
@@ -54,7 +54,7 @@ export function createCli(): Command {
     .description('List available models for a provider')
     .option(
       '-p, --provider <provider>',
-      'Provider to use: openai, ollama, lmstudio'
+      'Provider to use: openai, openrouter, alibaba, ollama, lmstudio'
     )
     .action(async (...args: unknown[]) => {
       const options = getActionOptions<Pick<SharedOptions, 'provider'>>(args);
