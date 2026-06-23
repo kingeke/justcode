@@ -20,6 +20,7 @@ export interface ToolResult {
 
 export interface ToolExecutionContext {
   workspaceRoot: string;
+  signal?: AbortSignal;
 }
 
 /**

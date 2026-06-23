@@ -48,6 +48,7 @@ export interface SubmitMessageInput {
   model: string;
   content: string;
   attachments?: MessageAttachment[];
+  signal?: AbortSignal;
   onToken?: (token: string) => void;
   onThinkingToken?: (token: string) => void;
   /** Asked before a tool that `requiresApproval` runs. Absent → auto-approved. */
@@ -138,6 +139,7 @@ export class ChatSessionService {
     let reply = '';
 
     for (let step = 0; step < MAX_TOOL_STEPS; step += 1) {
+      throwIfAborted(input.signal);
       const response = await this.provider.sendChat({
         model: input.model,
         messages: [systemMessage, ...working],
@@ -146,7 +148,10 @@ export class ChatSessionService {
         ...(input.onThinkingToken
           ? { onThinkingToken: input.onThinkingToken }
           : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
       });
+
+      throwIfAborted(input.signal);
 
       if (response.usage) {
         usage = usage ? sumUsage(usage, response.usage) : response.usage;
@@ -198,6 +203,7 @@ export class ChatSessionService {
     call: ToolCall,
     input: SubmitMessageInput
   ): Promise<ToolResult> {
+    throwIfAborted(input.signal);
     const tool = this.toolRegistry?.get(call.name);
     if (!tool) {
       return { content: `Unknown tool: ${call.name}`, isError: true };
@@ -211,11 +217,17 @@ export class ChatSessionService {
     if (!approved) {
       result = { content: 'The user rejected this tool call.', isError: true };
     } else {
+      throwIfAborted(input.signal);
       try {
         result = await tool.execute(call.arguments, {
           workspaceRoot: this.workspaceRoot,
+          ...(input.signal ? { signal: input.signal } : {}),
         });
+        throwIfAborted(input.signal);
       } catch (error: unknown) {
+        if (isAbortError(error)) {
+          throw error;
+        }
         result = {
           content: `Tool failed: ${errorMessage(error)}`,
           isError: true,
@@ -237,7 +249,10 @@ export class ChatSessionService {
       return true;
     }
 
-    return input.requestApproval({ toolName: call.name, ...view });
+    return awaitWithAbort(
+      input.requestApproval({ toolName: call.name, ...view }),
+      input.signal
+    );
   }
 
   private resolveModel(
@@ -282,6 +297,51 @@ function sumUsage(left: TokenUsage, right: TokenUsage): TokenUsage {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw createAbortError();
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+function awaitWithAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined
+): Promise<T> {
+  if (!signal) {
+    return promise;
+  }
+
+  if (signal.aborted) {
+    return Promise.reject(createAbortError());
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(createAbortError());
+    };
+
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      }
+    );
+  });
+}
+
+function createAbortError(): Error {
+  return new DOMException('The operation was aborted.', 'AbortError');
 }
 
 export function createEmptyConversation(sessionId: string): Conversation {

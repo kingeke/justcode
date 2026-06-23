@@ -103,6 +103,11 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     setInput(next);
     setInputKey((key) => key + 1);
   };
+  const activeRequestControllerRef = useRef<AbortController | null>(null);
+
+  const cancelActiveRequest = (): void => {
+    activeRequestControllerRef.current?.abort();
+  };
   const [status, setStatus] = useState<string>('Loading session...');
   const [isSending, setIsSending] = useState(false);
   const [streamingContent, setStreamingContent] = useState<string>('');
@@ -182,8 +187,10 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         resolveApproval(true, false);
       } else if (choice === 'a') {
         resolveApproval(true, true);
-      } else if (choice === 'n' || key.escape) {
+      } else if (choice === 'n') {
         resolveApproval(false, false);
+      } else if (key.escape) {
+        cancelActiveRequest();
       }
       return;
     }
@@ -207,6 +214,18 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     }
 
     if (key.escape) {
+      if (isSending) {
+        cancelActiveRequest();
+        return;
+      }
+
+      if (input) {
+        setInputWithCursorAtEnd('');
+        exitArmedRef.current = false;
+        setStatus('Ready');
+        return;
+      }
+
       exit();
       return;
     }
@@ -257,6 +276,12 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   useEffect(() => {
     setSelectedSuggestionIndex(0);
   }, [activeMentionQuery]);
+
+  useEffect(() => {
+    return () => {
+      activeRequestControllerRef.current?.abort();
+    };
+  }, []);
 
   // Typing cancels a pending "Ctrl+C again to exit".
   useEffect(() => {
@@ -481,6 +506,9 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
     if (!conversation || !session) return;
 
+    const requestController = new AbortController();
+    activeRequestControllerRef.current = requestController;
+
     const baseConversation = conversation;
 
     setError(null);
@@ -556,12 +584,16 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
     try {
       const attachments =
-        await props.promptAttachmentService.resolveAttachments(value);
+        await props.promptAttachmentService.resolveAttachments(
+          value,
+          requestController.signal
+        );
       const result = await props.chatSessionService.submitMessage({
         conversation: baseConversation,
         model: activeModel || session.activeModel,
         content: value,
         attachments,
+        signal: requestController.signal,
         requestApproval,
         onToolActivity,
         onToken: (token) => {
@@ -653,10 +685,18 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       setStreamingContent('');
       setStreamingThinking('');
       setThinkingDuration(null);
-      setError(getErrorMessage(caughtError));
-      setStatus('Request failed');
+      setPendingApproval(null);
+
+      if (isAbortError(caughtError)) {
+        setError(null);
+        setStatus('Interrupted');
+      } else {
+        setError(getErrorMessage(caughtError));
+        setStatus('Request failed');
+      }
     } finally {
       setIsSending(false);
+      activeRequestControllerRef.current = null;
     }
   };
 
@@ -678,7 +718,8 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         provider: {props.providerId} | session: {currentSessionId}
       </Text>
       <Text dimColor>
-        Enter to send · Tab to complete @file or /command · Esc/Ctrl+C to exit
+        Enter to send · Tab to complete @file or /command · Esc to cancel or
+        interrupt · Ctrl+C to exit
       </Text>
 
       <Box marginTop={1} flexDirection="column">
@@ -991,6 +1032,10 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return 'Unknown error';
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }
 
 function summarizeToolArgs(rawArguments: string): string {

@@ -47,6 +47,7 @@ export interface ChatRequest {
   tools?: ToolDefinition[];
   onToken?: (token: string) => void;
   onThinkingToken?: (token: string) => void;
+  signal?: AbortSignal;
 }
 
 export interface ChatResult {

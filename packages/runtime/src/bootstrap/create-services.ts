@@ -62,7 +62,10 @@ export function createRuntimeServices(
       workspaceRoot,
     }),
     listModelsService: new ListModelsService(provider),
-    promptAttachmentService: new PromptAttachmentService(workspaceFiles),
+    promptAttachmentService: new PromptAttachmentService(
+      workspaceFiles,
+      () => readSettings.maxReadBytes
+    ),
     allProviders,
     createProvider: (id: ProviderId) => registry.create(id),
     setMaxReadBytes: (bytes: number) => {

@@ -4,33 +4,46 @@ import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 const ACTIVE_MENTION_PATTERN = /(?:^|\s)@([^\s@]*)$/;
 const MENTION_PATTERN = /(?:^|\s)@([^\s@]+)/g;
 const TRAILING_PUNCTUATION_PATTERN = /[),.:;!?\]]+$/;
+const DEFAULT_MAX_ATTACHMENT_BYTES = 50 * 1024;
 
 export class PromptAttachmentService {
-  public constructor(private readonly workspaceFiles: WorkspaceFilePort) {}
+  public constructor(
+    private readonly workspaceFiles: WorkspaceFilePort,
+    private readonly getMaxAttachmentBytes: () => number = () =>
+      DEFAULT_MAX_ATTACHMENT_BYTES
+  ) {}
 
   public async listFiles(): Promise<string[]> {
     return this.workspaceFiles.listFiles();
   }
 
   public async resolveAttachments(
-    content: string
+    content: string,
+    signal?: AbortSignal
   ): Promise<MessageAttachment[]> {
     const mentions = extractFileMentions(content);
 
-    const resolved = await Promise.all(
-      mentions.map(async (relativePath) => {
-        try {
-          return {
-            path: relativePath,
-            content: await this.workspaceFiles.readFile(relativePath),
-          };
-        } catch {
-          // Skip mentions that don't resolve to a readable file (e.g. a typo or
-          // an @mention the user never Tab-completed) so the message still sends.
-          return undefined;
-        }
-      })
-    );
+    const resolved: Array<MessageAttachment | undefined> = [];
+    for (const relativePath of mentions) {
+      if (signal?.aborted) {
+        throw createAbortError();
+      }
+
+      try {
+        const bytes = await this.workspaceFiles.readFileBytes(relativePath);
+        resolved.push({
+          path: relativePath,
+          content: formatAttachmentContent(
+            bytes,
+            this.getMaxAttachmentBytes()
+          ),
+        });
+      } catch {
+        // Skip mentions that don't resolve to a readable file (e.g. a typo or
+        // an @mention the user never Tab-completed) so the message still sends.
+        resolved.push(undefined);
+      }
+    }
 
     return resolved.filter(
       (attachment): attachment is MessageAttachment => attachment !== undefined
@@ -154,4 +167,38 @@ function normalizeMentionPath(path: string | undefined): string | undefined {
   }
 
   return trimmedPath;
+}
+
+function createAbortError(): Error {
+  return new DOMException('The operation was aborted.', 'AbortError');
+}
+
+function formatAttachmentContent(
+  bytes: Uint8Array,
+  maxBytes: number
+): string {
+  if (bytes.length === 0) {
+    return '';
+  }
+
+  const byteLimit = Math.max(1, Math.floor(maxBytes));
+  const end = Math.min(byteLimit, bytes.length);
+  const text = Buffer.from(bytes.subarray(0, end)).toString('utf8');
+  const body = numberLines(text.replaceAll('\r\n', '\n'));
+
+  if (end >= bytes.length) {
+    return body;
+  }
+
+  return (
+    body +
+    `\n\n(Output capped at ${byteLimit} bytes. Showing bytes 0-${end} of ${bytes.length}. Use read_file for more.)`
+  );
+}
+
+function numberLines(text: string): string {
+  return text
+    .split('\n')
+    .map((line, index) => `${index + 1}\t${line}`)
+    .join('\n');
 }

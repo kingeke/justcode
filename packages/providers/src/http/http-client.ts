@@ -15,6 +15,7 @@ export interface JsonRequestOptions {
   method?: 'GET' | 'POST';
   headers?: Record<string, string>;
   body?: unknown;
+  signal?: AbortSignal;
 }
 
 export async function requestJson<T>(
@@ -27,7 +28,9 @@ export async function requestJson<T>(
       'content-type': 'application/json',
       ...options.headers,
     },
-    signal: AbortSignal.timeout(30_000),
+    signal: options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(30_000)])
+      : AbortSignal.timeout(30_000),
   };
 
   if (options.body !== undefined) {
@@ -121,7 +124,9 @@ export async function requestSseStream(
       accept: 'text/event-stream',
       ...options.headers,
     },
-    signal: AbortSignal.timeout(120_000),
+    signal: options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(120_000)])
+      : AbortSignal.timeout(120_000),
   };
 
   if (options.body !== undefined) {
@@ -222,7 +227,9 @@ export async function requestNdjsonStream(
       'content-type': 'application/json',
       ...options.headers,
     },
-    signal: AbortSignal.timeout(120_000),
+    signal: options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(120_000)])
+      : AbortSignal.timeout(120_000),
   };
 
   if (options.body !== undefined) {

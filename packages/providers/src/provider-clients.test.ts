@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
 import { OllamaProvider } from '@providers/ollama/ollama-provider';
 import { OpenRouterProvider } from '@providers/openrouter/openrouter-provider';
+import { ProviderId } from '@core/ports/chat-model';
 
 function createJsonResponse(payload: unknown): Response {
   return new Response(JSON.stringify(payload), {
@@ -59,8 +60,16 @@ describe('provider clients', () => {
     ).listModels();
 
     expect(models).toEqual([
-      { id: 'mistral-small', displayName: 'mistral-small' },
-      { id: 'qwen2.5-coder-7b', displayName: 'qwen2.5-coder-7b' },
+      {
+        id: 'mistral-small',
+        displayName: 'mistral-small',
+        providerId: ProviderId.LmStudio,
+      },
+      {
+        id: 'qwen2.5-coder-7b',
+        displayName: 'qwen2.5-coder-7b',
+        providerId: ProviderId.LmStudio,
+      },
     ]);
   });
 
@@ -90,12 +99,14 @@ describe('provider clients', () => {
       {
         id: 'anthropic/claude-3-haiku',
         displayName: 'Claude 3 Haiku',
-        contextLength: 200000,
+        contextWindow: 200000,
+        providerId: ProviderId.OpenRouter,
       },
       {
         id: 'mistralai/mistral-7b-instruct',
         displayName: 'Mistral 7B Instruct',
-        contextLength: 32768,
+        contextWindow: 32768,
+        providerId: ProviderId.OpenRouter,
       },
     ]);
   });

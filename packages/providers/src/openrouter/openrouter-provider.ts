@@ -73,6 +73,7 @@ export class OpenRouterProvider implements ProviderClient {
         {
           method: 'POST',
           headers,
+          ...(request.signal ? { signal: request.signal } : {}),
           body: {
             model: request.model,
             messages,
@@ -104,6 +105,7 @@ export class OpenRouterProvider implements ProviderClient {
       {
         method: 'POST',
         headers,
+        ...(request.signal ? { signal: request.signal } : {}),
         body: {
           model: request.model,
           messages,

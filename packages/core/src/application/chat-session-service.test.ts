@@ -4,6 +4,7 @@ import { ToolRegistry } from '@core/application/tool-registry';
 import { createConversation } from '@core/domain/conversation';
 import {
   ProviderId,
+  type ChatRequest,
   type ChatResult,
   type ProviderClient,
 } from '@core/ports/chat-model';
@@ -101,6 +102,38 @@ function createToolCallingProvider(): ProviderClient {
   };
 }
 
+function createAbortableProvider(): ProviderClient {
+  return {
+    providerId: ProviderId.Ollama,
+    async sendChat({ signal }: ChatRequest): Promise<ChatResult> {
+      return await new Promise<ChatResult>((_resolve, reject) => {
+        const abort = (): void => {
+          reject(new DOMException('The operation was aborted.', 'AbortError'));
+        };
+
+        if (signal?.aborted) {
+          abort();
+          return;
+        }
+
+        signal?.addEventListener('abort', abort, { once: true });
+      });
+    },
+    async listModels() {
+      return [
+        {
+          id: 'llama3.1',
+          displayName: 'llama3.1',
+          providerId: ProviderId.Ollama,
+        },
+      ];
+    },
+    getDefaultModel() {
+      return undefined;
+    },
+  };
+}
+
 describe('ChatSessionService', () => {
   it('loads available models and picks the first model when none is requested', async () => {
     const service = new ChatSessionService(
@@ -112,7 +145,11 @@ describe('ChatSessionService', () => {
 
     expect(session.activeModel).toBe('llama3.1');
     expect(session.availableModels).toEqual([
-      { id: 'llama3.1', displayName: 'llama3.1' },
+      {
+        id: 'llama3.1',
+        displayName: 'llama3.1',
+        providerId: ProviderId.Ollama,
+      },
     ]);
   });
 
@@ -153,6 +190,28 @@ describe('ChatSessionService', () => {
     expect(result.conversation.messages[0]?.attachments).toEqual([
       { path: 'src/app.ts', content: 'console.log("hello")' },
     ]);
+  });
+
+  it('aborts an in-flight request when the signal is cancelled', async () => {
+    const repository = new InMemoryConversationRepository();
+    const service = new ChatSessionService(repository, createAbortableProvider());
+    const controller = new AbortController();
+
+    const startedSession = await service.startSession({
+      sessionId: 'session-1',
+    });
+
+    const submitPromise = service.submitMessage({
+      conversation: startedSession.conversation,
+      model: startedSession.activeModel,
+      content: 'Hello',
+      signal: controller.signal,
+    });
+
+    controller.abort();
+
+    await expect(submitPromise).rejects.toMatchObject({ name: 'AbortError' });
+    expect(repository.conversation.messages).toHaveLength(0);
   });
 
   it('executes a requested tool and feeds the result back to the model', async () => {
