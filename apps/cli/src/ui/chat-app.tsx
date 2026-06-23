@@ -64,6 +64,7 @@ interface ToolEvent {
 }
 
 const MAX_PREVIEW_LINES = 16;
+const EXIT_HINT = 'Press Ctrl+C again to exit';
 
 export function ChatApp(props: ChatAppProps): React.ReactElement {
   const { exit } = useApp();
@@ -144,6 +145,9 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     useState<PendingApproval | null>(null);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const toolEventKeyRef = useRef(0);
+  // Armed by a Ctrl+C that didn't exit (it cleared text or hit an empty input);
+  // the next Ctrl+C exits. Disarmed as soon as the user types again.
+  const exitArmedRef = useRef(false);
 
   const isCommandMode = input.startsWith('/') && !input.includes(' ');
   const commandQuery = isCommandMode ? (parseCommandInput(input) ?? '') : '';
@@ -184,7 +188,25 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       return;
     }
 
-    if (key.escape || (key.ctrl && value.toLowerCase() === 'c')) {
+    if (key.ctrl && value.toLowerCase() === 'c') {
+      // Clear any typed text first; otherwise arm exit and confirm on the next
+      // Ctrl+C.
+      if (input) {
+        setInputWithCursorAtEnd('');
+        exitArmedRef.current = true;
+        setStatus(EXIT_HINT);
+        return;
+      }
+      if (exitArmedRef.current) {
+        exit();
+        return;
+      }
+      exitArmedRef.current = true;
+      setStatus(EXIT_HINT);
+      return;
+    }
+
+    if (key.escape) {
       exit();
       return;
     }
@@ -235,6 +257,14 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   useEffect(() => {
     setSelectedSuggestionIndex(0);
   }, [activeMentionQuery]);
+
+  // Typing cancels a pending "Ctrl+C again to exit".
+  useEffect(() => {
+    if (input && exitArmedRef.current) {
+      exitArmedRef.current = false;
+      setStatus((current) => (current === EXIT_HINT ? 'Ready' : current));
+    }
+  }, [input]);
 
   const loadSession = (sessionId: string): void => {
     setStatus('Loading session...');

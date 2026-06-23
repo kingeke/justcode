@@ -112,6 +112,7 @@ export class OpenAiCompatibleProvider implements ProviderClient {
 
     if (request.onToken) {
       let accumulated = '';
+      let reasoning = '';
       const { usage: streamUsage, toolCalls } = await requestSseStream(
         joinUrl(this.options.baseUrl, '/chat/completions'),
         {
@@ -129,17 +130,24 @@ export class OpenAiCompatibleProvider implements ProviderClient {
           accumulated += token;
           request.onToken!(token);
         },
-        request.onThinkingToken
+        (token) => {
+          reasoning += token;
+          request.onThinkingToken?.(token);
+        }
       );
 
-      if (!accumulated.trim() && toolCalls.length === 0) {
+      // Reasoning models (e.g. gpt-oss) sometimes emit their whole turn on the
+      // reasoning channel and finish with empty content. Treat the reasoning as
+      // the answer rather than failing the turn.
+      const content = accumulated.trim() ? accumulated : reasoning;
+      if (!content.trim() && toolCalls.length === 0) {
         throw new Error(
           `Provider '${this.providerId}' returned an empty response.`
         );
       }
 
       return {
-        content: accumulated,
+        content,
         ...(streamUsage.inputTokens > 0 ? { usage: streamUsage } : {}),
         ...(toolCalls.length ? { toolCalls } : {}),
       };
