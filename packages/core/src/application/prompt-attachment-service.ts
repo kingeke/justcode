@@ -74,6 +74,10 @@ export function getActiveMentionQuery(content: string): string | undefined {
   return matchedQuery;
 }
 
+export function hasActiveMentionTrigger(content: string): boolean {
+  return ACTIVE_MENTION_PATTERN.test(content);
+}
+
 export function filterMentionSuggestions(
   files: readonly string[],
   query: string | undefined,

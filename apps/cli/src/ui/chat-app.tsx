@@ -13,6 +13,7 @@ import {
   applyMentionSuggestion,
   filterMentionSuggestions,
   getActiveMentionQuery,
+  hasActiveMentionTrigger,
   type PromptAttachmentService,
 } from '@core/application/prompt-attachment-service';
 import type {
@@ -86,8 +87,12 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   const [lastStats, setLastStats] = useState<{
     ttftMs: number;
     tokensPerSecond: number;
-    outputTokens: number;
+    avgTokensPerSecond: number;
   } | null>(null);
+  const sessionStatsRef = useRef({
+    outputTokens: 0,
+    generationMs: 0,
+  });
   const responseTimingRef = useRef<{
     startMs: number;
     firstTokenMs: number | null;
@@ -104,12 +109,14 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     setInputKey((key) => key + 1);
   };
   const activeRequestControllerRef = useRef<AbortController | null>(null);
+  const nextSessionRequestedModelRef = useRef<string | undefined>(undefined);
 
   const cancelActiveRequest = (): void => {
     activeRequestControllerRef.current?.abort();
   };
   const [status, setStatus] = useState<string>('Loading session...');
   const [isSending, setIsSending] = useState(false);
+  const [activityTick, setActivityTick] = useState(0);
   const [streamingContent, setStreamingContent] = useState<string>('');
   const streamingBufferRef = useRef('');
   const [streamingThinking, setStreamingThinking] = useState<string>('');
@@ -166,11 +173,30 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     () => (isCommandMode ? null : getActiveMentionQuery(input)),
     [isCommandMode, input]
   );
+  const activeMentionTrigger = useMemo(
+    () => (isCommandMode ? false : hasActiveMentionTrigger(input)),
+    [isCommandMode, input]
+  );
+  const showInterruptHint = isSending || pendingApproval !== null;
+  const displayStats = isSending
+    ? getLiveStats(
+        responseTimingRef.current,
+        streamingThinking + streamingContent,
+        activityTick,
+        sessionStatsRef.current
+      )
+    : lastStats;
   const mentionSuggestions = useMemo(
     () =>
       filterMentionSuggestions(workspaceFiles, activeMentionQuery ?? undefined),
     [activeMentionQuery, workspaceFiles]
   );
+  const showMentionSuggestions =
+    activeMentionTrigger && !isCommandMode && workspaceFiles.length > 0;
+  const noMentionMatches =
+    activeMentionTrigger &&
+    activeMentionQuery !== undefined &&
+    mentionSuggestions.length === 0;
   const selectedSuggestion =
     mentionSuggestions[selectedSuggestionIndex] ?? mentionSuggestions[0];
 
@@ -249,7 +275,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       return;
     }
 
-    if (!mentionSuggestions.length) return;
+    if (!showMentionSuggestions) return;
 
     if (key.downArrow) {
       setSelectedSuggestionIndex((i) =>
@@ -291,7 +317,10 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     }
   }, [input]);
 
-  const loadSession = (sessionId: string): void => {
+  const loadSession = (
+    sessionId: string,
+    requestedModel?: string
+  ): void => {
     setStatus('Loading session...');
     setSession(null);
     setConversation(null);
@@ -303,11 +332,10 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       cost: 0,
       lastInputTokens: 0,
     });
+    const modelForSession = requestedModel ?? props.requestedModel;
     void props.chatSessionService
       .startSession(
-        props.requestedModel
-          ? { sessionId, requestedModel: props.requestedModel }
-          : { sessionId }
+        modelForSession ? { sessionId, requestedModel: modelForSession } : { sessionId }
       )
       .then((startedSession) => {
         const modelInfo =
@@ -329,7 +357,8 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   };
 
   useEffect(() => {
-    loadSession(currentSessionId);
+    loadSession(currentSessionId, nextSessionRequestedModelRef.current);
+    nextSessionRequestedModelRef.current = undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSessionId]);
 
@@ -456,7 +485,10 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
     if (name === 'new-session') {
       const newId = `session-${Date.now()}`;
+      const nextRequestedModel = activeModel || props.requestedModel;
+      nextSessionRequestedModelRef.current = nextRequestedModel;
       setCurrentSessionId(newId);
+      return;
     }
 
     if (name === 'clear') {
@@ -531,6 +563,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     setStatus('Waiting for response...');
 
     const flushInterval = setInterval(() => {
+      setActivityTick((tick) => tick + 1);
       const t = thinkingRef.current;
       if (t.buffer) setStreamingThinking(t.buffer);
       if (t.durationMs !== null) setThinkingDuration(t.durationMs);
@@ -625,11 +658,26 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       const lastMsg =
         result.conversation.messages[result.conversation.messages.length - 1];
       const capturedThinking = thinkingRef.current.buffer;
+      const capturedContent = streamingBufferRef.current;
       const capturedDuration =
         thinkingRef.current.durationMs ??
         (thinkingRef.current.startMs
           ? Date.now() - thinkingRef.current.startMs
           : 0);
+      const capturedGenerationMs = Math.max(
+        endMs - (timing.firstTokenMs ?? endMs),
+        0
+      );
+      const sessionTotals = sessionStatsRef.current;
+      const nextOutputTokens = estimateTokenCount(
+        capturedThinking + capturedContent
+      );
+      const nextTotalOutputTokens = sessionTotals.outputTokens + nextOutputTokens;
+      const nextGenerationMs = sessionTotals.generationMs + capturedGenerationMs;
+      const nextAverageTokensPerSecond = getAverageTokensPerSecond(
+        nextTotalOutputTokens,
+        nextGenerationMs
+      );
 
       clearInterval(flushInterval);
       streamingBufferRef.current = '';
@@ -650,15 +698,18 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
             },
           }));
         }
-        if (result.usage && timing.firstTokenMs !== null) {
-          const u = result.usage;
+        if (timing.firstTokenMs !== null) {
           const ttftMs = timing.firstTokenMs - timing.startMs;
-          const genSeconds = Math.max(endMs - timing.firstTokenMs, 1) / 1000;
+          const genSeconds = Math.max(capturedGenerationMs, 1) / 1000;
           setLastStats({
             ttftMs,
-            tokensPerSecond: u.outputTokens / genSeconds,
-            outputTokens: u.outputTokens,
+            tokensPerSecond: nextOutputTokens / genSeconds,
+            avgTokensPerSecond: nextAverageTokensPerSecond,
           });
+          sessionStatsRef.current = {
+            outputTokens: nextTotalOutputTokens,
+            generationMs: nextGenerationMs,
+          };
         }
         if (result.usage) {
           const u = result.usage;
@@ -923,7 +974,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         />
       </Box>
 
-      {!isCommandMode && mentionSuggestions.length ? (
+      {!isCommandMode && showMentionSuggestions ? (
         <Box marginTop={1} flexDirection="column">
           <Text dimColor>file suggestions:</Text>
           {mentionSuggestions.map((suggestion, index) => (
@@ -934,6 +985,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
               {index === selectedSuggestionIndex ? '>' : ' '} @{suggestion}
             </Text>
           ))}
+          {noMentionMatches ? <Text dimColor>no file found</Text> : null}
         </Box>
       ) : null}
 
@@ -948,77 +1000,73 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
             {activeModelInfo?.providerId ?? props.providerId}/
             {activeModel || session?.activeModel || 'loading'}
           </Text>
+          {showInterruptHint ? (
+            <Text dimColor> · Press Esc to interrupt</Text>
+          ) : null}
         </Box>
-        <Box gap={2}>
-          {metrics.inputTokens > 0 ? (
-            <>
-              <Text dimColor>
-                in{' '}
+      </Box>
+      {metrics.inputTokens > 0 ? (
+        <Box marginTop={1}>
+          <Text dimColor>
+            in{' '}
+            <Text color="white">{metrics.inputTokens.toLocaleString()}</Text>{' '}
+            out{' '}
+            <Text color="white">{metrics.outputTokens.toLocaleString()}</Text>
+            {metrics.cachedTokens > 0 ? (
+              <>
+                {' '}
+                cached{' '}
                 <Text color="white">
-                  {metrics.inputTokens.toLocaleString()}
+                  {metrics.cachedTokens.toLocaleString()}
                 </Text>
-              </Text>
-              <Text dimColor>
-                out{' '}
-                <Text color="white">
-                  {metrics.outputTokens.toLocaleString()}
-                </Text>
-              </Text>
-              {metrics.cachedTokens > 0 ? (
-                <Text dimColor>
-                  cached{' '}
-                  <Text color="white">
-                    {metrics.cachedTokens.toLocaleString()}
-                  </Text>
-                </Text>
-              ) : null}
-              {activeModelInfo?.contextWindow ? (
-                <Text dimColor>
-                  ctx{' '}
-                  <Text
-                    color={
-                      contextPct(
-                        metrics.lastInputTokens,
-                        activeModelInfo.contextWindow
-                      ) > 80
-                        ? 'yellow'
-                        : 'white'
-                    }
-                  >
-                    {contextPct(
+              </>
+            ) : null}
+            {activeModelInfo?.contextWindow ? (
+              <>
+                {' '}
+                ctx{' '}
+                <Text
+                  color={
+                    contextPct(
                       metrics.lastInputTokens,
                       activeModelInfo.contextWindow
-                    )}
-                    %
-                  </Text>
+                    ) > 80
+                      ? 'yellow'
+                      : 'white'
+                  }
+                >
+                  {contextPct(
+                    metrics.lastInputTokens,
+                    activeModelInfo.contextWindow
+                  )}
+                  %
                 </Text>
-              ) : null}
-              {metrics.cost > 0 ? (
-                <Text dimColor>
-                  $<Text color="white">{metrics.cost.toFixed(4)}</Text>
-                </Text>
-              ) : null}
-              {lastStats ? (
-                <>
-                  <Text dimColor>
-                    ttft{' '}
-                    <Text color="white">
-                      {formatDuration(lastStats.ttftMs)}
-                    </Text>
-                  </Text>
-                  <Text dimColor>
-                    <Text color="white">
-                      {lastStats.tokensPerSecond.toFixed(1)}
-                    </Text>{' '}
-                    tok/s
-                  </Text>
-                </>
-              ) : null}
-            </>
-          ) : (
-            <Text dimColor>{status}</Text>
-          )}
+              </>
+            ) : null}
+            {metrics.cost > 0 ? (
+              <>
+                {' '}
+                $<Text color="white">{metrics.cost.toFixed(4)}</Text>
+              </>
+            ) : null}
+          </Text>
         </Box>
+      ) : null}
+      <Box marginTop={1} justifyContent="flex-end">
+        {displayStats ? (
+          <Text dimColor>
+            TTFT {formatDuration(displayStats.ttftMs)} ·{' '}
+            <Text color="white">
+              {displayStats.tokensPerSecond.toFixed(1)}
+            </Text>{' '}
+            tok/s · AVG{' '}
+            <Text color="white">
+              {displayStats.avgTokensPerSecond.toFixed(1)}
+            </Text>
+          </Text>
+        ) : (
+          <Text dimColor>{status}</Text>
+        )}
       </Box>
       {error ? (
         <Box marginTop={1}>
@@ -1036,6 +1084,57 @@ function getErrorMessage(error: unknown): string {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
+}
+
+function getLiveStats(
+  timing: { startMs: number; firstTokenMs: number | null },
+  outputText: string,
+  tick: number,
+  sessionTotals: { outputTokens: number; generationMs: number }
+): { ttftMs: number; tokensPerSecond: number; avgTokensPerSecond: number } | null {
+  if (!timing.startMs) {
+    return null;
+  }
+
+  const now = Date.now();
+  const firstTokenMs = timing.firstTokenMs ?? now;
+  const ttftMs = Math.max(firstTokenMs - timing.startMs, 0);
+  const genElapsedMs = Math.max(now - firstTokenMs, 1);
+  const estimatedTokens = estimateTokenCount(outputText);
+  const currentTokensPerSecond = estimatedTokens / (genElapsedMs / 1000);
+  const avgTokensPerSecond = getAverageTokensPerSecond(
+    sessionTotals.outputTokens + estimatedTokens,
+    sessionTotals.generationMs + genElapsedMs
+  );
+
+  // `tick` is included so the caller can force a rerender on a timer.
+  void tick;
+
+  return {
+    ttftMs,
+    tokensPerSecond: currentTokensPerSecond,
+    avgTokensPerSecond,
+  };
+}
+
+function getAverageTokensPerSecond(
+  outputTokens: number,
+  generationMs: number
+): number {
+  if (outputTokens <= 0 || generationMs <= 0) {
+    return 0;
+  }
+
+  return outputTokens / (generationMs / 1000);
+}
+
+function estimateTokenCount(text: string): number {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return 0;
+  }
+
+  return Math.max(1, Math.round(trimmed.length / 4));
 }
 
 function summarizeToolArgs(rawArguments: string): string {
