@@ -59,3 +59,15 @@ export interface ProviderClient {
   listModels(): Promise<ModelInfo[]>;
   getDefaultModel(): string | undefined;
 }
+
+/**
+ * Thrown by a provider when a request fails specifically because the target
+ * model does not support tool/function calling. The agent loop catches this and
+ * retries the model in chat-only mode (no tools).
+ */
+export class ToolsUnsupportedError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'ToolsUnsupportedError';
+  }
+}

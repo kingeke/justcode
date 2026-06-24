@@ -15,6 +15,7 @@ export interface ProviderCatalogEntry {
 export interface ProviderConfig {
   apiKey?: string;
   baseUrl?: string;
+  defaultModel?: string;
 }
 
 export const PROVIDERS = [

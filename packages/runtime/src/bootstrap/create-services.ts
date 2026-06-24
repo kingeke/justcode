@@ -11,6 +11,7 @@ import {
   DEFAULT_MAX_READ_BYTES,
 } from '@runtime/tools/read-file-tool';
 import { ProviderRegistry } from '@runtime/bootstrap/provider-registry';
+import { NullProvider } from '@runtime/bootstrap/null-provider';
 import { loadAppConfig } from '@runtime/config/app-config';
 import { FileConversationRepository } from '@runtime/persistence/file-conversation-repository';
 import { LocalWorkspaceFileService } from '@runtime/workspace/local-workspace-file-service';
@@ -67,7 +68,8 @@ const PROVIDER_SPECS: ProviderSpec[] = [
 ];
 
 export interface RuntimeServices {
-  providerId: ProviderId;
+  /** Active provider, or undefined when nothing has been connected yet. */
+  providerId: ProviderId | undefined;
   chatSessionService: ChatSessionService;
   listModelsService: ListModelsService;
   promptAttachmentService: PromptAttachmentService;
@@ -79,18 +81,22 @@ export interface RuntimeServices {
 
 export interface CreateRuntimeOptions {
   providerId?: ProviderId;
-  env?: NodeJS.ProcessEnv;
+  configDirectory?: string;
   /** Initial per-read byte cap; falls back to the default when unset. */
   maxReadBytes?: number;
 }
 
-export function createRuntimeServices(
+export async function createRuntimeServices(
   options: CreateRuntimeOptions = {}
-): RuntimeServices {
-  const config = loadAppConfig(options.env);
+): Promise<RuntimeServices> {
+  const config = await loadAppConfig(options.configDirectory);
   const providerId = options.providerId ?? config.defaultProvider;
   const registry = new ProviderRegistry(config);
-  const provider = registry.create(providerId);
+  // Without a configured provider the session is backed by a placeholder; the
+  // CLI shows the connect screen and swaps in a real provider once chosen.
+  const provider = providerId
+    ? registry.create(providerId)
+    : new NullProvider();
   const repository = new FileConversationRepository(config.sessionsDirectory);
   const workspaceRoot = process.cwd();
   const workspaceFiles = new LocalWorkspaceFileService(workspaceRoot);
@@ -124,6 +130,12 @@ export function createRuntimeServices(
 
 function createAllProviders(config: AppConfig): ProviderClient[] {
   return PROVIDER_SPECS.flatMap((spec) => {
+    // Only surface providers the user has actually connected. Nothing is
+    // available until it has been set up via the connect screen.
+    if (!config.configuredProviders.includes(spec.id)) {
+      return [];
+    }
+
     const providerCatalog = PROVIDER_BY_ID[spec.id];
     const apiKey = spec.getApiKey(config);
 

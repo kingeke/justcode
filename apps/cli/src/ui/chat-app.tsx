@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Box, Text, useApp, useInput } from 'ink';
+import { Box, Static, Text, useApp, useInput } from 'ink';
 import Spinner from 'ink-spinner';
 import TextInput from 'ink-text-input';
 
@@ -23,7 +23,7 @@ import type {
   ToolApprovalRequest,
 } from '@core/application/chat-session-service';
 import type { Conversation } from '@core/domain/conversation';
-import { createMessage } from '@core/domain/message';
+import { createMessage, type ChatMessage } from '@core/domain/message';
 import type {
   ModelInfo,
   ProviderId,
@@ -42,7 +42,8 @@ import { ModelPicker } from './model-picker.js';
 const MAX_COMMAND_ITEMS = 8;
 
 interface ChatAppProps {
-  providerId: ProviderId;
+  /** Active provider, or undefined when nothing is connected yet. */
+  providerId: ProviderId | undefined;
   savedConfig: GlobalConfig;
   chatSessionService: ChatSessionService;
   promptAttachmentService: PromptAttachmentService;
@@ -93,8 +94,14 @@ function getInitialMetrics(): {
 
 export function ChatApp(props: ChatAppProps): React.ReactElement {
   const { exit } = useApp();
-  const [showConnectPicker, setShowConnectPicker] = useState(false);
+  // No provider connected yet: open straight into the connect screen and hold
+  // off on starting a session until the user picks one.
+  const needsConnect = props.providerId === undefined;
+  const [showConnectPicker, setShowConnectPicker] = useState(needsConnect);
   const [showModelPicker, setShowModelPicker] = useState(false);
+  // When the model picker is opened right after connecting, it shows only the
+  // freshly connected provider's models (allModels hasn't refreshed yet).
+  const [connectModels, setConnectModels] = useState<ModelInfo[] | null>(null);
   const [allModels, setAllModels] = useState<ModelInfo[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState(props.sessionId);
   const [session, setSession] = useState<StartSessionResult | null>(null);
@@ -160,7 +167,17 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
     responseTimingRef.current = { startMs: 0, firstTokenMs: null };
     sessionStatsRef.current = { outputTokens: 0, generationMs: 0 };
+    // Remount <Static> so its append-only index resets when the history is
+    // cleared/switched; otherwise it would stop printing new messages. Skip the
+    // very first reset (initial session load) so the header isn't printed twice.
+    if (firstResetDoneRef.current) {
+      setHistoryEpoch((epoch) => epoch + 1);
+    } else {
+      firstResetDoneRef.current = true;
+    }
   };
+  const [historyEpoch, setHistoryEpoch] = useState(0);
+  const firstResetDoneRef = useRef(false);
   const [status, setStatus] = useState<string>('Loading session...');
   const [isSending, setIsSending] = useState(false);
   const [activityTick, setActivityTick] = useState(0);
@@ -412,6 +429,9 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   };
 
   useEffect(() => {
+    // Don't start a session until a provider is connected; the connect screen
+    // drives the first load via handleConnectComplete.
+    if (!activeProviderId) return;
     loadSession(currentSessionId, nextSessionRequestedModelRef.current);
     nextSessionRequestedModelRef.current = undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -461,6 +481,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
   const handleModelSelect = (model: ModelInfo): void => {
     setShowModelPicker(false);
+    setConnectModels(null);
     if (model.providerId !== activeProviderId) {
       try {
         const newProvider = resolveProviderClient(model.providerId);
@@ -473,14 +494,21 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     }
     setActiveModel(model.id);
     setActiveModelInfo(model);
-    setStatus(`Switched to ${model.displayName}`);
     props.onModelChange?.(model.id, model.providerId);
+    // First model chosen right after connecting: no session exists yet, so
+    // start one now with the chosen model.
+    if (!session) {
+      loadSession(currentSessionId, model.id);
+      return;
+    }
+    setStatus(`Switched to ${model.displayName}`);
   };
 
   const handleConnectComplete = async ({
     providerId,
     client,
     selectedModel,
+    models,
     config,
     provider,
   }: ConnectedProviderResult): Promise<void> => {
@@ -497,11 +525,15 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     setSavedConfig(nextConfig);
     props.chatSessionService.switchProvider(client);
     setActiveProviderId(providerId);
+    setStatus(`Connected to ${provider.name} · choose a model`);
+    setShowConnectPicker(false);
+    // Hand off to the model picker (seeded with this provider's models, and
+    // highlighting the default) so the user chooses which model to use. The
+    // session starts once they pick — see handleModelSelect.
     setActiveModel(selectedModel.id);
     setActiveModelInfo(selectedModel);
-    setStatus(`Connected to ${provider.name}`);
-    props.onModelChange?.(selectedModel.id, providerId);
-    setShowConnectPicker(false);
+    setConnectModels(models);
+    setShowModelPicker(true);
   };
 
   const resolveApproval = (approved: boolean, always: boolean): void => {
@@ -890,13 +922,111 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     }
   };
 
+  const renderMessage = (message: ChatMessage): React.ReactElement => {
+    const thinking =
+      message.role === 'assistant'
+        ? (message.thinking ?? messageThinking[message.id])
+        : undefined;
+    return (
+      <Box key={message.id} flexDirection="column">
+        {thinking ? (
+          <Box flexDirection="column" marginBottom={0}>
+            <Text color="yellow">
+              {thinkingCollapsed ? '+ ' : ''}Thought:{' '}
+              {formatDuration(thinking.durationMs)}
+            </Text>
+            {thinkingCollapsed ? null : (
+              <Text dimColor>{thinking.content}</Text>
+            )}
+          </Box>
+        ) : null}
+        {message.role === 'user' ? (
+          <Box
+            flexDirection="column"
+            borderStyle="round"
+            borderColor="cyan"
+            borderTop={false}
+            borderRight={false}
+            borderBottom={false}
+            paddingLeft={1}
+            marginY={1}
+          >
+            <Text bold color="white">
+              {message.content}
+            </Text>
+            <Text dimColor>{formatTime(message.createdAt)}</Text>
+          </Box>
+        ) : message.role === 'assistant' ? (
+          <Box flexDirection="column">
+            {message.content ? (
+              <Text>
+                {renderedContent[message.id] ??
+                  renderMarkdown(message.content)}
+              </Text>
+            ) : null}
+            {message.toolCalls?.map((call) => (
+              <Text key={call.id} color="magenta">
+                ⚙ {call.name}({summarizeToolArgs(call.arguments)})
+              </Text>
+            ))}
+          </Box>
+        ) : message.role === 'tool' ? (
+          <Text dimColor>
+            {'  ↳ '}
+            {firstLine(message.content)}
+          </Text>
+        ) : (
+          <Text>
+            <Text color="yellow">{message.role}</Text>
+            <Text>: {message.content}</Text>
+          </Text>
+        )}
+        {message.attachments?.map((attachment) => (
+          <Text key={`${message.id}:${attachment.path}`} dimColor>
+            attached: @{attachment.path}
+          </Text>
+        ))}
+      </Box>
+    );
+  };
+
+  // Split history at the first assistant message whose async (Shiki) markdown
+  // isn't ready yet. The ready prefix is committed to <Static> — printed once
+  // and excluded from the per-token redraw during streaming, which is what
+  // stops the whole screen from flickering. The unready tail re-renders live
+  // until its highlight resolves, then migrates into <Static>.
+  const messages = conversation?.messages ?? [];
+  const firstUnrenderedIndex = (() => {
+    for (let index = 0; index < messages.length; index += 1) {
+      const message = messages[index]!;
+      if (
+        message.role === 'assistant' &&
+        message.content &&
+        !renderedContent[message.id]
+      ) {
+        return index;
+      }
+    }
+    return messages.length;
+  })();
+  const staticMessages = messages.slice(0, firstUnrenderedIndex);
+  const dynamicMessages = messages.slice(firstUnrenderedIndex);
+
   if (showModelPicker) {
     return (
       <ModelPicker
-        models={allModels}
+        models={connectModels ?? allModels}
         currentModel={activeModel}
         onSelect={handleModelSelect}
-        onCancel={() => setShowModelPicker(false)}
+        onCancel={() => {
+          setShowModelPicker(false);
+          setConnectModels(null);
+          // Cancelling the post-connect picker keeps the highlighted default and
+          // starts the session, so the connect flow still lands somewhere usable.
+          if (!session && activeModel) {
+            loadSession(currentSessionId, activeModel);
+          }
+        }}
       />
     );
   }
@@ -908,94 +1038,45 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         configuredProviderIds={configuredProviderIds}
         configuredProviders={configuredProviders}
         onComplete={(result) => void handleConnectComplete(result)}
-        onCancel={() => setShowConnectPicker(false)}
+        onCancel={() => {
+          // Nothing connected yet means there's nothing to fall back to, so
+          // cancelling exits rather than dropping into an unusable chat view.
+          if (!activeProviderId) {
+            exit();
+            return;
+          }
+          setShowConnectPicker(false);
+        }}
       />
     );
   }
 
   return (
     <Box flexDirection="column" padding={1}>
-      <Text color="cyan">justcode</Text>
-      <Text dimColor>
-        provider: {activeProviderId} | session: {currentSessionId}
-      </Text>
-      <Text dimColor>
-        Enter to send · Tab to complete @file or /command · Esc to cancel or
-        interrupt · Ctrl+C to exit
-      </Text>
+      {/* Finalized history is printed once via <Static> (scrollback) so it is
+          not part of the live frame that redraws on every streamed token. */}
+      <Static key={historyEpoch} items={['__header__', ...staticMessages]}>
+        {(row) =>
+          typeof row === 'string' ? (
+            <Box key="header" flexDirection="column" marginBottom={1}>
+              <Text color="cyan">justcode</Text>
+              <Text dimColor>session: {currentSessionId}</Text>
+              <Text dimColor>
+                Enter to send · Tab to complete @file or /command · Esc to
+                cancel or interrupt · Ctrl+C to exit
+              </Text>
+            </Box>
+          ) : (
+            renderMessage(row)
+          )
+        }
+      </Static>
 
-      <Box marginTop={1} flexDirection="column">
-        {conversation?.messages.length ? (
-          conversation.messages.map((message) => {
-            const thinking =
-              message.role === 'assistant'
-                ? (message.thinking ?? messageThinking[message.id])
-                : undefined;
-            return (
-              <Box key={message.id} flexDirection="column">
-                {thinking ? (
-                  <Box flexDirection="column" marginBottom={0}>
-                    <Text color="yellow">
-                      {thinkingCollapsed ? '+ ' : ''}Thought:{' '}
-                      {formatDuration(thinking.durationMs)}
-                    </Text>
-                    {thinkingCollapsed ? null : (
-                      <Text dimColor>{thinking.content}</Text>
-                    )}
-                  </Box>
-                ) : null}
-                {message.role === 'user' ? (
-                  <Box
-                    flexDirection="column"
-                    borderStyle="round"
-                    borderColor="cyan"
-                    borderTop={false}
-                    borderRight={false}
-                    borderBottom={false}
-                    paddingLeft={1}
-                    marginY={1}
-                  >
-                    <Text bold color="white">
-                      {message.content}
-                    </Text>
-                    <Text dimColor>{formatTime(message.createdAt)}</Text>
-                  </Box>
-                ) : message.role === 'assistant' ? (
-                  <Box flexDirection="column">
-                    {message.content ? (
-                      <Text>
-                        {renderedContent[message.id] ??
-                          renderMarkdown(message.content)}
-                      </Text>
-                    ) : null}
-                    {message.toolCalls?.map((call) => (
-                      <Text key={call.id} color="magenta">
-                        ⚙ {call.name}({summarizeToolArgs(call.arguments)})
-                      </Text>
-                    ))}
-                  </Box>
-                ) : message.role === 'tool' ? (
-                  <Text dimColor>
-                    {'  ↳ '}
-                    {firstLine(message.content)}
-                  </Text>
-                ) : (
-                  <Text>
-                    <Text color="yellow">{message.role}</Text>
-                    <Text>: {message.content}</Text>
-                  </Text>
-                )}
-                {message.attachments?.map((attachment) => (
-                  <Text key={`${message.id}:${attachment.path}`} dimColor>
-                    attached: @{attachment.path}
-                  </Text>
-                ))}
-              </Box>
-            );
-          })
-        ) : (
+      <Box flexDirection="column">
+        {messages.length === 0 && !streamingThinking && !streamingContent ? (
           <Text dimColor>No messages yet.</Text>
-        )}
+        ) : null}
+        {dynamicMessages.map(renderMessage)}
         {streamingThinking || streamingContent ? (
           <Box flexDirection="column">
             {streamingThinking ? (
@@ -1141,15 +1222,18 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       ) : null}
 
       <Box marginTop={1} justifyContent="space-between">
-        <Box>
+        {/* flexShrink={0} stops yoga from compressing this row and wrapping the
+            model name mid-word during the transition back from the picker. */}
+        <Box flexShrink={0}>
           {isSending ? (
             <Text color="yellow">
               <Spinner type="dots" />{' '}
             </Text>
           ) : null}
-          <Text color="cyan" bold>
-            {activeModelInfo?.providerId ?? props.providerId}/
-            {activeModel || session?.activeModel || 'loading'}
+          <Text color="cyan" bold wrap="truncate-end">
+            {`${activeModelInfo?.providerId ?? props.providerId ?? ''}/${
+              activeModel || session?.activeModel || 'loading'
+            }`}
           </Text>
           {showInterruptHint ? (
             <Text dimColor> · Press Esc to interrupt</Text>

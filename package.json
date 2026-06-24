@@ -11,8 +11,8 @@
   },
   "scripts": {
     "build": "tsup",
-    "dev": "tsx --env-file=.env apps/cli/src/index.tsx",
-    "dev:watch": "tsx watch --env-file=.env apps/cli/src/index.tsx",
+    "dev": "tsx apps/cli/src/index.tsx",
+    "dev:watch": "tsx watch apps/cli/src/index.tsx",
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",

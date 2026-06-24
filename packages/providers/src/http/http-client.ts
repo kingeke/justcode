@@ -11,6 +11,45 @@ export class HttpError extends Error {
   }
 }
 
+/**
+ * Builds an error message that includes the server's response body so failures
+ * surface the actual reason (e.g. the provider's `{ "error": ... }`) instead of
+ * just the HTTP status.
+ */
+function httpErrorMessage(
+  url: string,
+  status: number,
+  responseText: string
+): string {
+  const base = `Request to ${url} failed with status ${status}.`;
+  const detail = extractErrorDetail(responseText);
+  return detail ? `${base} ${detail}` : base;
+}
+
+function extractErrorDetail(responseText: string): string | undefined {
+  const trimmed = responseText.trim();
+  if (!trimmed) return undefined;
+
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (typeof parsed === 'string') return parsed;
+    if (parsed && typeof parsed === 'object') {
+      const error = (parsed as { error?: unknown }).error;
+      if (typeof error === 'string') return error;
+      if (error && typeof error === 'object') {
+        const message = (error as { message?: unknown }).message;
+        if (typeof message === 'string') return message;
+      }
+      const message = (parsed as { message?: unknown }).message;
+      if (typeof message === 'string') return message;
+    }
+  } catch {
+    // Not JSON; fall through to the raw body.
+  }
+
+  return trimmed;
+}
+
 export interface JsonRequestOptions {
   method?: 'GET' | 'POST';
   headers?: Record<string, string>;
@@ -42,7 +81,7 @@ export async function requestJson<T>(
   if (!response.ok) {
     const responseText = await response.text();
     throw new HttpError(
-      `Request to ${url} failed with status ${response.status}.`,
+      httpErrorMessage(url, response.status, responseText),
       response.status,
       responseText
     );
@@ -138,7 +177,7 @@ export async function requestSseStream(
   if (!response.ok) {
     const responseText = await response.text();
     throw new HttpError(
-      `Request to ${url} failed with status ${response.status}.`,
+      httpErrorMessage(url, response.status, responseText),
       response.status,
       responseText
     );
@@ -241,7 +280,7 @@ export async function requestNdjsonStream(
   if (!response.ok) {
     const responseText = await response.text();
     throw new HttpError(
-      `Request to ${url} failed with status ${response.status}.`,
+      httpErrorMessage(url, response.status, responseText),
       response.status,
       responseText
     );

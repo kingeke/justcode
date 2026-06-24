@@ -8,10 +8,11 @@ import {
   type MessageAttachment,
   type ToolCall,
 } from '@core/domain/message';
-import type {
-  ModelInfo,
-  ProviderClient,
-  TokenUsage,
+import {
+  ToolsUnsupportedError,
+  type ModelInfo,
+  type ProviderClient,
+  type TokenUsage,
 } from '@core/ports/chat-model';
 import type { ConversationRepository } from '@core/ports/conversation-repository';
 import type { Tool, ToolInvocationView, ToolResult } from '@core/ports/tool';
@@ -71,6 +72,8 @@ export class ChatSessionService {
   private provider: ProviderClient;
   private readonly toolRegistry: ToolRegistry | undefined;
   private readonly workspaceRoot: string;
+  /** Models that rejected tools once; we send their requests chat-only after. */
+  private readonly toolUnsupportedModels = new Set<string>();
 
   public constructor(
     private readonly repository: ConversationRepository,
@@ -125,10 +128,12 @@ export class ChatSessionService {
     );
 
     const toolDefinitions = this.toolRegistry?.definitions() ?? [];
-    const systemMessage = createMessage(
-      'system',
-      buildSystemPrompt(toolDefinitions)
-    );
+    // Models known not to support tools are sent chat-only from the start; the
+    // tool section is also dropped from the system prompt so we don't advertise
+    // tools the model can't call.
+    let toolsEnabled =
+      toolDefinitions.length > 0 &&
+      !this.toolUnsupportedModels.has(input.model);
 
     // `working` is the persisted history plus everything produced this turn.
     const working: ChatMessage[] = [
@@ -140,16 +145,34 @@ export class ChatSessionService {
 
     for (let step = 0; step < MAX_TOOL_STEPS; step += 1) {
       throwIfAborted(input.signal);
-      const response = await this.provider.sendChat({
-        model: input.model,
-        messages: [systemMessage, ...working],
-        ...(toolDefinitions.length ? { tools: toolDefinitions } : {}),
-        ...(input.onToken ? { onToken: input.onToken } : {}),
-        ...(input.onThinkingToken
-          ? { onThinkingToken: input.onThinkingToken }
-          : {}),
-        ...(input.signal ? { signal: input.signal } : {}),
-      });
+      const systemMessage = createMessage(
+        'system',
+        buildSystemPrompt(toolsEnabled ? toolDefinitions : [])
+      );
+
+      let response;
+      try {
+        response = await this.provider.sendChat({
+          model: input.model,
+          messages: [systemMessage, ...working],
+          ...(toolsEnabled ? { tools: toolDefinitions } : {}),
+          ...(input.onToken ? { onToken: input.onToken } : {}),
+          ...(input.onThinkingToken
+            ? { onThinkingToken: input.onThinkingToken }
+            : {}),
+          ...(input.signal ? { signal: input.signal } : {}),
+        });
+      } catch (error) {
+        // The model doesn't support tools: remember it, drop tools, and retry
+        // this step in chat-only mode.
+        if (toolsEnabled && error instanceof ToolsUnsupportedError) {
+          this.toolUnsupportedModels.add(input.model);
+          toolsEnabled = false;
+          step -= 1;
+          continue;
+        }
+        throw error;
+      }
 
       throwIfAborted(input.signal);
 

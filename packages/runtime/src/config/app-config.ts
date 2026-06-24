@@ -1,10 +1,15 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+import { readGlobalConfig } from '../persistence/global-config';
 import { ProviderId } from '@core/ports/chat-model';
+import type { GlobalConfig } from '../persistence/global-config';
 
 export interface AppConfig {
-  defaultProvider: ProviderId;
+  /** Provider to use on launch, or undefined when nothing is configured yet. */
+  defaultProvider: ProviderId | undefined;
+  /** Providers the user has explicitly connected (present in config.json). */
+  configuredProviders: ProviderId[];
   configDirectory: string;
   sessionsDirectory: string;
   openai: {
@@ -30,45 +35,49 @@ export interface AppConfig {
   };
 }
 
-export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const requestedProvider = env.JUSTCODE_PROVIDER;
+export async function loadAppConfig(
+  configDirectory?: string
+): Promise<AppConfig> {
+  const targetConfigDir =
+    configDirectory ?? join(homedir(), '.cache', 'justcode');
 
-  const configDirectory =
-    env.JUSTCODE_CONFIG_DIR ?? join(homedir(), '.justcode');
+  const globalConfig = await readGlobalConfig(targetConfigDir);
+
+  const configuredProviders = Object.keys(globalConfig.providers ?? {})
+    .map((id) => parseProviderId(id))
+    .filter((id): id is ProviderId => id !== undefined);
+
+  // Nothing is used by default: only a provider the user explicitly connected
+  // (the last one they picked, or any configured one) is selected. When none
+  // exist, defaultProvider is undefined and the CLI shows the connect screen.
+  const requestedProvider = parseProviderId(globalConfig.lastProvider);
+
   return {
-    defaultProvider:
-      parseProviderId(requestedProvider) ??
-      (env.OPENAI_API_KEY
-        ? ProviderId.Openai
-        : env.OPENROUTER_API_KEY
-          ? ProviderId.OpenRouter
-          : env.ALIBABA_API_KEY
-            ? ProviderId.Alibaba
-            : ProviderId.Ollama),
-    configDirectory,
-    sessionsDirectory:
-      env.JUSTCODE_SESSIONS_DIR ?? join(configDirectory, 'sessions'),
+    defaultProvider: requestedProvider ?? configuredProviders[0],
+    configuredProviders,
+    configDirectory: targetConfigDir,
+    sessionsDirectory: join(targetConfigDir, 'sessions'),
     openai: {
-      apiKey: env.OPENAI_API_KEY,
-      baseUrl: env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
-      defaultModel: env.OPENAI_MODEL ?? 'gpt-4.1-mini',
+      apiKey: globalConfig.providers?.openai?.apiKey,
+      baseUrl: globalConfig.providers?.openai?.baseUrl ?? 'https://api.openai.com/v1',
+      defaultModel: globalConfig.providers?.openai?.defaultModel ?? 'gpt-4.1-mini',
     },
     ollama: {
-      baseUrl: env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
-      apiKey: env.OLLAMA_API_KEY,
+      baseUrl: globalConfig.providers?.ollama?.baseUrl ?? 'http://127.0.0.1:11434',
+      apiKey: globalConfig.providers?.ollama?.apiKey,
     },
     lmstudio: {
-      baseUrl: env.LMSTUDIO_BASE_URL ?? 'http://127.0.0.1:1234/v1',
-      apiKey: env.LMSTUDIO_API_KEY,
+      baseUrl: globalConfig.providers?.lmstudio?.baseUrl ?? 'http://127.0.0.1:1234/v1',
+      apiKey: globalConfig.providers?.lmstudio?.apiKey,
     },
     openrouter: {
-      apiKey: env.OPENROUTER_API_KEY,
-      baseUrl: env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1',
+      apiKey: globalConfig.providers?.openrouter?.apiKey,
+      baseUrl: globalConfig.providers?.openrouter?.baseUrl ?? 'https://openrouter.ai/api/v1',
     },
     alibaba: {
-      apiKey: env.ALIBABA_API_KEY,
+      apiKey: globalConfig.providers?.alibaba?.apiKey,
       baseUrl:
-        env.ALIBABA_BASE_URL ??
+        globalConfig.providers?.alibaba?.baseUrl ??
         'https://dashscope.aliyuncs.com/compatible-mode/v1',
     },
   };

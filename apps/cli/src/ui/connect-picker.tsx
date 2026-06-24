@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
+import Spinner from 'ink-spinner';
 
 import {
   ProviderId,
@@ -27,12 +28,15 @@ export interface ConnectedProviderResult {
   providerId: ProviderId;
   provider: ProviderConnectionInfo;
   client: ProviderClient;
+  /** Default model (provider default or first available). */
   selectedModel: ModelInfo;
+  /** All models the provider reported, for the follow-up model picker. */
+  models: ModelInfo[];
   config: ProviderConfig;
 }
 
 interface ConnectPickerProps {
-  activeProviderId: ProviderId;
+  activeProviderId: ProviderId | undefined;
   configuredProviderIds: ProviderId[];
   configuredProviders: Partial<Record<ProviderId, ProviderConfig>>;
   onComplete: (result: ConnectedProviderResult) => void;
@@ -159,13 +163,13 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
               ? `API key - ${selectedProvider?.name ?? ''}`
               : step === 'base-url'
                 ? `Base URL - ${selectedProvider?.name ?? ''}`
-                : `Connecting - ${selectedProvider?.name ?? ''}`}
+                : `Fetching models - ${selectedProvider?.name ?? ''}`}
         </Text>
         <Text dimColor>
           {step === 'provider'
             ? 'enter to configure · esc to cancel'
             : step === 'connecting'
-              ? 'verifying...'
+              ? 'fetching models...'
               : 'enter to continue · esc to go back'}
         </Text>
       </Box>
@@ -189,27 +193,18 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
               {visibleRows.map((entry, index) => {
                 const absoluteIndex = scrollOffsetRef.current + index;
                 const isFocused = absoluteIndex === focusedIndex;
-                const isCurrent = entry.id === props.activeProviderId;
-                const isConfigured = configuredProviderSet.has(entry.id);
+                const isConnected = configuredProviderSet.has(entry.id);
 
                 return (
-                  <Box key={entry.id} flexDirection="column">
-                    <Box justifyContent="space-between">
-                      <Text
-                        {...(isFocused
-                          ? { backgroundColor: 'cyan', color: 'black' }
-                          : {})}
-                      >
-                        {isFocused ? '› ' : '  '}
-                        {entry.name}
-                        {isCurrent ? <Text dimColor> ✓ current</Text> : null}
-                        {isConfigured ? <Text dimColor> ✓ setup</Text> : null}
-                      </Text>
-                      <Text dimColor>{formatRequirements(entry)}</Text>
-                    </Box>
-                    <Text dimColor>
-                      {entry.description}
-                      {entry.baseUrl ? ` · ${entry.baseUrl}` : ''}
+                  <Box key={entry.id}>
+                    <Text
+                      {...(isFocused
+                        ? { backgroundColor: 'cyan', color: 'black' }
+                        : {})}
+                    >
+                      {isFocused ? '› ' : '  '}
+                      {entry.name}
+                      {isConnected ? ' ✓' : ''}
                     </Text>
                   </Box>
                 );
@@ -226,6 +221,16 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
             </Box>
           )}
         </>
+      ) : step === 'connecting' ? (
+        <Box>
+          <Text color="cyan">
+            <Spinner type="dots" />
+          </Text>
+          <Text dimColor>
+            {' '}
+            Connecting and fetching models...
+          </Text>
+        </Box>
       ) : (
         <Box flexDirection="column">
           <Text dimColor>
@@ -239,6 +244,9 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
           <Box marginTop={1}>
             <Text dimColor>{step === 'api-key' ? 'key> ' : 'url> '}</Text>
             <TextInput
+              // Remount when the step changes so ink-text-input's cursor jumps
+              // to the end of the pre-filled value instead of staying at 0.
+              key={step}
               value={step === 'api-key' ? apiKey : baseUrl}
               onChange={step === 'api-key' ? setApiKey : setBaseUrl}
               placeholder={
@@ -325,6 +333,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
         provider,
         client,
         selectedModel,
+        models,
         config,
       });
     } catch (caughtError) {
@@ -339,16 +348,6 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
     const trimmed = current.trim();
     return trimmed ? trimmed : undefined;
   }
-}
-
-function formatRequirements(provider: ProviderConnectionInfo): string {
-  const apiKey = provider.apiKeyRequired
-    ? `API key required${provider.apiKeyEnvVar ? ` (${provider.apiKeyEnvVar})` : ''}`
-    : `API key optional${provider.apiKeyEnvVar ? ` (${provider.apiKeyEnvVar})` : ''}`;
-
-  return provider.baseUrlEnvVar
-    ? `${apiKey} · ${provider.baseUrlEnvVar}`
-    : apiKey;
 }
 
 function createProviderClient(

@@ -8,7 +8,6 @@ import { createRuntimeServices } from '@runtime/bootstrap/create-services';
 import { DEFAULT_MAX_READ_BYTES } from '@runtime/tools/read-file-tool';
 import { loadAppConfig, parseProviderId } from '@runtime/config/app-config';
 import {
-  buildEnvFromGlobalConfig,
   readGlobalConfig,
   writeGlobalConfig,
 } from '@runtime/persistence/global-config';
@@ -60,7 +59,17 @@ export function createCli(): Command {
     .action(async (...args: unknown[]) => {
       const options = getActionOptions<Pick<SharedOptions, 'provider'>>(args);
       const providerId = resolveProviderId(options.provider);
-      const runtime = createRuntimeServices(providerId ? { providerId } : {});
+      const runtime = await createRuntimeServices(
+        providerId ? { providerId } : {}
+      );
+
+      if (!runtime.providerId) {
+        process.stdout.write(
+          'No provider is configured. Run `justcode` and use /connect first.\n'
+        );
+        return;
+      }
+
       const models = await runtime.listModelsService.execute();
 
       if (models.length === 0) {
@@ -102,18 +111,17 @@ export function normalizeArgv(argv: readonly string[]): string[] {
 }
 
 async function runChat(options: SharedOptions): Promise<void> {
-  const appConfig = loadAppConfig();
+  const appConfig = await loadAppConfig();
   const savedConfig = await readGlobalConfig(appConfig.configDirectory);
-  const runtimeEnv = buildEnvFromGlobalConfig(process.env, savedConfig);
 
-  // CLI flag > saved config > env default
+  // CLI flag > saved config (last connected provider)
   const explicitProviderId =
     resolveProviderId(options.provider) ??
     parseProviderId(savedConfig.lastProvider);
 
-  const runtime = createRuntimeServices({
+  const runtime = await createRuntimeServices({
     ...(explicitProviderId ? { providerId: explicitProviderId } : {}),
-    env: runtimeEnv,
+    configDirectory: appConfig.configDirectory,
     ...(savedConfig.cache?.maxReadBytes
       ? { maxReadBytes: savedConfig.cache.maxReadBytes }
       : {}),

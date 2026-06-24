@@ -4,6 +4,7 @@ import { ToolRegistry } from '@core/application/tool-registry';
 import { createConversation } from '@core/domain/conversation';
 import {
   ProviderId,
+  ToolsUnsupportedError,
   type ChatRequest,
   type ChatResult,
   type ProviderClient,
@@ -245,6 +246,53 @@ describe('ChatSessionService', () => {
     const toolMessage = result.conversation.messages[2];
     expect(toolMessage?.toolCallId).toBe('call-1');
     expect(toolMessage?.content).toBe('wrote the file');
+  });
+
+  it('retries chat-only and omits tools when the model rejects tools', async () => {
+    const repository = new InMemoryConversationRepository();
+    const tool = new RecordingWriteTool();
+    const requests: Array<ChatRequest['tools']> = [];
+    let firstCall = true;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Ollama,
+      async sendChat(request: ChatRequest): Promise<ChatResult> {
+        requests.push(request.tools);
+        if (firstCall) {
+          firstCall = false;
+          throw new ToolsUnsupportedError('model does not support tools');
+        }
+        return { content: 'hi from a chat-only model' };
+      },
+      async listModels() {
+        return [{ id: 'gemma', displayName: 'gemma', providerId: ProviderId.Ollama }];
+      },
+      getDefaultModel() {
+        return 'gemma';
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry: new ToolRegistry([tool]),
+    });
+
+    const result = await service.submitMessage({
+      conversation: createConversation('session-1'),
+      model: 'gemma',
+      content: 'hello',
+    });
+
+    expect(result.reply).toBe('hi from a chat-only model');
+    // First attempt sent tools; the retry omitted them.
+    expect(requests[0]?.length).toBeGreaterThan(0);
+    expect(requests[1]).toBeUndefined();
+
+    // A second message skips tools immediately (no failed attempt).
+    requests.length = 0;
+    await service.submitMessage({
+      conversation: result.conversation,
+      model: 'gemma',
+      content: 'again',
+    });
+    expect(requests).toEqual([undefined]);
   });
 
   it('skips execution and reports rejection when approval is denied', async () => {

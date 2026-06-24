@@ -1,12 +1,14 @@
-import type {
-  ChatRequest,
-  ChatResult,
-  ModelInfo,
-  ModelPricing,
-  ProviderClient,
-  ProviderId,
+import {
+  ToolsUnsupportedError,
+  type ChatRequest,
+  type ChatResult,
+  type ModelInfo,
+  type ModelPricing,
+  type ProviderClient,
+  type ProviderId,
 } from '@core/ports/chat-model';
 import {
+  HttpError,
   joinUrl,
   requestJson,
   requestSseStream,
@@ -107,6 +109,21 @@ export class OpenAiCompatibleProvider implements ProviderClient {
   }
 
   public async sendChat(request: ChatRequest): Promise<ChatResult> {
+    try {
+      return await this.sendChatRequest(request);
+    } catch (error) {
+      // Surface "model doesn't support tools" 400s as a typed error so the
+      // agent loop can retry the model in chat-only mode.
+      if (request.tools?.length && isToolsUnsupportedError(error)) {
+        throw new ToolsUnsupportedError(
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async sendChatRequest(request: ChatRequest): Promise<ChatResult> {
     const messages = toOpenAiWireMessages(request.messages);
     const tools = toOpenAiToolDefinitions(request.tools);
 
@@ -255,4 +272,23 @@ export class OpenAiCompatibleProvider implements ProviderClient {
   protected resolvePricing(modelId: string): ModelPricing | undefined {
     return OPENAI_PRICING[modelId];
   }
+}
+
+/**
+ * Detects a 400 that means the model rejected tool/function calling (e.g.
+ * Ollama's "<model> does not support tools"). Matched on the response body so
+ * we don't misclassify unrelated 400s.
+ */
+function isToolsUnsupportedError(error: unknown): boolean {
+  if (!(error instanceof HttpError) || error.status !== 400) {
+    return false;
+  }
+
+  const body = error.responseText.toLowerCase();
+  return (
+    body.includes('does not support tools') ||
+    body.includes('does not support tool') ||
+    (body.includes('tool') && body.includes('not supported')) ||
+    (body.includes('function calling') && body.includes('not'))
+  );
 }
