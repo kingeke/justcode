@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Box, Static, Text, useApp, useInput } from 'ink';
+import { Box, Text, useApp, useInput } from 'ink';
 import Spinner from 'ink-spinner';
 import TextInput from 'ink-text-input';
 
@@ -23,7 +23,7 @@ import type {
   ToolApprovalRequest,
 } from '@core/application/chat-session-service';
 import type { Conversation } from '@core/domain/conversation';
-import { createMessage, type ChatMessage } from '@core/domain/message';
+import { createMessage } from '@core/domain/message';
 import type {
   ModelInfo,
   ProviderId,
@@ -167,17 +167,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
     responseTimingRef.current = { startMs: 0, firstTokenMs: null };
     sessionStatsRef.current = { outputTokens: 0, generationMs: 0 };
-    // Remount <Static> so its append-only index resets when the history is
-    // cleared/switched; otherwise it would stop printing new messages. Skip the
-    // very first reset (initial session load) so the header isn't printed twice.
-    if (firstResetDoneRef.current) {
-      setHistoryEpoch((epoch) => epoch + 1);
-    } else {
-      firstResetDoneRef.current = true;
-    }
   };
-  const [historyEpoch, setHistoryEpoch] = useState(0);
-  const firstResetDoneRef = useRef(false);
   const [status, setStatus] = useState<string>('Loading session...');
   const [isSending, setIsSending] = useState(false);
   const [activityTick, setActivityTick] = useState(0);
@@ -922,96 +912,6 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     }
   };
 
-  const renderMessage = (message: ChatMessage): React.ReactElement => {
-    const thinking =
-      message.role === 'assistant'
-        ? (message.thinking ?? messageThinking[message.id])
-        : undefined;
-    return (
-      <Box key={message.id} flexDirection="column">
-        {thinking ? (
-          <Box flexDirection="column" marginBottom={0}>
-            <Text color="yellow">
-              {thinkingCollapsed ? '+ ' : ''}Thought:{' '}
-              {formatDuration(thinking.durationMs)}
-            </Text>
-            {thinkingCollapsed ? null : (
-              <Text dimColor>{thinking.content}</Text>
-            )}
-          </Box>
-        ) : null}
-        {message.role === 'user' ? (
-          <Box
-            flexDirection="column"
-            borderStyle="round"
-            borderColor="cyan"
-            borderTop={false}
-            borderRight={false}
-            borderBottom={false}
-            paddingLeft={1}
-            marginY={1}
-          >
-            <Text bold color="white">
-              {message.content}
-            </Text>
-            <Text dimColor>{formatTime(message.createdAt)}</Text>
-          </Box>
-        ) : message.role === 'assistant' ? (
-          <Box flexDirection="column">
-            {message.content ? (
-              <Text>
-                {renderedContent[message.id] ??
-                  renderMarkdown(message.content)}
-              </Text>
-            ) : null}
-            {message.toolCalls?.map((call) => (
-              <Text key={call.id} color="magenta">
-                ⚙ {call.name}({summarizeToolArgs(call.arguments)})
-              </Text>
-            ))}
-          </Box>
-        ) : message.role === 'tool' ? (
-          <Text dimColor>
-            {'  ↳ '}
-            {firstLine(message.content)}
-          </Text>
-        ) : (
-          <Text>
-            <Text color="yellow">{message.role}</Text>
-            <Text>: {message.content}</Text>
-          </Text>
-        )}
-        {message.attachments?.map((attachment) => (
-          <Text key={`${message.id}:${attachment.path}`} dimColor>
-            attached: @{attachment.path}
-          </Text>
-        ))}
-      </Box>
-    );
-  };
-
-  // Split history at the first assistant message whose async (Shiki) markdown
-  // isn't ready yet. The ready prefix is committed to <Static> — printed once
-  // and excluded from the per-token redraw during streaming, which is what
-  // stops the whole screen from flickering. The unready tail re-renders live
-  // until its highlight resolves, then migrates into <Static>.
-  const messages = conversation?.messages ?? [];
-  const firstUnrenderedIndex = (() => {
-    for (let index = 0; index < messages.length; index += 1) {
-      const message = messages[index]!;
-      if (
-        message.role === 'assistant' &&
-        message.content &&
-        !renderedContent[message.id]
-      ) {
-        return index;
-      }
-    }
-    return messages.length;
-  })();
-  const staticMessages = messages.slice(0, firstUnrenderedIndex);
-  const dynamicMessages = messages.slice(firstUnrenderedIndex);
-
   if (showModelPicker) {
     return (
       <ModelPicker
@@ -1053,30 +953,87 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
   return (
     <Box flexDirection="column" padding={1}>
-      {/* Finalized history is printed once via <Static> (scrollback) so it is
-          not part of the live frame that redraws on every streamed token. */}
-      <Static key={historyEpoch} items={['__header__', ...staticMessages]}>
-        {(row) =>
-          typeof row === 'string' ? (
-            <Box key="header" flexDirection="column" marginBottom={1}>
-              <Text color="cyan">justcode</Text>
-              <Text dimColor>session: {currentSessionId}</Text>
-              <Text dimColor>
-                Enter to send · Tab to complete @file or /command · Esc to
-                cancel or interrupt · Ctrl+C to exit
-              </Text>
-            </Box>
-          ) : (
-            renderMessage(row)
-          )
-        }
-      </Static>
+      <Text color="cyan">justcode</Text>
+      <Text dimColor>
+        provider: {activeProviderId} | session: {currentSessionId}
+      </Text>
+      <Text dimColor>
+        Enter to send · Tab to complete @file or /command · Esc to cancel or
+        interrupt · Ctrl+C to exit
+      </Text>
 
-      <Box flexDirection="column">
-        {messages.length === 0 && !streamingThinking && !streamingContent ? (
+      <Box marginTop={1} flexDirection="column">
+        {conversation?.messages.length ? (
+          conversation.messages.map((message) => {
+            const thinking =
+              message.role === 'assistant'
+                ? (message.thinking ?? messageThinking[message.id])
+                : undefined;
+            return (
+              <Box key={message.id} flexDirection="column">
+                {thinking ? (
+                  <Box flexDirection="column" marginBottom={0}>
+                    <Text color="yellow">
+                      {thinkingCollapsed ? '+ ' : ''}Thought:{' '}
+                      {formatDuration(thinking.durationMs)}
+                    </Text>
+                    {thinkingCollapsed ? null : (
+                      <Text dimColor>{thinking.content}</Text>
+                    )}
+                  </Box>
+                ) : null}
+                {message.role === 'user' ? (
+                  <Box
+                    flexDirection="column"
+                    borderStyle="round"
+                    borderColor="cyan"
+                    borderTop={false}
+                    borderRight={false}
+                    borderBottom={false}
+                    paddingLeft={1}
+                    marginY={1}
+                  >
+                    <Text bold color="white">
+                      {message.content}
+                    </Text>
+                    <Text dimColor>{formatTime(message.createdAt)}</Text>
+                  </Box>
+                ) : message.role === 'assistant' ? (
+                  <Box flexDirection="column">
+                    {message.content ? (
+                      <Text>
+                        {renderedContent[message.id] ??
+                          renderMarkdown(message.content)}
+                      </Text>
+                    ) : null}
+                    {message.toolCalls?.map((call) => (
+                      <Text key={call.id} color="magenta">
+                        ⚙ {call.name}({summarizeToolArgs(call.arguments)})
+                      </Text>
+                    ))}
+                  </Box>
+                ) : message.role === 'tool' ? (
+                  <Text dimColor>
+                    {'  ↳ '}
+                    {firstLine(message.content)}
+                  </Text>
+                ) : (
+                  <Text>
+                    <Text color="yellow">{message.role}</Text>
+                    <Text>: {message.content}</Text>
+                  </Text>
+                )}
+                {message.attachments?.map((attachment) => (
+                  <Text key={`${message.id}:${attachment.path}`} dimColor>
+                    attached: @{attachment.path}
+                  </Text>
+                ))}
+              </Box>
+            );
+          })
+        ) : (
           <Text dimColor>No messages yet.</Text>
-        ) : null}
-        {dynamicMessages.map(renderMessage)}
+        )}
         {streamingThinking || streamingContent ? (
           <Box flexDirection="column">
             {streamingThinking ? (
