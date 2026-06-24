@@ -12,6 +12,11 @@ export interface ProviderCatalogEntry {
   baseUrlEnvVar?: string;
 }
 
+export interface ProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+}
+
 export const PROVIDERS = [
   {
     id: ProviderId.Openai,
@@ -64,6 +69,7 @@ export type ProviderInfo = Pick<ProviderCatalogEntry, 'id' | 'name'>;
 
 export type ProviderConnectionInfo = ProviderCatalogEntry;
 
-export const PROVIDER_BY_ID: Record<ProviderId, ProviderCatalogEntry> = Object.fromEntries(
-  PROVIDERS.map((provider) => [provider.id, provider])
-) as Record<ProviderId, ProviderCatalogEntry>;
+export const PROVIDER_BY_ID: Record<ProviderId, ProviderCatalogEntry> =
+  Object.fromEntries(
+    PROVIDERS.map((provider) => [provider.id, provider])
+  ) as Record<ProviderId, ProviderCatalogEntry>;

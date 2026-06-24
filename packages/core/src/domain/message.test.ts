@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { createMessage, renderMessageContentForModel } from '@core/domain/message';
+import {
+  createMessage,
+  renderMessageContentForModel,
+} from '@core/domain/message';
 
 describe('renderMessageContentForModel', () => {
   it('appends attached file contents to the model prompt', () => {
@@ -16,9 +19,15 @@ describe('renderMessageContentForModel', () => {
   });
 
   it('can persist assistant thinking metadata', () => {
-    const message = createMessage('assistant', 'partial', new Date(), undefined, {
-      thinking: { content: 'thinking', durationMs: 42 },
-    });
+    const message = createMessage(
+      'assistant',
+      'partial',
+      new Date(),
+      undefined,
+      {
+        thinking: { content: 'thinking', durationMs: 42 },
+      }
+    );
 
     expect(message.thinking).toEqual({ content: 'thinking', durationMs: 42 });
   });

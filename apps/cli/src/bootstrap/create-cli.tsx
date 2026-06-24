@@ -8,6 +8,7 @@ import { createRuntimeServices } from '@runtime/bootstrap/create-services';
 import { DEFAULT_MAX_READ_BYTES } from '@runtime/tools/read-file-tool';
 import { loadAppConfig, parseProviderId } from '@runtime/config/app-config';
 import {
+  buildEnvFromGlobalConfig,
   readGlobalConfig,
   writeGlobalConfig,
 } from '@runtime/persistence/global-config';
@@ -103,6 +104,7 @@ export function normalizeArgv(argv: readonly string[]): string[] {
 async function runChat(options: SharedOptions): Promise<void> {
   const appConfig = loadAppConfig();
   const savedConfig = await readGlobalConfig(appConfig.configDirectory);
+  const runtimeEnv = buildEnvFromGlobalConfig(process.env, savedConfig);
 
   // CLI flag > saved config > env default
   const explicitProviderId =
@@ -111,6 +113,7 @@ async function runChat(options: SharedOptions): Promise<void> {
 
   const runtime = createRuntimeServices({
     ...(explicitProviderId ? { providerId: explicitProviderId } : {}),
+    env: runtimeEnv,
     ...(savedConfig.cache?.maxReadBytes
       ? { maxReadBytes: savedConfig.cache.maxReadBytes }
       : {}),
@@ -126,12 +129,16 @@ async function runChat(options: SharedOptions): Promise<void> {
   render(
     React.createElement(ChatApp, {
       providerId: runtime.providerId,
+      savedConfig,
       chatSessionService: runtime.chatSessionService,
       promptAttachmentService: runtime.promptAttachmentService,
       sessionId: options.session ?? `session-${Date.now()}`,
       requestedModel: options.model ?? savedConfig.lastModel,
       allProviders: runtime.allProviders,
       createProvider: runtime.createProvider,
+      onConfigChange: (nextConfig) => {
+        persistConfig(nextConfig);
+      },
       initialThinkingCollapsed: savedConfig.thinkingCollapsed ?? false,
       initialAutoApplyWrites: savedConfig.autoApplyWrites ?? false,
       initialMaxReadBytes:

@@ -7,7 +7,12 @@ import { PROVIDER_BY_ID } from '@core/ports/provider-catalog';
 import { fuzzyFilter } from './fuzzy-filter.js';
 
 const VISIBLE_ROWS = 18;
-const SORT_MODES = ['provider', 'input-cost', 'output-cost', 'context-window'] as const;
+const SORT_MODES = [
+  'provider',
+  'input-cost',
+  'output-cost',
+  'context-window',
+] as const;
 type SortMode = (typeof SORT_MODES)[number];
 type SortDirection = 'asc' | 'desc';
 type SortState = {
@@ -48,7 +53,10 @@ interface GroupedModel {
 
 export function ModelPicker(props: ModelPickerProps): React.ReactElement {
   const [query, setQuery] = useState('');
-  const [sortState, setSortState] = useState<SortState>({ mode: 'provider', direction: 'asc' });
+  const [sortState, setSortState] = useState<SortState>({
+    mode: 'provider',
+    direction: 'asc',
+  });
   const [focusedIndex, setFocusedIndex] = useState(0);
   const scrollOffsetRef = useRef(0);
 
@@ -57,18 +65,22 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
       fuzzyFilter(
         props.models,
         query,
-        (m) => `${PROVIDER_BY_ID[m.providerId]?.name ?? ''} ${m.id} ${m.displayName}`
+        (m) =>
+          `${PROVIDER_BY_ID[m.providerId]?.name ?? ''} ${m.id} ${m.displayName}`
       ),
     [props.models, query]
   );
 
   const grouped: GroupedModel[] = useMemo(() => {
     const result: GroupedModel[] = [];
-    const sorted = [...filteredModels].sort((a, b) => compareModels(a, b, sortState));
+    const sorted = [...filteredModels].sort((a, b) =>
+      compareModels(a, b, sortState)
+    );
 
     for (const model of sorted) {
       const isFirstInGroup =
-        sortState.mode === 'provider' && model.providerId !== result.at(-1)?.model.providerId;
+        sortState.mode === 'provider' &&
+        model.providerId !== result.at(-1)?.model.providerId;
       result.push({
         model,
         isFirstInGroup,
@@ -226,7 +238,9 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
                     {sortState.mode === 'provider' ? null : (
                       <Text dimColor>
                         {' '}
-                        · {PROVIDER_BY_ID[entry.model.providerId]?.name ?? entry.model.providerId}
+                        ·{' '}
+                        {PROVIDER_BY_ID[entry.model.providerId]?.name ??
+                          entry.model.providerId}
                       </Text>
                     )}
                     {isCurrent ? <Text dimColor> ✓</Text> : null}
@@ -250,7 +264,11 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
   );
 }
 
-function compareModels(a: ModelInfo, b: ModelInfo, sortState: SortState): number {
+function compareModels(
+  a: ModelInfo,
+  b: ModelInfo,
+  sortState: SortState
+): number {
   if (sortState.mode === 'provider') {
     const providerOrder = [
       ProviderId.OpenRouter,
@@ -259,7 +277,10 @@ function compareModels(a: ModelInfo, b: ModelInfo, sortState: SortState): number
       ProviderId.Ollama,
       ProviderId.LmStudio,
     ];
-    const orderedProviders = sortState.direction === 'asc' ? providerOrder : [...providerOrder].reverse();
+    const orderedProviders =
+      sortState.direction === 'asc'
+        ? providerOrder
+        : [...providerOrder].reverse();
     const ai = orderedProviders.indexOf(a.providerId);
     const bi = orderedProviders.indexOf(b.providerId);
     if (ai !== bi) return ai - bi;
@@ -269,20 +290,27 @@ function compareModels(a: ModelInfo, b: ModelInfo, sortState: SortState): number
   if (sortState.mode === 'context-window') {
     const aContext = a.contextWindow ?? Number.NEGATIVE_INFINITY;
     const bContext = b.contextWindow ?? Number.NEGATIVE_INFINITY;
-    if (aContext !== bContext) return sortState.direction === 'asc' ? aContext - bContext : bContext - aContext;
+    if (aContext !== bContext)
+      return sortState.direction === 'asc'
+        ? aContext - bContext
+        : bContext - aContext;
     return compareStrings(a.displayName, b.displayName, sortState.direction);
   }
 
-  const key = sortState.mode === 'input-cost' ? 'inputPerToken' : 'outputPerToken';
+  const key =
+    sortState.mode === 'input-cost' ? 'inputPerToken' : 'outputPerToken';
   const aCost = a.pricing?.[key] ?? Number.POSITIVE_INFINITY;
   const bCost = b.pricing?.[key] ?? Number.POSITIVE_INFINITY;
-  if (aCost !== bCost) return sortState.direction === 'asc' ? aCost - bCost : bCost - aCost;
+  if (aCost !== bCost)
+    return sortState.direction === 'asc' ? aCost - bCost : bCost - aCost;
   return compareStrings(a.displayName, b.displayName, sortState.direction);
 }
 
 function cycleSortState(current: SortState, step: 1 | -1): SortState {
   const index = SORT_STATES.findIndex(
-    (candidate) => candidate.mode === current.mode && candidate.direction === current.direction
+    (candidate) =>
+      candidate.mode === current.mode &&
+      candidate.direction === current.direction
   );
   return SORT_STATES[(index + step + SORT_STATES.length) % SORT_STATES.length]!;
 }
@@ -291,7 +319,11 @@ function formatSortState(sortState: SortState): string {
   return `${SORT_MODE_LABELS[sortState.mode]} ${sortState.direction}`;
 }
 
-function compareStrings(a: string, b: string, direction: SortDirection): number {
+function compareStrings(
+  a: string,
+  b: string,
+  direction: SortDirection
+): number {
   return direction === 'asc' ? a.localeCompare(b) : b.localeCompare(a);
 }
 
@@ -318,5 +350,8 @@ function formatModelMeta(model: ModelInfo): string {
 }
 
 function formatCompactNumber(value: number): string {
-  return new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+  return new Intl.NumberFormat('en', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(value);
 }

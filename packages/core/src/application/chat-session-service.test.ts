@@ -194,7 +194,10 @@ describe('ChatSessionService', () => {
 
   it('aborts an in-flight request when the signal is cancelled', async () => {
     const repository = new InMemoryConversationRepository();
-    const service = new ChatSessionService(repository, createAbortableProvider());
+    const service = new ChatSessionService(
+      repository,
+      createAbortableProvider()
+    );
     const controller = new AbortController();
 
     const startedSession = await service.startSession({

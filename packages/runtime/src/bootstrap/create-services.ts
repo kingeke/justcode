@@ -30,7 +30,8 @@ const PROVIDER_SPECS: ProviderSpec[] = [
   {
     id: ProviderId.Ollama,
     getApiKey: (config) => config.ollama.apiKey,
-    create: (config) => new OllamaProvider(config.ollama.baseUrl, config.ollama.apiKey),
+    create: (config) =>
+      new OllamaProvider(config.ollama.baseUrl, config.ollama.apiKey),
   },
   {
     id: ProviderId.LmStudio,
@@ -52,7 +53,10 @@ const PROVIDER_SPECS: ProviderSpec[] = [
     id: ProviderId.OpenRouter,
     getApiKey: (config) => config.openrouter.apiKey,
     create: (config) =>
-      new OpenRouterProvider(config.openrouter.apiKey!, config.openrouter.baseUrl),
+      new OpenRouterProvider(
+        config.openrouter.apiKey!,
+        config.openrouter.baseUrl
+      ),
   },
   {
     id: ProviderId.Alibaba,

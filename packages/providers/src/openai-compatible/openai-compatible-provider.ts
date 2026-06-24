@@ -113,16 +113,16 @@ export class OpenAiCompatibleProvider implements ProviderClient {
     if (request.onToken) {
       let accumulated = '';
       let reasoning = '';
-        const { usage: streamUsage, toolCalls } = await requestSseStream(
-          joinUrl(this.options.baseUrl, '/chat/completions'),
-          {
-            method: 'POST',
-            headers: this.createHeaders(),
-            ...(request.signal ? { signal: request.signal } : {}),
-            body: {
-              model: request.model,
-              messages,
-              stream: true,
+      const { usage: streamUsage, toolCalls } = await requestSseStream(
+        joinUrl(this.options.baseUrl, '/chat/completions'),
+        {
+          method: 'POST',
+          headers: this.createHeaders(),
+          ...(request.signal ? { signal: request.signal } : {}),
+          body: {
+            model: request.model,
+            messages,
+            stream: true,
             stream_options: { include_usage: true },
             ...(tools ? { tools, tool_choice: 'auto' } : {}),
           },

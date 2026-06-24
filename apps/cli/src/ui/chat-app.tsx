@@ -29,22 +29,28 @@ import type {
   ProviderId,
   ProviderClient,
 } from '@core/ports/chat-model';
-import type { ProviderConnectionInfo } from '@core/ports/provider-catalog';
+import type { GlobalConfig } from '@runtime/persistence/global-config';
+import { mergeProviderConfig } from '@runtime/persistence/global-config';
 import { renderMarkdown, renderMarkdownAsync } from './render-markdown.js';
 import { COMMANDS, filterCommands, parseCommandInput } from './commands.js';
-import { ConnectPicker } from './connect-picker.js';
+import {
+  ConnectPicker,
+  type ConnectedProviderResult,
+} from './connect-picker.js';
 import { ModelPicker } from './model-picker.js';
 
 const MAX_COMMAND_ITEMS = 8;
 
 interface ChatAppProps {
   providerId: ProviderId;
+  savedConfig: GlobalConfig;
   chatSessionService: ChatSessionService;
   promptAttachmentService: PromptAttachmentService;
   sessionId: string;
   requestedModel: string | undefined;
   allProviders: ProviderClient[];
   createProvider: (id: ProviderId) => ProviderClient;
+  onConfigChange: (config: GlobalConfig) => void;
   onModelChange?: (modelId: string, providerId: string) => void;
   initialThinkingCollapsed?: boolean;
   onThinkingCollapsedChange?: (collapsed: boolean) => void;
@@ -97,6 +103,10 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     null
   );
   const [activeProviderId, setActiveProviderId] = useState(props.providerId);
+  const [connectedProviders, setConnectedProviders] = useState<
+    ProviderClient[]
+  >([]);
+  const [savedConfig, setSavedConfig] = useState(props.savedConfig);
   const [metrics, setMetrics] = useState(getInitialMetrics);
   const [lastStats, setLastStats] = useState<{
     ttftMs: number;
@@ -237,6 +247,20 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   const selectedSuggestion =
     mentionSuggestions[selectedSuggestionIndex] ?? mentionSuggestions[0];
 
+  const configuredProviderIds = Object.keys(
+    savedConfig.providers ?? {}
+  ) as ProviderId[];
+  const configuredProviders = savedConfig.providers ?? {};
+
+  const availableProviders = useMemo(
+    () => mergeProviders(props.allProviders, connectedProviders),
+    [connectedProviders, props.allProviders]
+  );
+
+  const resolveProviderClient = (providerId: ProviderId): ProviderClient =>
+    availableProviders.find((provider) => provider.providerId === providerId) ??
+    props.createProvider(providerId);
+
   useInput((value, key) => {
     if (showModelPicker || showConnectPicker) return;
 
@@ -354,10 +378,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     }
   }, [input]);
 
-  const loadSession = (
-    sessionId: string,
-    requestedModel?: string
-  ): void => {
+  const loadSession = (sessionId: string, requestedModel?: string): void => {
     resetFreshSessionState();
     setStatus('Loading session...');
     setSession(null);
@@ -367,7 +388,9 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     const modelForSession = requestedModel ?? props.requestedModel;
     void props.chatSessionService
       .startSession(
-        modelForSession ? { sessionId, requestedModel: modelForSession } : { sessionId }
+        modelForSession
+          ? { sessionId, requestedModel: modelForSession }
+          : { sessionId }
       )
       .then((startedSession) => {
         const modelInfo =
@@ -406,7 +429,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   }, [props.promptAttachmentService]);
 
   useEffect(() => {
-    void Promise.allSettled(props.allProviders.map((p) => p.listModels())).then(
+    void Promise.allSettled(availableProviders.map((p) => p.listModels())).then(
       (results) => {
         const models = results
           .filter((r) => r.status === 'fulfilled')
@@ -414,7 +437,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         startTransition(() => setAllModels(models));
       }
     );
-  }, [props.allProviders]);
+  }, [availableProviders]);
 
   useEffect(() => {
     const messages = conversation?.messages;
@@ -440,7 +463,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     setShowModelPicker(false);
     if (model.providerId !== activeProviderId) {
       try {
-        const newProvider = props.createProvider(model.providerId);
+        const newProvider = resolveProviderClient(model.providerId);
         props.chatSessionService.switchProvider(newProvider);
         setActiveProviderId(model.providerId);
       } catch (e) {
@@ -454,49 +477,31 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     props.onModelChange?.(model.id, model.providerId);
   };
 
-  const handleConnectSelect = async (
-    providerInfo: ProviderConnectionInfo
-  ): Promise<void> => {
-    let provider: ProviderClient;
+  const handleConnectComplete = async ({
+    providerId,
+    client,
+    selectedModel,
+    config,
+    provider,
+  }: ConnectedProviderResult): Promise<void> => {
+    const nextConfig = mergeProviderConfig(savedConfig, providerId, config);
 
-    try {
-      provider = props.createProvider(providerInfo.id);
-    } catch (e) {
-      setError(getErrorMessage(e));
-      setStatus('Connect failed');
-      return;
-    }
-
-    try {
-      const models = await provider.listModels();
-      if (models.length === 0) {
-        setError(`No models are available for provider '${providerInfo.name}'.`);
-        setStatus('Connect failed');
-        return;
-      }
-
-      const selectedModel =
-        models.find((model) => model.id === provider.getDefaultModel()) ??
-        models[0];
-      if (!selectedModel) {
-        setError(`No models are available for provider '${providerInfo.name}'.`);
-        setStatus('Connect failed');
-        return;
-      }
-
-      props.chatSessionService.switchProvider(provider);
-      startTransition(() => {
-        setActiveProviderId(providerInfo.id);
-        setActiveModel(selectedModel.id);
-        setActiveModelInfo(selectedModel);
-        setStatus(`Connected to ${providerInfo.name}`);
-      });
-      props.onModelChange?.(selectedModel.id, providerInfo.id);
-      setShowConnectPicker(false);
-    } catch (e) {
-      setError(getErrorMessage(e));
-      setStatus('Connect failed');
-    }
+    setConnectedProviders((current) => {
+      const next = current.filter(
+        (provider) => provider.providerId !== providerId
+      );
+      next.push(client);
+      return next;
+    });
+    props.onConfigChange(nextConfig);
+    setSavedConfig(nextConfig);
+    props.chatSessionService.switchProvider(client);
+    setActiveProviderId(providerId);
+    setActiveModel(selectedModel.id);
+    setActiveModelInfo(selectedModel);
+    setStatus(`Connected to ${provider.name}`);
+    props.onModelChange?.(selectedModel.id, providerId);
+    setShowConnectPicker(false);
   };
 
   const resolveApproval = (approved: boolean, always: boolean): void => {
@@ -596,7 +601,9 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     if (isSending || !value.trim()) return;
 
     if (showMentionSuggestions && selectedSuggestion) {
-      setInputWithCursorAtEnd(applyMentionSuggestion(value, selectedSuggestion));
+      setInputWithCursorAtEnd(
+        applyMentionSuggestion(value, selectedSuggestion)
+      );
       return;
     }
 
@@ -763,8 +770,10 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       const nextOutputTokens = estimateTokenCount(
         capturedThinking + capturedContent
       );
-      const nextTotalOutputTokens = sessionTotals.outputTokens + nextOutputTokens;
-      const nextGenerationMs = sessionTotals.generationMs + capturedGenerationMs;
+      const nextTotalOutputTokens =
+        sessionTotals.outputTokens + nextOutputTokens;
+      const nextGenerationMs =
+        sessionTotals.generationMs + capturedGenerationMs;
       const nextAverageTokensPerSecond = getAverageTokensPerSecond(
         nextTotalOutputTokens,
         nextGenerationMs
@@ -896,7 +905,9 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     return (
       <ConnectPicker
         activeProviderId={activeProviderId}
-        onSelect={(providerInfo) => void handleConnectSelect(providerInfo)}
+        configuredProviderIds={configuredProviderIds}
+        configuredProviders={configuredProviders}
+        onComplete={(result) => void handleConnectComplete(result)}
         onCancel={() => setShowConnectPicker(false)}
       />
     );
@@ -918,7 +929,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
           conversation.messages.map((message) => {
             const thinking =
               message.role === 'assistant'
-                ? message.thinking ?? messageThinking[message.id]
+                ? (message.thinking ?? messageThinking[message.id])
                 : undefined;
             return (
               <Box key={message.id} flexDirection="column">
@@ -1148,8 +1159,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       {metrics.inputTokens > 0 ? (
         <Box marginTop={1}>
           <Text dimColor>
-            in{' '}
-            <Text color="white">{metrics.inputTokens.toLocaleString()}</Text>{' '}
+            in <Text color="white">{metrics.inputTokens.toLocaleString()}</Text>{' '}
             out{' '}
             <Text color="white">{metrics.outputTokens.toLocaleString()}</Text>
             {metrics.cachedTokens > 0 ? (
@@ -1196,9 +1206,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         {displayStats ? (
           <Text dimColor>
             TTFT {formatDuration(displayStats.ttftMs)} ·{' '}
-            <Text color="white">
-              {displayStats.tokensPerSecond.toFixed(1)}
-            </Text>{' '}
+            <Text color="white">{displayStats.tokensPerSecond.toFixed(1)}</Text>{' '}
             tok/s · AVG{' '}
             <Text color="white">
               {displayStats.avgTokensPerSecond.toFixed(1)}
@@ -1231,7 +1239,11 @@ function getLiveStats(
   outputText: string,
   tick: number,
   sessionTotals: { outputTokens: number; generationMs: number }
-): { ttftMs: number; tokensPerSecond: number; avgTokensPerSecond: number } | null {
+): {
+  ttftMs: number;
+  tokensPerSecond: number;
+  avgTokensPerSecond: number;
+} | null {
   if (!timing.startMs) {
     return null;
   }
@@ -1308,6 +1320,23 @@ function truncatePreview(preview: string): string {
 
 function contextPct(inputTokens: number, contextWindow: number): number {
   return Math.round((inputTokens / contextWindow) * 100);
+}
+
+function mergeProviders(
+  baseProviders: ProviderClient[],
+  extraProviders: ProviderClient[]
+): ProviderClient[] {
+  const byId = new Map<ProviderId, ProviderClient>();
+
+  for (const provider of baseProviders) {
+    byId.set(provider.providerId, provider);
+  }
+
+  for (const provider of extraProviders) {
+    byId.set(provider.providerId, provider);
+  }
+
+  return [...byId.values()];
 }
 
 function formatTime(isoDate: string): string {

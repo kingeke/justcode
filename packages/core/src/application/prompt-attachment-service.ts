@@ -33,10 +33,7 @@ export class PromptAttachmentService {
         const bytes = await this.workspaceFiles.readFileBytes(relativePath);
         resolved.push({
           path: relativePath,
-          content: formatAttachmentContent(
-            bytes,
-            this.getMaxAttachmentBytes()
-          ),
+          content: formatAttachmentContent(bytes, this.getMaxAttachmentBytes()),
         });
       } catch {
         // Skip mentions that don't resolve to a readable file (e.g. a typo or
@@ -177,10 +174,7 @@ function createAbortError(): Error {
   return new DOMException('The operation was aborted.', 'AbortError');
 }
 
-function formatAttachmentContent(
-  bytes: Uint8Array,
-  maxBytes: number
-): string {
+function formatAttachmentContent(bytes: Uint8Array, maxBytes: number): string {
   if (bytes.length === 0) {
     return '';
   }

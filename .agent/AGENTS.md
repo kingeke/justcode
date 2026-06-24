@@ -8,6 +8,7 @@ Always:
 4. Expand context incrementally.
 5. Use absolute imports for project code with `@cli`, `@core`, `@providers`, and `@runtime`.
 6. Run `npm run format` after code changes so the repository stays Prettier-formatted.
+7. Keep the existing app color palette as the default for new UI work unless a change explicitly calls for a new visual language.
 
 Treat full repository reads as a last resort.
 
