@@ -55,7 +55,9 @@ import {
   type ConnectedProviderResult,
 } from '@cli/ui/connect-picker.js';
 import { ModelPicker } from '@cli/ui/model-picker.js';
+import { SessionPicker } from '@cli/ui/session-picker.js';
 import { ProviderId } from '@core/ports/provider-catalog.js';
+import type { ConversationSummary } from '@core/ports/conversation-repository';
 
 const MAX_COMMAND_ITEMS = 8;
 
@@ -279,9 +281,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const needsConnect = props.providerId === undefined;
   const [showConnectPicker, setShowConnectPicker] = useState(needsConnect);
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [showSessionPicker, setShowSessionPicker] = useState(false);
   // When the model picker is opened right after connecting, it shows only the
   // freshly connected provider's models (allModels hasn't refreshed yet).
   const [connectModels, setConnectModels] = useState<ModelInfo[] | null>(null);
+  const [sessionSummaries, setSessionSummaries] = useState<
+    ConversationSummary[]
+  >([]);
+  const [sessionSummariesLoading, setSessionSummariesLoading] = useState(false);
   const [allModels, setAllModels] = useState<ModelInfo[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState(props.sessionId);
   const [session, setSession] = useState<StartSessionResult | null>(null);
@@ -587,7 +594,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     props.createProvider(providerId);
 
   useKeyboard((key) => {
-    if (showModelPicker || showConnectPicker) return;
+    if (showModelPicker || showConnectPicker || showSessionPicker) return;
 
     const value = key.sequence ?? '';
 
@@ -845,6 +852,32 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     );
   }, [availableProviders]);
 
+  useEffect(() => {
+    if (!showSessionPicker) return;
+
+    let cancelled = false;
+    setSessionSummariesLoading(true);
+    void props.chatSessionService
+      .listSessions()
+      .then((sessions) => {
+        if (cancelled) return;
+        startTransition(() => {
+          setSessionSummaries(sessions);
+          setSessionSummariesLoading(false);
+        });
+      })
+      .catch((caughtError: unknown) => {
+        if (cancelled) return;
+        setSessionSummaries([]);
+        setSessionSummariesLoading(false);
+        setError(getErrorMessage(caughtError));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [props.chatSessionService, showSessionPicker]);
+
   const handleModelSelect = (model: ModelInfo): void => {
     setShowModelPicker(false);
     setConnectModels(null);
@@ -920,6 +953,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
     if (name === 'models') {
       setShowModelPicker(true);
+      return;
+    }
+
+    if (name === 'sessions') {
+      setShowSessionPicker(true);
       return;
     }
 
@@ -1411,6 +1449,24 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           if (!session && activeModel) {
             loadSession(currentSessionId, activeModel);
           }
+        }}
+      />
+    );
+  }
+
+  if (showSessionPicker) {
+    return (
+      <SessionPicker
+        sessions={sessionSummaries}
+        currentSessionId={currentSessionId}
+        loading={sessionSummariesLoading}
+        onSelect={(sessionId) => {
+          setShowSessionPicker(false);
+          setStatus('Loading session...');
+          setCurrentSessionId(sessionId);
+        }}
+        onCancel={() => {
+          setShowSessionPicker(false);
         }}
       />
     );

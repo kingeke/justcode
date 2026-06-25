@@ -15,6 +15,14 @@ import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 
 class InMemoryConversationRepository implements ConversationRepository {
   public conversation = createConversation('session-1');
+  public sessions = [
+    {
+      sessionId: this.conversation.sessionId,
+      createdAt: this.conversation.createdAt,
+      updatedAt: this.conversation.updatedAt,
+      messageCount: this.conversation.messages.length,
+    },
+  ];
 
   public async load(
     _sessionId: string
@@ -30,6 +38,10 @@ class InMemoryConversationRepository implements ConversationRepository {
 
   public async clear(_sessionId: string): Promise<void> {
     this.conversation = createConversation(_sessionId);
+  }
+
+  public async list() {
+    return this.sessions;
   }
 }
 
@@ -198,6 +210,13 @@ describe('ChatSessionService', () => {
     expect(result.conversation.messages[0]?.role).toBe('user');
     expect(result.conversation.messages[1]?.role).toBe('assistant');
     expect(repository.conversation.messages).toHaveLength(2);
+  });
+
+  it('lists saved sessions', async () => {
+    const repository = new InMemoryConversationRepository();
+    const service = new ChatSessionService(repository, createProviderStub());
+
+    await expect(service.listSessions()).resolves.toEqual(repository.sessions);
   });
 
   it('injects root AGENTS.md into the system prompt when available', async () => {

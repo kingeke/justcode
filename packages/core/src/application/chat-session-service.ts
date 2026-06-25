@@ -15,6 +15,7 @@ import {
   type TokenUsage,
 } from '@core/ports/chat-model';
 import type { ConversationRepository } from '@core/ports/conversation-repository';
+import type { ConversationSummary } from '@core/ports/conversation-repository';
 import type {
   Tool,
   ToolExecutionContext,
@@ -134,6 +135,10 @@ export class ChatSessionService {
   public async clearSession(sessionId: string): Promise<Conversation> {
     await this.repository.clear(sessionId);
     return createConversation(sessionId);
+  }
+
+  public async listSessions(): Promise<ConversationSummary[]> {
+    return this.repository.list();
   }
 
   public async submitMessage(

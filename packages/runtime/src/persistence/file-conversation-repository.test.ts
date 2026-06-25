@@ -49,4 +49,30 @@ describe('FileConversationRepository', () => {
       durationMs: 123,
     });
   });
+
+  it('lists saved sessions sorted by most recent activity', async () => {
+    const repository = new FileConversationRepository(directory);
+
+    const olderConversation = createConversation('older-session', new Date(1));
+    const newerConversation = createConversation('newer-session', new Date(2));
+    newerConversation.messages.push(createMessage('user', 'recent'));
+
+    await repository.save(olderConversation);
+    await repository.save(newerConversation);
+
+    await expect(repository.list()).resolves.toEqual([
+      {
+        sessionId: 'newer-session',
+        createdAt: newerConversation.createdAt,
+        updatedAt: newerConversation.updatedAt,
+        messageCount: 1,
+      },
+      {
+        sessionId: 'older-session',
+        createdAt: olderConversation.createdAt,
+        updatedAt: olderConversation.updatedAt,
+        messageCount: 0,
+      },
+    ]);
+  });
 });
