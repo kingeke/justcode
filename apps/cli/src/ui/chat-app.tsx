@@ -8,7 +8,6 @@ import React, {
 } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import Spinner from 'ink-spinner';
-import TextInput from 'ink-text-input';
 
 import {
   applyMentionSuggestion,
@@ -38,6 +37,7 @@ import {
 } from './connect-picker.js';
 import { ModelPicker } from './model-picker.js';
 import { ProviderId } from '@core/ports/provider-catalog.js';
+import { TextArea } from '@cli/ui/text-area.js';
 
 const MAX_COMMAND_ITEMS = 8;
 
@@ -1437,19 +1437,24 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       {browseIndex !== null ? (
         <Box marginTop={1}>
           <Text dimColor>
-            browsing commands · ↑/↓ select · enter show/hide output · esc back to
-            prompt
+            browsing commands · ↑/↓ select · enter show/hide output · esc back
+            to prompt
           </Text>
         </Box>
-      ) : bashToolMessages.length > 0 && !input && !isSending && !expandTools ? (
+      ) : bashToolMessages.length > 0 &&
+        !input &&
+        !isSending &&
+        !expandTools ? (
         <Box marginTop={1}>
-          <Text dimColor>↑ to browse {bashToolMessages.length} command output(s)</Text>
+          <Text dimColor>
+            ↑ to browse {bashToolMessages.length} command output(s)
+          </Text>
         </Box>
       ) : null}
 
       <Box marginTop={1}>
         <Text>{isSending ? 'sending' : 'prompt'}&gt; </Text>
-        <TextInput
+        <TextArea
           key={inputKey}
           value={input}
           onChange={setInput}

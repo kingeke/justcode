@@ -10,6 +10,7 @@ Always:
 - Run `npm run format` after code changes so the repository stays Prettier-formatted.
 - Run `npm run typecheck` after code changes so you can confirm any typescript errors.
 - Keep the existing app color palette as the default for new UI work unless a change explicitly calls for a new visual language.
+- All imports must use absolute path and not relative path
 
 Treat full repository reads as a last resort.
 

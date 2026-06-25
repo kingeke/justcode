@@ -95,7 +95,10 @@ export class ReadFileTool implements Tool {
 
     const { path, offset, limit } = parsed;
     if (!path) {
-      return { content: 'Invalid arguments: "path" is required.', isError: true };
+      return {
+        content: 'Invalid arguments: "path" is required.',
+        isError: true,
+      };
     }
 
     let text: string;
@@ -123,7 +126,8 @@ export class ReadFileTool implements Tool {
     }
 
     const maxLines = Math.max(1, Math.floor(this.getMaxLines()));
-    const requested = limit !== undefined ? Math.min(limit, maxLines) : maxLines;
+    const requested =
+      limit !== undefined ? Math.min(limit, maxLines) : maxLines;
     const lineStart = offset;
     const lineEnd = Math.min(offset + requested - 1, totalLines);
     const truncated = lineEnd < totalLines;
@@ -163,7 +167,11 @@ function tryParse(rawArguments: string): ReadFileArguments | undefined {
       limit = Math.max(1, Math.floor(parsed.limit));
     }
 
-    return { path: parsed.path, offset, ...(limit !== undefined ? { limit } : {}) };
+    return {
+      path: parsed.path,
+      offset,
+      ...(limit !== undefined ? { limit } : {}),
+    };
   } catch {
     return undefined;
   }

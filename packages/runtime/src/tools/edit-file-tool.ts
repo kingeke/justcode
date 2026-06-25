@@ -115,7 +115,10 @@ export class EditFileTool implements Tool {
 
     const { path, oldString, newString } = parsed;
     if (!path) {
-      return { content: 'Invalid arguments: "path" is required.', isError: true };
+      return {
+        content: 'Invalid arguments: "path" is required.',
+        isError: true,
+      };
     }
     if (oldString.length === 0) {
       return {
@@ -221,7 +224,9 @@ function planEdit(parsed: EditFileArguments, original: string): EditPlan {
     return { error: `No match for "old_string" in ${path}${where}.` };
   }
   if (matches.length > 1 && !replaceAll) {
-    return { error: ambiguousMessage(path, oldString, matches, original, where) };
+    return {
+      error: ambiguousMessage(path, oldString, matches, original, where),
+    };
   }
 
   const updated = applyReplacements(original, oldString, newString, matches);
@@ -254,19 +259,31 @@ function resolveWindow(
 
   const start = startLine ?? 1;
   const end = endLine ?? lineCount;
-  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < 1) {
-    return { error: 'Invalid arguments: line numbers must be positive integers' };
+  if (
+    !Number.isInteger(start) ||
+    !Number.isInteger(end) ||
+    start < 1 ||
+    end < 1
+  ) {
+    return {
+      error: 'Invalid arguments: line numbers must be positive integers',
+    };
   }
   if (start > end) {
-    return { error: `Invalid arguments: start_line ${start} is after end_line ${end}` };
+    return {
+      error: `Invalid arguments: start_line ${start} is after end_line ${end}`,
+    };
   }
   if (start > lineCount) {
-    return { error: `Invalid arguments: start_line ${start} is past the end of the file` };
+    return {
+      error: `Invalid arguments: start_line ${start} is past the end of the file`,
+    };
   }
 
   const from = lineStarts[start - 1] ?? 0;
   // Include the full text of `end` (up to, but not including, the next line).
-  const to = end < lineCount ? (lineStarts[end] ?? content.length) : content.length;
+  const to =
+    end < lineCount ? (lineStarts[end] ?? content.length) : content.length;
   return { from, to };
 }
 
@@ -379,7 +396,8 @@ function tryParse(rawArguments: string): EditFileArguments | undefined {
       replaceAll: parsed.replace_all === true,
       startLine:
         typeof parsed.start_line === 'number' ? parsed.start_line : undefined,
-      endLine: typeof parsed.end_line === 'number' ? parsed.end_line : undefined,
+      endLine:
+        typeof parsed.end_line === 'number' ? parsed.end_line : undefined,
     };
   } catch {
     return undefined;

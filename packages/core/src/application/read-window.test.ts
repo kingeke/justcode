@@ -33,7 +33,9 @@ describe('formatNumberedLine', () => {
     const line = 'x'.repeat(MAX_LINE_LENGTH + 50);
     const formatted = formatNumberedLine(1, line);
 
-    expect(formatted).toContain(`line truncated: ${MAX_LINE_LENGTH + 50} chars`);
+    expect(formatted).toContain(
+      `line truncated: ${MAX_LINE_LENGTH + 50} chars`
+    );
     expect(formatted).toContain(`showing first ${MAX_LINE_LENGTH}`);
     expect(formatted).not.toContain('x'.repeat(MAX_LINE_LENGTH + 1));
   });

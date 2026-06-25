@@ -163,7 +163,9 @@ export class ChatSessionService {
       const systemMessage = createMessage(
         'system',
         buildSystemPrompt(
-          toolsEnabled && this.describeToolsInSystemPrompt ? toolDefinitions : []
+          toolsEnabled && this.describeToolsInSystemPrompt
+            ? toolDefinitions
+            : []
         )
       );
 

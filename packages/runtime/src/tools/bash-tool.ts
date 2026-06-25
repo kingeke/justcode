@@ -85,7 +85,10 @@ export class BashTool implements Tool {
       };
     }
     if (!parsed.command.trim()) {
-      return { content: 'Invalid arguments: "command" is required.', isError: true };
+      return {
+        content: 'Invalid arguments: "command" is required.',
+        isError: true,
+      };
     }
 
     return this.run(
@@ -187,7 +190,10 @@ export class BashTool implements Tool {
 
     const status =
       code !== null ? `exit code ${code}` : `terminated by signal ${signal}`;
-    return { content: `Command failed (${status}).\n${body}${note}`, isError: true };
+    return {
+      content: `Command failed (${status}).\n${body}${note}`,
+      isError: true,
+    };
   }
 }
 
@@ -200,7 +206,10 @@ function tryParse(rawArguments: string): BashArguments | undefined {
 
     let timeout = DEFAULT_BASH_TIMEOUT_MS;
     if (typeof parsed.timeout === 'number' && Number.isFinite(parsed.timeout)) {
-      timeout = Math.min(MAX_BASH_TIMEOUT_MS, Math.max(1, Math.floor(parsed.timeout)));
+      timeout = Math.min(
+        MAX_BASH_TIMEOUT_MS,
+        Math.max(1, Math.floor(parsed.timeout))
+      );
     }
 
     return { command: parsed.command, timeout };

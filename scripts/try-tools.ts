@@ -41,7 +41,9 @@ async function main(): Promise<void> {
       if (diff) console.log('diff:\n' + renderDiff(diff));
     }
     const result = await tool.execute(raw, context);
-    console.log(`result${result.isError ? ' (ERROR)' : ''}:\n${result.content}`);
+    console.log(
+      `result${result.isError ? ' (ERROR)' : ''}:\n${result.content}`
+    );
   };
 
   await call('write index.html', write, {

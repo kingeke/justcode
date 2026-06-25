@@ -89,9 +89,7 @@ describe('ReadFileTool', () => {
       { workspaceRoot }
     );
 
-    expect(result.content).toBe(
-      'lines.txt lines 3-4 of 4\n3 | cc\n4 | dd'
-    );
+    expect(result.content).toBe('lines.txt lines 3-4 of 4\n3 | cc\n4 | dd');
   });
 
   it('honors a per-call limit (capped by the configured max)', async () => {

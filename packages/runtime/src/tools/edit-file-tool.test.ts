@@ -118,10 +118,10 @@ describe('EditFileTool', () => {
 
     const after = await readFile(join(workspaceRoot, 'index.html'), 'utf8');
     // Only the third div changed; the first two are untouched.
-    expect(after).toContain('<h1>Three</h1>\n  <p>This is a not serious file</p>');
-    expect(
-      after.match(/This is a serious file/g)?.length
-    ).toBe(2);
+    expect(after).toContain(
+      '<h1>Three</h1>\n  <p>This is a not serious file</p>'
+    );
+    expect(after.match(/This is a serious file/g)?.length).toBe(2);
   });
 
   it('errors when old_string is absent from the given line window', async () => {
@@ -176,7 +176,11 @@ describe('EditFileTool', () => {
     await seed('a.txt', 'hello');
 
     const result = await tool.execute(
-      JSON.stringify({ path: 'a.txt', old_string: 'hello', new_string: 'hello' }),
+      JSON.stringify({
+        path: 'a.txt',
+        old_string: 'hello',
+        new_string: 'hello',
+      }),
       { workspaceRoot }
     );
 
@@ -186,7 +190,11 @@ describe('EditFileTool', () => {
 
   it('rejects paths that escape the workspace root', async () => {
     const result = await tool.execute(
-      JSON.stringify({ path: '../escape.txt', old_string: 'a', new_string: 'b' }),
+      JSON.stringify({
+        path: '../escape.txt',
+        old_string: 'a',
+        new_string: 'b',
+      }),
       { workspaceRoot }
     );
 

@@ -58,10 +58,9 @@ describe('WriteFileTool', () => {
     expect(created).toEqual({ path: 'new.txt', oldText: '', newText: 'fresh' });
 
     // Overwriting: oldText is the prior content.
-    await tool.execute(
-      JSON.stringify({ path: 'new.txt', content: 'fresh' }),
-      { workspaceRoot }
-    );
+    await tool.execute(JSON.stringify({ path: 'new.txt', content: 'fresh' }), {
+      workspaceRoot,
+    });
     const overwrite = await tool.previewDiff(
       JSON.stringify({ path: 'new.txt', content: 'updated' }),
       { workspaceRoot }

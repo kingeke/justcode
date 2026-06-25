@@ -17,7 +17,10 @@ function Probe() {
       .map(([k]) => k)
       .join('+');
     setRows((r) =>
-      [...r, `bytes=[${bytes}] "${input.replace(/\r/g, '\\r').replace(/\n/g, '\\n').replace(/\x1b/g, 'ESC')}" key=${flags || '(none)'}`].slice(-12)
+      [
+        ...r,
+        `bytes=[${bytes}] "${input.replace(/\r/g, '\\r').replace(/\n/g, '\\n').replace(/\x1b/g, 'ESC')}" key=${flags || '(none)'}`,
+      ].slice(-12)
     );
   });
 
