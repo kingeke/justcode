@@ -6,6 +6,7 @@ import {
   type TextChunk,
 } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
+import { pasteFromClipboard } from './clipboard.js';
 
 export interface TextAreaProps {
   readonly value: string;
@@ -115,6 +116,22 @@ export function TextArea({
     if (key.ctrl && key.name === 'c') return;
     if (key.name === 'tab') return;
     if (key.name === 'escape') return;
+
+    if (
+      (key.meta && key.name === 'v') ||
+      (key.shift && key.name === 'insert')
+    ) {
+      const paste = pasteFromClipboard();
+      if (!paste) return;
+
+      const nextValue =
+        value.slice(0, state.offset) +
+        paste +
+        value.slice(state.offset, value.length);
+      setState({ offset: state.offset + paste.length });
+      onChange(nextValue);
+      return;
+    }
 
     let nextOffset = state.offset;
     let nextValue = value;

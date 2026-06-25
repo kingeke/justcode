@@ -4,6 +4,7 @@ import {
   createTextAttributes,
   RGBA,
   type KeyEvent,
+  type InputRenderable,
   type TextChunk,
 } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
@@ -15,6 +16,7 @@ import {
   type ProviderConfig,
   type ProviderConnectionInfo,
 } from '@core/ports/provider-catalog';
+import { normalizeSingleLinePaste, pasteFromClipboard } from './clipboard.js';
 import { fuzzyFilter } from './fuzzy-filter.js';
 import { Spinner } from './spinner.js';
 
@@ -44,9 +46,6 @@ function queryLineContent(query: string, placeholder: string): StyledText {
   return new StyledText(chunks);
 }
 
-// Renders a typed value (or dim placeholder) with a trailing inverse cursor cell.
-// Used for the API key / base URL fields, which are edited with the same simple
-// keyboard handling as the provider search rather than a separate input widget.
 function fieldChunks(value: string, placeholder: string): TextChunk[] {
   const chunks: TextChunk[] = [];
   if (value.length === 0) {
@@ -56,10 +55,6 @@ function fieldChunks(value: string, placeholder: string): TextChunk[] {
   }
   chunks.push({ __isChunk: true, text: ' ', attributes: INVERSE });
   return chunks;
-}
-
-function fieldContent(value: string, placeholder: string): StyledText {
-  return new StyledText(fieldChunks(value, placeholder));
 }
 
 export interface ConnectedProviderResult {
@@ -91,6 +86,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
   const [baseUrl, setBaseUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
   const scrollOffsetRef = useRef(0);
+  let field: InputRenderable | null | undefined;
 
   // Display order comes straight from the catalog (PROVIDERS) — the single
   // source of truth — so there's no separate ordering to keep in sync here.
@@ -116,8 +112,8 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
 
   useKeyboard((key) => {
     if (step !== 'provider') {
-      // The api-key / base-url steps own keyboard input via <input>; here we only
-      // intercept Escape to step back. Enter is handled by the input's onSubmit.
+      // The api-key / base-url steps own keyboard input via TextArea; here we
+      // only intercept Escape to step back. Enter is handled by onSubmit.
       if (key.name === 'escape') {
         setError(null);
         setStep('provider');
@@ -162,6 +158,14 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
 
     if (key.name === 'backspace' || key.name === 'delete') {
       setQuery((prev) => prev.slice(0, -1));
+      return;
+    }
+
+    if ((key.meta && key.name === 'v') || (key.shift && key.name === 'insert')) {
+      const paste = pasteFromClipboard();
+      if (paste) {
+        setQuery((prev) => prev + normalizeSingleLinePaste(paste));
+      }
       return;
     }
 
@@ -260,31 +264,31 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
           <box marginTop={1} flexDirection="row">
             <text fg={MUTED}>{step === 'api-key' ? 'key> ' : 'url> '}</text>
             <input
-              // Uncontrolled: seed the value once and read the result from
-              // onSubmit. Passing a controlled `value` on every keystroke fights
-              // the input's internal cursor (typing jumps around). The key={step}
-              // remount re-seeds the field (and lands the cursor at the end) when
-              // switching between the api-key and base-url steps.
               key={step}
+              width="100%"
               value={step === 'api-key' ? apiKey : baseUrl}
-              placeholder={
-                step === 'api-key' ? 'paste api key...' : 'base url...'
-              }
+              placeholder={step === 'api-key' ? 'paste api key...' : 'base url...'}
+              placeholderColor={MUTED}
+              textColor="white"
+              focusedTextColor="white"
+              backgroundColor="transparent"
+              focusedBackgroundColor="transparent"
+              cursorColor="white"
               focused
-              onSubmit={(submitted) => {
-                if (!selectedProvider) return;
+              onInput={(nextValue) => {
+                if (step === 'api-key') {
+                  setApiKey(nextValue);
+                } else {
+                  setBaseUrl(nextValue);
+                }
+              }}
+              onSubmit={() => {
+                if (!selectedProvider || !field) return;
 
-                // The React <input> passes the committed string; fall back to the
-                // seeded state for the inherited option's event-shaped overload.
-                const value =
-                  typeof submitted === 'string'
-                    ? submitted
-                    : step === 'api-key'
-                      ? apiKey
-                      : baseUrl;
+                const submitted = field.value;
 
                 if (step === 'api-key') {
-                  const nextApiKey = value.trim();
+                  const nextApiKey = submitted.trim();
                   if (selectedProvider.apiKeyRequired && !nextApiKey) {
                     setError('An API key is required for this provider.');
                     return;
@@ -296,17 +300,28 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
                   return;
                 }
 
-                const nextBaseUrl = value.trim() || baseUrl.trim();
+                const nextBaseUrl = submitted.trim() || baseUrl.trim();
                 if (!nextBaseUrl) {
                   setError('A base URL is required.');
                   return;
                 }
 
+                setBaseUrl(nextBaseUrl);
                 void connectProvider(
                   selectedProvider,
                   nextApiKeyValue(apiKey),
                   nextBaseUrl
                 );
+              }}
+              onKeyDown={(event) => {
+                if (event.name === 'escape') {
+                  event.preventDefault();
+                  setError(null);
+                  setStep('provider');
+                }
+              }}
+              ref={(item) => {
+                field = item;
               }}
             />
           </box>

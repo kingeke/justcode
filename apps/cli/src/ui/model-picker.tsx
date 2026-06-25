@@ -11,6 +11,7 @@ import { useKeyboard } from '@opentui/react';
 import { type ModelInfo } from '@core/ports/chat-model';
 import { PROVIDER_IDS } from '@core/ports/provider-catalog';
 import { PROVIDER_BY_ID } from '@core/ports/provider-catalog';
+import { normalizeSingleLinePaste, pasteFromClipboard } from './clipboard.js';
 import { fuzzyFilter } from './fuzzy-filter.js';
 
 const VISIBLE_ROWS = 18;
@@ -153,6 +154,14 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
 
     if (key.name === 'backspace' || key.name === 'delete') {
       setQuery((prev) => prev.slice(0, -1));
+      return;
+    }
+
+    if ((key.meta && key.name === 'v') || (key.shift && key.name === 'insert')) {
+      const paste = pasteFromClipboard();
+      if (paste) {
+        setQuery((prev) => prev + normalizeSingleLinePaste(paste));
+      }
       return;
     }
 
