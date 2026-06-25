@@ -11,6 +11,7 @@ import {
 import { ProviderId } from '@core/ports/provider-catalog';
 import type { ConversationRepository } from '@core/ports/conversation-repository';
 import type { Tool } from '@core/ports/tool';
+import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 
 class InMemoryConversationRepository implements ConversationRepository {
   public conversation = createConversation('session-1');
@@ -29,6 +30,31 @@ class InMemoryConversationRepository implements ConversationRepository {
 
   public async clear(_sessionId: string): Promise<void> {
     this.conversation = createConversation(_sessionId);
+  }
+}
+
+class InMemoryWorkspaceFiles implements WorkspaceFilePort {
+  public constructor(private readonly files: Record<string, string>) {}
+
+  public async listFiles(): Promise<string[]> {
+    return Object.keys(this.files);
+  }
+
+  public async readFile(relativePath: string): Promise<string> {
+    const content = this.files[relativePath];
+    if (content === undefined) {
+      throw new Error(`File '${relativePath}' was not found.`);
+    }
+
+    return content;
+  }
+
+  public async readFileBytes(relativePath: string): Promise<Uint8Array> {
+    return Buffer.from(await this.readFile(relativePath), 'utf8');
+  }
+
+  public async writeFile(relativePath: string, content: string): Promise<void> {
+    this.files[relativePath] = content;
   }
 }
 
@@ -172,6 +198,54 @@ describe('ChatSessionService', () => {
     expect(result.conversation.messages[0]?.role).toBe('user');
     expect(result.conversation.messages[1]?.role).toBe('assistant');
     expect(repository.conversation.messages).toHaveLength(2);
+  });
+
+  it('injects root AGENTS.md into the system prompt when available', async () => {
+    const repository = new InMemoryConversationRepository();
+    const seenMessages: Array<{ role: string; content: string }> = [];
+    const provider: ProviderClient = {
+      providerId: ProviderId.Ollama,
+      async sendChat({ messages }): Promise<ChatResult> {
+        seenMessages.push(
+          ...messages.map((message) => ({
+            role: message.role,
+            content: message.content,
+          }))
+        );
+        return { content: 'ok' };
+      },
+      async listModels() {
+        return [
+          {
+            id: 'llama3.1',
+            displayName: 'llama3.1',
+            providerId: ProviderId.Ollama,
+          },
+        ];
+      },
+      getDefaultModel() {
+        return undefined;
+      },
+    };
+
+    const service = new ChatSessionService(repository, provider, {
+      workspaceFiles: new InMemoryWorkspaceFiles({
+        'AGENTS.md': '1. Search first.\n2. Read only required files.',
+      }),
+    });
+
+    await service.submitMessage({
+      conversation: createConversation('session-1'),
+      model: 'llama3.1',
+      content: 'Hello',
+    });
+
+    expect(seenMessages[0]).toEqual({
+      role: 'system',
+      content: expect.stringContaining('Project instructions from AGENTS.md:'),
+    });
+    expect(seenMessages[0]?.content).toContain('1. Search first.');
+    expect(seenMessages[0]?.content).toContain('2. Read only required files.');
   });
 
   it('stores message attachments when files are included in a prompt', async () => {

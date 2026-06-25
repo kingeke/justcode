@@ -16,7 +16,10 @@ import {
   type ProviderConfig,
   type ProviderConnectionInfo,
 } from '@core/ports/provider-catalog';
-import { normalizeSingleLinePaste, pasteFromClipboard } from '@cli/ui/clipboard.js';
+import {
+  normalizeSingleLinePaste,
+  pasteFromClipboard,
+} from '@cli/ui/clipboard.js';
 import { fuzzyFilter } from '@cli/ui/fuzzy-filter.js';
 import { Spinner } from '@cli/ui/spinner.js';
 
@@ -161,7 +164,10 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       return;
     }
 
-    if ((key.meta && key.name === 'v') || (key.shift && key.name === 'insert')) {
+    if (
+      (key.meta && key.name === 'v') ||
+      (key.shift && key.name === 'insert')
+    ) {
       const paste = pasteFromClipboard();
       if (paste) {
         setQuery((prev) => prev + normalizeSingleLinePaste(paste));
@@ -267,7 +273,9 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
               key={step}
               width="100%"
               value={step === 'api-key' ? apiKey : baseUrl}
-              placeholder={step === 'api-key' ? 'paste api key...' : 'base url...'}
+              placeholder={
+                step === 'api-key' ? 'paste api key...' : 'base url...'
+              }
               placeholderColor={MUTED}
               textColor="white"
               focusedTextColor="white"

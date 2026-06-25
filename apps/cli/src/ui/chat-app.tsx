@@ -15,7 +15,12 @@ import {
   type TextareaRenderable,
   type TextChunk,
 } from '@opentui/core';
-import { useKeyboard, useTerminalDimensions } from '@opentui/react';
+import {
+  useBlur,
+  useFocus,
+  useKeyboard,
+  useTerminalDimensions,
+} from '@opentui/react';
 import { Spinner } from '@cli/ui/spinner.js';
 import { ansiToStyledText } from '@cli/ui/ansi-to-styled-text.js';
 
@@ -39,7 +44,11 @@ import type { GlobalConfig } from '@runtime/persistence/global-config';
 import { mergeProviderConfig } from '@runtime/persistence/global-config';
 import { renderDiff } from '@cli/ui/render-diff.js';
 import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
-import { COMMANDS, filterCommands, parseCommandInput } from '@cli/ui/commands.js';
+import {
+  COMMANDS,
+  filterCommands,
+  parseCommandInput,
+} from '@cli/ui/commands.js';
 import {
   ConnectPicker,
   type ConnectedProviderResult,
@@ -97,6 +106,7 @@ const MAX_PREVIEW_LINES = 16;
 const EXIT_HINT = 'Press Ctrl+C again to exit';
 const EXIT_WINDOW_MS = 2000;
 const MARKDOWN_FG = '#d4d4d4';
+const INPUT_BG = '#008B8B';
 
 // One shared SyntaxStyle for all markdown rendering. Created lazily on first use
 // (after the native renderer is initialised) so it isn't constructed at import time.
@@ -249,6 +259,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   // not use the terminal's native scrollback the way Ink's flowing output did.
   const dimensions = useTerminalDimensions();
   const scrollRef = useRef<ScrollBoxRenderable | null>(null);
+  const [terminalFocused, setTerminalFocused] = useState(true);
   const scrollToBottom = useCallback((): void => {
     const scroll = scrollRef.current;
     if (scroll && !scroll.isDestroyed) {
@@ -493,7 +504,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
     if (!isSending && browseIndex === null) {
       queueMicrotask(() => {
-        if (!promptArea || promptArea.isDestroyed || isSending || browseIndex !== null) {
+        if (
+          !promptArea ||
+          promptArea.isDestroyed ||
+          isSending ||
+          browseIndex !== null
+        ) {
           return;
         }
 
@@ -501,6 +517,27 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       });
     }
   }, [browseIndex, input, isSending]);
+
+  useFocus(() => {
+    setTerminalFocused(true);
+  });
+
+  useBlur(() => {
+    setTerminalFocused(false);
+  });
+
+  useEffect(() => {
+    if (!terminalFocused || isSending || browseIndex !== null) {
+      return;
+    }
+
+    const area = promptArea;
+    if (!area || area.isDestroyed) {
+      return;
+    }
+
+    area.focus();
+  }, [browseIndex, isSending, terminalFocused]);
 
   const configuredProviderIds = Object.keys(
     savedConfig.providers ?? {}
@@ -1622,26 +1659,37 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           </box>
         ) : null}
 
-        <box marginTop={1} flexDirection="row">
-          <text>{isSending ? 'sending' : 'prompt'}&gt; </text>
+        <box
+          marginTop={1}
+          width="100%"
+          paddingX={1}
+          paddingY={1}
+          backgroundColor={INPUT_BG}
+        >
           <textarea
             key={inputKey}
             initialValue={input}
-            minHeight={1}
+            width="100%"
+            minHeight={3}
             maxHeight={6}
             wrapMode="word"
             placeholder="Ask anything..."
-            focusedTextColor="white"
-            textColor="white"
+            backgroundColor={INPUT_BG}
+            textColor="#111111"
+            focusedTextColor="#111111"
             cursorColor="white"
-            focused={!isSending && browseIndex === null}
+            focused={terminalFocused && !isSending && browseIndex === null}
             onSubmit={() => {
               void submit(promptArea?.plainText ?? input);
             }}
             onKeyDown={(event) => {
               if (!promptArea || promptArea.isDestroyed) return;
 
-              if (event.name === 'return' || event.name === 'kpenter' || event.name === 'linefeed') {
+              if (
+                event.name === 'return' ||
+                event.name === 'kpenter' ||
+                event.name === 'linefeed'
+              ) {
                 event.preventDefault();
                 if (event.shift) {
                   promptArea.insertText('\n');
@@ -1692,11 +1740,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             ) : null}
           </box>
         </box>
-        {metrics.inputTokens > 0 ? (
-          <box marginTop={1}>
-            <text content={metricsLineContent(metrics, activeModelInfo)} />
-          </box>
-        ) : null}
+        <box marginTop={1}>
+          <text content={metricsLineContent(metrics, activeModelInfo)} />
+        </box>
         <box marginTop={1} flexDirection="row" justifyContent="flex-end">
           {displayStats ? (
             <text

@@ -71,6 +71,7 @@ export async function createRuntimeServices(
     chatSessionService: new ChatSessionService(repository, provider, {
       toolRegistry,
       workspaceRoot,
+      workspaceFiles,
     }),
     listModelsService: new ListModelsService(provider),
     promptAttachmentService: new PromptAttachmentService(

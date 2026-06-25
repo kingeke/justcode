@@ -21,6 +21,7 @@ import type {
   ToolInvocationView,
   ToolResult,
 } from '@core/ports/tool';
+import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 import type { ToolRegistry } from '@core/application/tool-registry';
 import { buildSystemPrompt } from '@core/application/system-prompt';
 
@@ -71,6 +72,7 @@ export interface SubmitMessageResult {
 export interface ChatSessionOptions {
   toolRegistry?: ToolRegistry;
   workspaceRoot?: string;
+  workspaceFiles?: WorkspaceFilePort;
   /**
    * Whether to also list the available tools (with their descriptions) in the
    * prose system prompt. Tools are always advertised to the provider via
@@ -84,6 +86,7 @@ export class ChatSessionService {
   private provider: ProviderClient;
   private readonly toolRegistry: ToolRegistry | undefined;
   private readonly workspaceRoot: string;
+  private readonly workspaceFiles: WorkspaceFilePort | undefined;
   private readonly describeToolsInSystemPrompt: boolean;
   /** Models that rejected tools once; we send their requests chat-only after. */
   private readonly toolUnsupportedModels = new Set<string>();
@@ -96,6 +99,7 @@ export class ChatSessionService {
     this.provider = provider;
     this.toolRegistry = options.toolRegistry;
     this.workspaceRoot = options.workspaceRoot ?? process.cwd();
+    this.workspaceFiles = options.workspaceFiles;
     this.describeToolsInSystemPrompt =
       options.describeToolsInSystemPrompt ?? false;
   }
@@ -143,6 +147,7 @@ export class ChatSessionService {
     );
 
     const toolDefinitions = this.toolRegistry?.definitions() ?? [];
+    const projectInstructions = await this.loadProjectInstructions();
     // Models known not to support tools are sent chat-only from the start; the
     // tool section is also dropped from the system prompt so we don't advertise
     // tools the model can't call.
@@ -165,7 +170,8 @@ export class ChatSessionService {
         buildSystemPrompt(
           toolsEnabled && this.describeToolsInSystemPrompt
             ? toolDefinitions
-            : []
+            : [],
+          projectInstructions
         )
       );
 
@@ -282,6 +288,20 @@ export class ChatSessionService {
 
     input.onToolActivity?.({ phase: 'end', toolName: call.name, view, result });
     return result;
+  }
+
+  private async loadProjectInstructions(): Promise<string | undefined> {
+    if (!this.workspaceFiles) {
+      return undefined;
+    }
+
+    try {
+      const agentsMd = await this.workspaceFiles.readFile('AGENTS.md');
+      const trimmed = agentsMd.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private async resolveApproval(
