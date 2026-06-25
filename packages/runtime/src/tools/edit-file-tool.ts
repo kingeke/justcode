@@ -2,6 +2,7 @@ import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 import type {
   Tool,
   ToolDefinition,
+  ToolDiff,
   ToolExecutionContext,
   ToolInvocationView,
   ToolResult,
@@ -112,8 +113,7 @@ export class EditFileTool implements Tool {
       };
     }
 
-    const { path, oldString, newString, replaceAll, startLine, endLine } =
-      parsed;
+    const { path, oldString, newString } = parsed;
     if (!path) {
       return { content: 'Invalid arguments: "path" is required.', isError: true };
     }
@@ -145,40 +145,13 @@ export class EditFileTool implements Tool {
       };
     }
 
-    const lineStarts = getLineStarts(original);
-    const lineCount = lineStarts.length;
-
-    // Resolve the search window (defaults to the whole file).
-    const window = resolveWindow(startLine, endLine, lineCount, lineStarts, original);
-    if ('error' in window) {
-      return { content: `${window.error} (${path} has ${lineCount} lines).`, isError: true };
+    const plan = planEdit(parsed, original);
+    if ('error' in plan) {
+      return { content: plan.error, isError: true };
     }
-
-    const matches = findMatches(
-      original,
-      oldString,
-      window.from,
-      window.to
-    );
-
-    const where = describeWindow(startLine, endLine);
-    if (matches.length === 0) {
-      return {
-        content: `No match for "old_string" in ${path}${where}.`,
-        isError: true,
-      };
-    }
-    if (matches.length > 1 && !replaceAll) {
-      return {
-        content: ambiguousMessage(path, oldString, matches, original, where),
-        isError: true,
-      };
-    }
-
-    const updated = applyReplacements(original, oldString, newString, matches);
 
     try {
-      await this.workspace.writeFile(path, updated);
+      await this.workspace.writeFile(path, plan.updated);
     } catch (error: unknown) {
       return {
         content: `Failed to write ${path}: ${
@@ -188,10 +161,71 @@ export class EditFileTool implements Tool {
       };
     }
 
-    const replaced = matches.length;
-    const noun = replaced === 1 ? 'occurrence' : 'occurrences';
-    return { content: `Edited ${path} (${replaced} ${noun} replaced).` };
+    const noun = plan.count === 1 ? 'occurrence' : 'occurrences';
+    return { content: `Edited ${path} (${plan.count} ${noun} replaced).` };
   }
+
+  public async previewDiff(
+    rawArguments: string,
+    _context: ToolExecutionContext
+  ): Promise<ToolDiff | undefined> {
+    const parsed = tryParse(rawArguments);
+    if (!parsed?.path) {
+      return undefined;
+    }
+    if (
+      parsed.oldString.length === 0 ||
+      parsed.oldString === parsed.newString
+    ) {
+      return undefined;
+    }
+
+    let original: string;
+    try {
+      original = await this.workspace.readFile(parsed.path);
+    } catch {
+      return undefined;
+    }
+
+    const plan = planEdit(parsed, original);
+    if ('error' in plan) {
+      return undefined;
+    }
+    return { path: parsed.path, oldText: original, newText: plan.updated };
+  }
+}
+
+type EditPlan = { updated: string; count: number } | { error: string };
+
+/** Pure core of an edit: resolve the window, find matches, build new content. */
+function planEdit(parsed: EditFileArguments, original: string): EditPlan {
+  const { path, oldString, newString, replaceAll, startLine, endLine } = parsed;
+  const lineStarts = getLineStarts(original);
+  const lineCount = lineStarts.length;
+
+  // Resolve the search window (defaults to the whole file).
+  const window = resolveWindow(
+    startLine,
+    endLine,
+    lineCount,
+    lineStarts,
+    original
+  );
+  if ('error' in window) {
+    return { error: `${window.error} (${path} has ${lineCount} lines).` };
+  }
+
+  const matches = findMatches(original, oldString, window.from, window.to);
+  const where = describeWindow(startLine, endLine);
+  if (matches.length === 0) {
+    return { error: `No match for "old_string" in ${path}${where}.` };
+  }
+  if (matches.length > 1 && !replaceAll) {
+    return { error: ambiguousMessage(path, oldString, matches, original, where) };
+  }
+
+  const updated = applyReplacements(original, oldString, newString, matches);
+  return { updated, count: matches.length };
 }
 
 /** Character offset at which each 1-based line begins. */

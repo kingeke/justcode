@@ -8,7 +8,7 @@ import type {
 } from '@core/ports/tool';
 
 /** Default window size if the user hasn't configured one. */
-export const DEFAULT_MAX_READ_BYTES = 50 * 1024;
+export const DEFAULT_MAX_READ_BYTES = 2 * 1024;
 
 interface ReadFileArguments {
   path: string;

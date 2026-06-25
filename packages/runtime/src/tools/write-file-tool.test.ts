@@ -49,6 +49,42 @@ describe('WriteFileTool', () => {
     expect(result.isError).toBe(true);
   });
 
+  it('previewDiff diffs against the existing file and is empty for creates', async () => {
+    // Creating a new file: oldText is empty (renders as all additions).
+    const created = await tool.previewDiff(
+      JSON.stringify({ path: 'new.txt', content: 'fresh' }),
+      { workspaceRoot }
+    );
+    expect(created).toEqual({ path: 'new.txt', oldText: '', newText: 'fresh' });
+
+    // Overwriting: oldText is the prior content.
+    await tool.execute(
+      JSON.stringify({ path: 'new.txt', content: 'fresh' }),
+      { workspaceRoot }
+    );
+    const overwrite = await tool.previewDiff(
+      JSON.stringify({ path: 'new.txt', content: 'updated' }),
+      { workspaceRoot }
+    );
+    expect(overwrite).toEqual({
+      path: 'new.txt',
+      oldText: 'fresh',
+      newText: 'updated',
+    });
+  });
+
+  it('previewDiff returns undefined when content is unchanged', async () => {
+    await tool.execute(
+      JSON.stringify({ path: 'same.txt', content: 'identical' }),
+      { workspaceRoot }
+    );
+    const diff = await tool.previewDiff(
+      JSON.stringify({ path: 'same.txt', content: 'identical' }),
+      { workspaceRoot }
+    );
+    expect(diff).toBeUndefined();
+  });
+
   it('describes a call with the path as title and content as preview', () => {
     const view = tool.describe(
       JSON.stringify({ path: 'a.txt', content: 'hello' })

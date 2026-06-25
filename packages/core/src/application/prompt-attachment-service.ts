@@ -4,7 +4,7 @@ import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 const ACTIVE_MENTION_PATTERN = /(?:^|\s)@([^\s@]*)$/;
 const MENTION_PATTERN = /(?:^|\s)@([^\s@]+)/g;
 const TRAILING_PUNCTUATION_PATTERN = /[),.:;!?\]]+$/;
-const DEFAULT_MAX_ATTACHMENT_BYTES = 50 * 1024;
+const DEFAULT_MAX_ATTACHMENT_BYTES = 5 * 1024;
 
 export class PromptAttachmentService {
   public constructor(

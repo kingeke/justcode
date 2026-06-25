@@ -29,6 +29,7 @@ import type { ModelInfo, ProviderClient } from '@core/ports/chat-model';
 import type { GlobalConfig } from '@runtime/persistence/global-config';
 import { mergeProviderConfig } from '@runtime/persistence/global-config';
 import { renderMarkdown, renderMarkdownAsync } from './render-markdown.js';
+import { renderDiff } from './render-diff.js';
 import { COMMANDS, filterCommands, parseCommandInput } from './commands.js';
 import {
   ConnectPicker,
@@ -69,6 +70,8 @@ interface ToolEvent {
   toolName: string;
   title: string;
   status: 'running' | 'done' | 'error';
+  /** Pre-rendered, colored diff for file-changing tools (if any). */
+  diff?: string;
 }
 
 const MAX_PREVIEW_LINES = 16;
@@ -731,6 +734,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
             toolName: event.toolName,
             title: event.view.title,
             status: 'running',
+            ...(event.view.diff ? { diff: renderDiff(event.view.diff) } : {}),
           },
         ]);
         return;
@@ -1072,23 +1076,29 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         {toolEvents.length ? (
           <Box flexDirection="column" marginTop={1}>
             {toolEvents.map((event) => (
-              <Text
-                key={event.key}
-                color={
-                  event.status === 'error'
-                    ? 'red'
+              <Box key={event.key} flexDirection="column">
+                <Text
+                  color={
+                    event.status === 'error'
+                      ? 'red'
+                      : event.status === 'done'
+                        ? 'green'
+                        : 'yellow'
+                  }
+                >
+                  {event.status === 'running'
+                    ? '⚙ '
                     : event.status === 'done'
-                      ? 'green'
-                      : 'yellow'
-                }
-              >
-                {event.status === 'running'
-                  ? '⚙ '
-                  : event.status === 'done'
-                    ? '✓ '
-                    : '✗ '}
-                {event.title}
-              </Text>
+                      ? '✓ '
+                      : '✗ '}
+                  {event.title}
+                </Text>
+                {event.diff ? (
+                  <Box marginLeft={2}>
+                    <Text>{event.diff}</Text>
+                  </Box>
+                ) : null}
+              </Box>
             ))}
           </Box>
         ) : null}
@@ -1104,7 +1114,11 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
               Run {pendingApproval.request.toolName}?
             </Text>
             <Text>{pendingApproval.request.title}</Text>
-            {pendingApproval.request.preview ? (
+            {pendingApproval.request.diff ? (
+              <Box marginTop={1} marginLeft={1}>
+                <Text>{renderDiff(pendingApproval.request.diff)}</Text>
+              </Box>
+            ) : pendingApproval.request.preview ? (
               <Box marginTop={1}>
                 <Text dimColor>
                   {truncatePreview(pendingApproval.request.preview)}

@@ -23,6 +23,7 @@
     "chalk": "5",
     "cli-table3": "^0.6.5",
     "commander": "^13.1.0",
+    "diff": "^9.0.0",
     "ink": "^5.2.1",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",

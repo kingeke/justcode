@@ -200,6 +200,43 @@ describe('EditFileTool', () => {
     expect(result.isError).toBe(true);
   });
 
+  it('previewDiff returns before/after for a valid edit', async () => {
+    await seed('a.txt', 'hello world');
+
+    const diff = await tool.previewDiff(
+      JSON.stringify({
+        path: 'a.txt',
+        old_string: 'world',
+        new_string: 'there',
+      }),
+      { workspaceRoot }
+    );
+
+    expect(diff).toEqual({
+      path: 'a.txt',
+      oldText: 'hello world',
+      newText: 'hello there',
+    });
+  });
+
+  it('previewDiff returns undefined when the edit would not apply', async () => {
+    await seed('a.txt', 'x x x');
+
+    // Ambiguous match → no diff to preview.
+    const ambiguous = await tool.previewDiff(
+      JSON.stringify({ path: 'a.txt', old_string: 'x', new_string: 'y' }),
+      { workspaceRoot }
+    );
+    expect(ambiguous).toBeUndefined();
+
+    // No match → undefined.
+    const missing = await tool.previewDiff(
+      JSON.stringify({ path: 'a.txt', old_string: 'z', new_string: 'y' }),
+      { workspaceRoot }
+    );
+    expect(missing).toBeUndefined();
+  });
+
   it('describes a call with the path as title and a diff-like preview', () => {
     const view = tool.describe(
       JSON.stringify({ path: 'a.txt', old_string: 'foo', new_string: 'bar' })

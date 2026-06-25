@@ -2,6 +2,7 @@ import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 import type {
   Tool,
   ToolDefinition,
+  ToolDiff,
   ToolExecutionContext,
   ToolInvocationView,
   ToolResult,
@@ -50,6 +51,28 @@ export class WriteFileTool implements Tool {
       return { title: 'write_file (unparseable arguments)' };
     }
     return { title: `write ${parsed.path}`, preview: parsed.content };
+  }
+
+  public async previewDiff(
+    rawArguments: string,
+    _context: ToolExecutionContext
+  ): Promise<ToolDiff | undefined> {
+    const parsed = tryParse(rawArguments);
+    if (!parsed?.path) {
+      return undefined;
+    }
+    // Diff against the existing file when overwriting; an empty `oldText`
+    // signals a creation (the whole file reads as additions).
+    let oldText = '';
+    try {
+      oldText = await this.workspace.readFile(parsed.path);
+    } catch {
+      oldText = '';
+    }
+    if (oldText === parsed.content) {
+      return undefined;
+    }
+    return { path: parsed.path, oldText, newText: parsed.content };
   }
 
   public async execute(

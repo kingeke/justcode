@@ -15,7 +15,12 @@ import {
   type TokenUsage,
 } from '@core/ports/chat-model';
 import type { ConversationRepository } from '@core/ports/conversation-repository';
-import type { Tool, ToolInvocationView, ToolResult } from '@core/ports/tool';
+import type {
+  Tool,
+  ToolExecutionContext,
+  ToolInvocationView,
+  ToolResult,
+} from '@core/ports/tool';
 import type { ToolRegistry } from '@core/application/tool-registry';
 import { buildSystemPrompt } from '@core/application/system-prompt';
 
@@ -244,7 +249,10 @@ export class ChatSessionService {
       return { content: `Unknown tool: ${call.name}`, isError: true };
     }
 
-    const view = describeTool(tool, call.arguments);
+    const view = await describeTool(tool, call.arguments, {
+      workspaceRoot: this.workspaceRoot,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
     input.onToolActivity?.({ phase: 'start', toolName: call.name, view });
 
     let result: ToolResult;
@@ -314,12 +322,32 @@ export class ChatSessionService {
   }
 }
 
-function describeTool(tool: Tool, rawArguments: string): ToolInvocationView {
+async function describeTool(
+  tool: Tool,
+  rawArguments: string,
+  context: ToolExecutionContext
+): Promise<ToolInvocationView> {
+  let view: ToolInvocationView;
   try {
-    return tool.describe(rawArguments);
+    view = tool.describe(rawArguments);
   } catch {
-    return { title: tool.definition.name };
+    view = { title: tool.definition.name };
   }
+
+  // Enrich with a before/after diff when the tool supports it. A failure here
+  // is non-fatal — the call still runs, just without the colored preview.
+  if (tool.previewDiff) {
+    try {
+      const diff = await tool.previewDiff(rawArguments, context);
+      if (diff) {
+        view = { ...view, diff };
+      }
+    } catch {
+      // Ignore: previewing a diff must never block the actual call.
+    }
+  }
+
+  return view;
 }
 
 function sumUsage(left: TokenUsage, right: TokenUsage): TokenUsage {
