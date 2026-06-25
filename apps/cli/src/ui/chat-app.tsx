@@ -30,6 +30,7 @@ import type { GlobalConfig } from '@runtime/persistence/global-config';
 import { mergeProviderConfig } from '@runtime/persistence/global-config';
 import { renderMarkdown, renderMarkdownAsync } from './render-markdown.js';
 import { renderDiff } from './render-diff.js';
+import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
 import { COMMANDS, filterCommands, parseCommandInput } from './commands.js';
 import {
   ConnectPicker,
@@ -56,8 +57,8 @@ interface ChatAppProps {
   onThinkingCollapsedChange?: (collapsed: boolean) => void;
   initialAutoApplyWrites?: boolean;
   onAutoApplyWritesChange?: (autoApply: boolean) => void;
-  initialMaxReadBytes?: number;
-  onMaxReadBytesChange?: (bytes: number) => void;
+  initialMaxReadLines?: number;
+  onMaxReadLinesChange?: (lines: number) => void;
 }
 
 interface PendingApproval {
@@ -205,9 +206,11 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     props.initialAutoApplyWrites ?? false
   );
   const autoApplyWritesRef = useRef(props.initialAutoApplyWrites ?? false);
-  const maxReadBytesRef = useRef(props.initialMaxReadBytes ?? 50 * 1024);
-  const [maxReadBytes, setMaxReadBytes] = useState(
-    props.initialMaxReadBytes ?? 50 * 1024
+  const maxReadLinesRef = useRef(
+    props.initialMaxReadLines ?? DEFAULT_MAX_READ_LINES
+  );
+  const [maxReadLines, setMaxReadLines] = useState(
+    props.initialMaxReadLines ?? DEFAULT_MAX_READ_LINES
   );
   const [pendingApproval, setPendingApproval] =
     useState<PendingApproval | null>(null);
@@ -574,25 +577,24 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
     if (name === 'read-limit') {
       const trimmed = (arg ?? '').trim();
-      const currentKb = Math.round(maxReadBytesRef.current / 1024);
+      const current = maxReadLinesRef.current;
       if (!trimmed) {
         setStatus(
-          `Read limit is ${currentKb} KB (use /read-limit <KB> to change)`
+          `Read limit is ${current} lines (use /read-limit <lines> to change)`
         );
         return;
       }
-      const kb = Number.parseInt(trimmed, 10);
-      if (!Number.isFinite(kb) || kb <= 0) {
+      const lines = Number.parseInt(trimmed, 10);
+      if (!Number.isFinite(lines) || lines <= 0) {
         setError(
-          `Invalid read limit '${trimmed}'. Provide a positive number of KB.`
+          `Invalid read limit '${trimmed}'. Provide a positive number of lines.`
         );
         return;
       }
-      const bytes = kb * 1024;
-      maxReadBytesRef.current = bytes;
-      setMaxReadBytes(bytes);
-      props.onMaxReadBytesChange?.(bytes);
-      setStatus(`Read limit set to ${kb} KB`);
+      maxReadLinesRef.current = lines;
+      setMaxReadLines(lines);
+      props.onMaxReadLinesChange?.(lines);
+      setStatus(`Read limit set to ${lines} lines`);
       return;
     }
 
@@ -1174,9 +1176,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
                 {cmd.name === 'read-limit' ? (
                   <Text>
                     {'  '}
-                    <Text color="green">
-                      [{Math.round(maxReadBytes / 1024)} KB]
-                    </Text>
+                    <Text color="green">[{maxReadLines} lines]</Text>
                   </Text>
                 ) : null}
               </Text>

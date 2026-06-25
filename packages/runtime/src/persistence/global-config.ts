@@ -13,8 +13,8 @@ export interface GlobalConfig {
   autoApplyWrites?: boolean;
   /** Tunables for how the agent reads from the workspace. */
   cache?: {
-    /** Max bytes returned by a single file read before it is windowed. */
-    maxReadBytes?: number;
+    /** Max lines returned by a single file read before it is paged. */
+    maxReadLines?: number;
   };
 }
 

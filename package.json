@@ -13,6 +13,7 @@
     "build": "tsup",
     "dev": "tsx apps/cli/src/index.tsx",
     "dev:watch": "tsx watch apps/cli/src/index.tsx",
+    "try:tools": "tsx scripts/try-tools.ts",
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",

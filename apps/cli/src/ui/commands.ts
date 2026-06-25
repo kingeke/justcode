@@ -31,7 +31,7 @@ export const COMMANDS: Command[] = [
   {
     name: 'read-limit',
     description:
-      'Set how much of a file the model reads at once, e.g. /read-limit 64 (KB)',
+      'Set how many lines of a file the model reads at once, e.g. /read-limit 500',
   },
 ];
 

@@ -1,4 +1,8 @@
-import { DEFAULT_MAX_READ_BYTES } from '@core/application/limits';
+import {
+  DEFAULT_MAX_READ_LINES,
+  formatNumberedLine,
+  splitLines,
+} from '@core/application/read-window';
 import type { MessageAttachment } from '@core/domain/message';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 
@@ -9,8 +13,8 @@ const TRAILING_PUNCTUATION_PATTERN = /[),.:;!?\]]+$/;
 export class PromptAttachmentService {
   public constructor(
     private readonly workspaceFiles: WorkspaceFilePort,
-    private readonly getMaxAttachmentBytes: () => number = () =>
-      DEFAULT_MAX_READ_BYTES
+    private readonly getMaxAttachmentLines: () => number = () =>
+      DEFAULT_MAX_READ_LINES
   ) {}
 
   public async listFiles(): Promise<string[]> {
@@ -30,10 +34,10 @@ export class PromptAttachmentService {
       }
 
       try {
-        const bytes = await this.workspaceFiles.readFileBytes(relativePath);
+        const text = await this.workspaceFiles.readFile(relativePath);
         resolved.push({
           path: relativePath,
-          content: formatAttachmentContent(bytes, this.getMaxAttachmentBytes()),
+          content: formatAttachmentLines(text, this.getMaxAttachmentLines()),
         });
       } catch {
         // Skip mentions that don't resolve to a readable file (e.g. a typo or
@@ -174,29 +178,24 @@ function createAbortError(): Error {
   return new DOMException('The operation was aborted.', 'AbortError');
 }
 
-function formatAttachmentContent(bytes: Uint8Array, maxBytes: number): string {
-  if (bytes.length === 0) {
+function formatAttachmentLines(text: string, maxLines: number): string {
+  const lines = splitLines(text);
+  if (lines.length === 0) {
     return '';
   }
 
-  const byteLimit = Math.max(1, Math.floor(maxBytes));
-  const end = Math.min(byteLimit, bytes.length);
-  const text = Buffer.from(bytes.subarray(0, end)).toString('utf8');
-  const body = numberLines(text.replaceAll('\r\n', '\n'));
+  const limit = Math.max(1, Math.floor(maxLines));
+  const shown = lines.slice(0, limit);
+  const body = shown
+    .map((line, index) => formatNumberedLine(index + 1, line))
+    .join('\n');
 
-  if (end >= bytes.length) {
+  if (shown.length >= lines.length) {
     return body;
   }
 
   return (
     body +
-    `\n\n(Output capped at ${byteLimit} bytes. Showing bytes 0-${end} of ${bytes.length}. Use read_file for more.)`
+    `\n\n(Showing lines 1-${shown.length} of ${lines.length}. Use read_file for more.)`
   );
-}
-
-function numberLines(text: string): string {
-  return text
-    .split('\n')
-    .map((line, index) => `${index + 1}\t${line}`)
-    .join('\n');
 }

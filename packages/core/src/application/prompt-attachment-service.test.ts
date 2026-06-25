@@ -48,17 +48,17 @@ describe('PromptAttachmentService', () => {
     );
 
     expect(attachments).toEqual([
-      { path: 'src/app.ts', content: '1\tconsole.log("app")' },
-      { path: 'README.md', content: '1\t# Readme' },
+      { path: 'src/app.ts', content: '1 | console.log("app")' },
+      { path: 'README.md', content: '1 | # Readme' },
     ]);
   });
 
-  it('caps attachment content to the configured number of bytes', async () => {
+  it('caps attachment content to the configured number of lines', async () => {
     const service = new PromptAttachmentService(
       new InMemoryWorkspaceFiles({
-        'src/app.ts': 'abcdef',
+        'src/app.ts': 'one\ntwo\nthree\nfour',
       }),
-      () => 3
+      () => 2
     );
 
     const attachments = await service.resolveAttachments('Review @src/app.ts');
@@ -67,7 +67,7 @@ describe('PromptAttachmentService', () => {
       {
         path: 'src/app.ts',
         content:
-          '1\tabc\n\n(Output capped at 3 bytes. Showing bytes 0-3 of 6. Use read_file for more.)',
+          '1 | one\n2 | two\n\n(Showing lines 1-2 of 4. Use read_file for more.)',
       },
     ]);
   });
@@ -82,7 +82,7 @@ describe('PromptAttachmentService', () => {
     );
 
     expect(attachments).toEqual([
-      { path: 'src/app.ts', content: '1\tconsole.log("app")' },
+      { path: 'src/app.ts', content: '1 | console.log("app")' },
     ]);
   });
 });

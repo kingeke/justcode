@@ -8,7 +8,7 @@ import { WriteFileTool } from '@runtime/tools/write-file-tool';
 import { EditFileTool } from '@runtime/tools/edit-file-tool';
 import {
   ReadFileTool,
-  DEFAULT_MAX_READ_BYTES,
+  DEFAULT_MAX_READ_LINES,
 } from '@runtime/tools/read-file-tool';
 import { ProviderRegistry } from '@runtime/bootstrap/provider-registry';
 import { NullProvider } from '@runtime/bootstrap/null-provider';
@@ -25,15 +25,15 @@ export interface RuntimeServices {
   promptAttachmentService: PromptAttachmentService;
   allProviders: ProviderClient[];
   createProvider: (id: ProviderId) => ProviderClient;
-  /** Update, at runtime, how many bytes a single file read returns. */
-  setMaxReadBytes: (bytes: number) => void;
+  /** Update, at runtime, how many lines a single file read returns. */
+  setMaxReadLines: (lines: number) => void;
 }
 
 export interface CreateRuntimeOptions {
   providerId?: ProviderId;
   configDirectory?: string;
-  /** Initial per-read byte cap; falls back to the default when unset. */
-  maxReadBytes?: number;
+  /** Initial per-read line cap; falls back to the default when unset. */
+  maxReadLines?: number;
 }
 
 export async function createRuntimeServices(
@@ -51,12 +51,12 @@ export async function createRuntimeServices(
   const workspaceRoot = process.cwd();
   const workspaceFiles = new LocalWorkspaceFileService(workspaceRoot);
   const readSettings = {
-    maxReadBytes: options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES,
+    maxReadLines: options.maxReadLines ?? DEFAULT_MAX_READ_LINES,
   };
   const toolRegistry = new ToolRegistry([
     new WriteFileTool(workspaceFiles),
     new EditFileTool(workspaceFiles),
-    new ReadFileTool(workspaceFiles, () => readSettings.maxReadBytes),
+    new ReadFileTool(workspaceFiles, () => readSettings.maxReadLines),
   ]);
   const allProviders = createAllProviders(config);
 
@@ -69,12 +69,12 @@ export async function createRuntimeServices(
     listModelsService: new ListModelsService(provider),
     promptAttachmentService: new PromptAttachmentService(
       workspaceFiles,
-      () => readSettings.maxReadBytes
+      () => readSettings.maxReadLines
     ),
     allProviders,
     createProvider: (id: ProviderId) => registry.create(id),
-    setMaxReadBytes: (bytes: number) => {
-      readSettings.maxReadBytes = bytes;
+    setMaxReadLines: (lines: number) => {
+      readSettings.maxReadLines = lines;
     },
   };
 }

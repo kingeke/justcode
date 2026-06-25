@@ -6,22 +6,29 @@ import type {
   ToolInvocationView,
   ToolResult,
 } from '@core/ports/tool';
+import {
+  MAX_LINE_LENGTH,
+  formatNumberedLine,
+  splitLines,
+} from '@core/application/read-window';
 
 // Re-exported from core so the read_file tool and @-mention attachments share a
 // single default; the runtime still overrides it from user config.
-export { DEFAULT_MAX_READ_BYTES } from '@core/application/limits';
+export { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
 
 interface ReadFileArguments {
   path: string;
   offset: number;
+  limit?: number;
 }
 
 /**
- * Reads a file inside the workspace in fixed-size windows so a single read can
- * never flood the model's context. Windowing is by byte offset (not line) so it
- * stays bounded even for files with very long lines. When the file is larger
- * than the window, the result tells the model the byte offset to pass back in to
- * continue reading. Path-safety is enforced by the underlying `WorkspaceFilePort`.
+ * Reads a file inside the workspace as numbered lines, paging by line so a
+ * single read can never flood the model's context. `offset` is a 1-based line
+ * number and `limit` caps how many lines come back; when more lines remain the
+ * result reports the line range, total line count, and the offset to continue
+ * from. Individual lines longer than `MAX_LINE_LENGTH` are truncated and
+ * flagged. Path-safety is enforced by the underlying `WorkspaceFilePort`.
  */
 export class ReadFileTool implements Tool {
   public readonly requiresApproval = false;
@@ -29,10 +36,12 @@ export class ReadFileTool implements Tool {
   public readonly definition: ToolDefinition = {
     name: 'read_file',
     description:
-      'Read a file in the workspace. The path is relative to the workspace ' +
-      'root. Output is capped at a fixed size; if the file is larger, pass the ' +
-      '"offset" reported in the result to continue reading from where you left ' +
-      'off. Lines are prefixed with their line number.',
+      'Read a file in the workspace as numbered lines. The path is relative ' +
+      'to the workspace root. Use "offset" (1-based line number, default 1) ' +
+      'and "limit" (maximum lines to return) to page through large files; the ' +
+      'result reports the line range shown, the total line count, and whether ' +
+      'more lines remain (pass the next offset to continue). Lines longer than ' +
+      `${MAX_LINE_LENGTH} characters are truncated and flagged.`,
     parameters: {
       type: 'object',
       properties: {
@@ -43,8 +52,14 @@ export class ReadFileTool implements Tool {
         offset: {
           type: 'number',
           description:
-            'Byte offset to start reading from. Defaults to 0 (the start of ' +
-            'the file). Use the offset reported by a previous read to continue.',
+            '1-based line number to start reading from. Defaults to 1 (the ' +
+            'first line). Use the offset reported by a previous read to continue.',
+        },
+        limit: {
+          type: 'number',
+          description:
+            'Maximum number of lines to return. Defaults to (and is capped at) ' +
+            'the configured read limit.',
         },
       },
       required: ['path'],
@@ -54,7 +69,7 @@ export class ReadFileTool implements Tool {
 
   public constructor(
     private readonly workspace: WorkspaceFilePort,
-    private readonly getMaxBytes: () => number
+    private readonly getMaxLines: () => number
   ) {}
 
   public describe(rawArguments: string): ToolInvocationView {
@@ -62,7 +77,7 @@ export class ReadFileTool implements Tool {
     if (!parsed) {
       return { title: 'read_file (unparseable arguments)' };
     }
-    const suffix = parsed.offset > 0 ? ` (from byte ${parsed.offset})` : '';
+    const suffix = parsed.offset > 1 ? ` (from line ${parsed.offset})` : '';
     return { title: `read ${parsed.path}${suffix}` };
   }
 
@@ -78,17 +93,14 @@ export class ReadFileTool implements Tool {
       };
     }
 
-    const { path, offset } = parsed;
+    const { path, offset, limit } = parsed;
     if (!path) {
-      return {
-        content: 'Invalid arguments: "path" is required.',
-        isError: true,
-      };
+      return { content: 'Invalid arguments: "path" is required.', isError: true };
     }
 
-    let bytes: Uint8Array;
+    let text: string;
     try {
-      bytes = await this.workspace.readFileBytes(path);
+      text = await this.workspace.readFile(path);
     } catch (error: unknown) {
       return {
         content: `Failed to read ${path}: ${
@@ -98,47 +110,40 @@ export class ReadFileTool implements Tool {
       };
     }
 
-    const total = bytes.length;
-    if (total === 0) {
+    const lines = splitLines(text);
+    const totalLines = lines.length;
+    if (totalLines === 0) {
       return { content: `${path} is empty.` };
     }
-    if (offset >= total) {
+    if (offset > totalLines) {
       return {
-        content: `Offset ${offset} is at or past the end of ${path} (${total} bytes).`,
+        content: `Offset ${offset} is past the end of ${path} (${totalLines} lines).`,
         isError: true,
       };
     }
 
-    const maxBytes = Math.max(1, Math.floor(this.getMaxBytes()));
-    const buffer = Buffer.from(bytes);
-    const end = Math.min(offset + maxBytes, total);
-    const startLine = countNewlines(buffer.subarray(0, offset)) + 1;
-    const text = buffer.subarray(offset, end).toString('utf8');
+    const maxLines = Math.max(1, Math.floor(this.getMaxLines()));
+    const requested = limit !== undefined ? Math.min(limit, maxLines) : maxLines;
+    const lineStart = offset;
+    const lineEnd = Math.min(offset + requested - 1, totalLines);
+    const truncated = lineEnd < totalLines;
 
-    const body = numberLines(text, startLine);
-    if (end >= total) {
-      return { content: body };
+    const body = lines
+      .slice(lineStart - 1, lineEnd)
+      .map((line, index) => formatNumberedLine(lineStart + index, line))
+      .join('\n');
+
+    const header = `${path} lines ${lineStart}-${lineEnd} of ${totalLines}`;
+    if (!truncated) {
+      return { content: `${header}\n${body}` };
     }
 
-    const shownKb = Math.round((end - offset) / 1024);
-    const note =
-      `\n\n(Output capped at ${shownKb} KB. Showing bytes ${offset}-${end} of ` +
-      `${total}. Use offset=${end} to continue reading.)`;
-    return { content: body + note };
+    const remaining = totalLines - lineEnd;
+    const footer =
+      `\n\n(truncated: ${remaining} more line${remaining === 1 ? '' : 's'}; ` +
+      `use offset=${lineEnd + 1} to continue)`;
+    return { content: `${header}\n${body}${footer}` };
   }
-}
-
-function numberLines(text: string, startLine: number): string {
-  const lines = text.split('\n');
-  return lines.map((line, index) => `${startLine + index}\t${line}`).join('\n');
-}
-
-function countNewlines(buffer: Buffer): number {
-  let count = 0;
-  for (let index = 0; index < buffer.length; index += 1) {
-    if (buffer[index] === 0x0a) count += 1;
-  }
-  return count;
 }
 
 function tryParse(rawArguments: string): ReadFileArguments | undefined {
@@ -147,11 +152,18 @@ function tryParse(rawArguments: string): ReadFileArguments | undefined {
     if (typeof parsed.path !== 'string') {
       return undefined;
     }
-    const rawOffset = typeof parsed.offset === 'number' ? parsed.offset : 0;
+
+    const rawOffset = typeof parsed.offset === 'number' ? parsed.offset : 1;
     const offset = Number.isFinite(rawOffset)
-      ? Math.max(0, Math.floor(rawOffset))
-      : 0;
-    return { path: parsed.path, offset };
+      ? Math.max(1, Math.floor(rawOffset))
+      : 1;
+
+    let limit: number | undefined;
+    if (typeof parsed.limit === 'number' && Number.isFinite(parsed.limit)) {
+      limit = Math.max(1, Math.floor(parsed.limit));
+    }
+
+    return { path: parsed.path, offset, ...(limit !== undefined ? { limit } : {}) };
   } catch {
     return undefined;
   }

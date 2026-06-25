@@ -4,7 +4,7 @@ import React from 'react';
 import { ChatApp } from '@cli/ui/chat-app';
 import type { ProviderId } from '@core/ports/provider-catalog';
 import { createRuntimeServices } from '@runtime/bootstrap/create-services';
-import { DEFAULT_MAX_READ_BYTES } from '@runtime/tools/read-file-tool';
+import { DEFAULT_MAX_READ_LINES } from '@runtime/tools/read-file-tool';
 import { loadAppConfig, parseProviderId } from '@runtime/config/app-config';
 import {
   readGlobalConfig,
@@ -121,8 +121,8 @@ async function runChat(options: SharedOptions): Promise<void> {
   const runtime = await createRuntimeServices({
     ...(explicitProviderId ? { providerId: explicitProviderId } : {}),
     configDirectory: appConfig.configDirectory,
-    ...(savedConfig.cache?.maxReadBytes
-      ? { maxReadBytes: savedConfig.cache.maxReadBytes }
+    ...(savedConfig.cache?.maxReadLines
+      ? { maxReadLines: savedConfig.cache.maxReadLines }
       : {}),
   });
 
@@ -148,8 +148,8 @@ async function runChat(options: SharedOptions): Promise<void> {
       },
       initialThinkingCollapsed: savedConfig.thinkingCollapsed ?? false,
       initialAutoApplyWrites: savedConfig.autoApplyWrites ?? false,
-      initialMaxReadBytes:
-        savedConfig.cache?.maxReadBytes ?? DEFAULT_MAX_READ_BYTES,
+      initialMaxReadLines:
+        savedConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES,
       onModelChange: (modelId: string, modelProviderId: string) => {
         persistConfig({ lastModel: modelId, lastProvider: modelProviderId });
       },
@@ -159,10 +159,10 @@ async function runChat(options: SharedOptions): Promise<void> {
       onAutoApplyWritesChange: (autoApply: boolean) => {
         persistConfig({ autoApplyWrites: autoApply });
       },
-      onMaxReadBytesChange: (bytes: number) => {
-        runtime.setMaxReadBytes(bytes);
+      onMaxReadLinesChange: (lines: number) => {
+        runtime.setMaxReadLines(lines);
         persistConfig({
-          cache: { ...currentConfig.cache, maxReadBytes: bytes },
+          cache: { ...currentConfig.cache, maxReadLines: lines },
         });
       },
     }),
