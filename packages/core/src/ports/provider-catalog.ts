@@ -1,3 +1,11 @@
+import { type ProviderClient } from '@core/ports/chat-model';
+import { AlibabaProvider } from '@providers/alibaba/alibaba-provider';
+import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
+import { OllamaProvider } from '@providers/ollama/ollama-provider';
+import { OpenAiProvider } from '@providers/openai/openai-provider';
+import { OpenRouterProvider } from '@providers/openrouter/openrouter-provider';
+import type { AppConfig } from '@runtime/config/app-config';
+
 export type ProviderCredentialRequirement = 'required' | 'optional' | 'none';
 
 export interface ProviderCatalogEntry {
@@ -8,6 +16,10 @@ export interface ProviderCatalogEntry {
   apiKeyEnvVar?: string;
   baseUrl?: string;
   baseUrlEnvVar?: string;
+  /** Reads this provider's API key out of the app config. */
+  getApiKey: (config: AppConfig) => string | undefined;
+  /** Constructs the concrete client for this provider. */
+  create: (config: AppConfig) => ProviderClient;
 }
 
 export interface ProviderConfig {
@@ -33,6 +45,13 @@ export const PROVIDERS = [
     apiKeyEnvVar: 'OPENAI_API_KEY',
     baseUrl: 'https://api.openai.com/v1',
     baseUrlEnvVar: 'OPENAI_BASE_URL',
+    getApiKey: (config) => config.openai.apiKey,
+    create: (config) =>
+      new OpenAiProvider(
+        config.openai.apiKey!,
+        config.openai.baseUrl,
+        config.openai.defaultModel
+      ),
   },
   {
     id: ProviderId.Ollama,
@@ -42,6 +61,9 @@ export const PROVIDERS = [
     apiKeyEnvVar: 'OLLAMA_API_KEY',
     baseUrl: 'http://127.0.0.1:11434',
     baseUrlEnvVar: 'OLLAMA_BASE_URL',
+    getApiKey: (config) => config.ollama.apiKey,
+    create: (config) =>
+      new OllamaProvider(config.ollama.baseUrl, config.ollama.apiKey),
   },
   {
     id: ProviderId.LmStudio,
@@ -51,6 +73,9 @@ export const PROVIDERS = [
     apiKeyEnvVar: 'LMSTUDIO_API_KEY',
     baseUrl: 'http://127.0.0.1:1234/v1',
     baseUrlEnvVar: 'LMSTUDIO_BASE_URL',
+    getApiKey: (config) => config.lmstudio.apiKey,
+    create: (config) =>
+      new LmStudioProvider(config.lmstudio.baseUrl, config.lmstudio.apiKey),
   },
   {
     id: ProviderId.OpenRouter,
@@ -60,6 +85,12 @@ export const PROVIDERS = [
     apiKeyEnvVar: 'OPENROUTER_API_KEY',
     baseUrl: 'https://openrouter.ai/api/v1',
     baseUrlEnvVar: 'OPENROUTER_BASE_URL',
+    getApiKey: (config) => config.openrouter.apiKey,
+    create: (config) =>
+      new OpenRouterProvider(
+        config.openrouter.apiKey!,
+        config.openrouter.baseUrl
+      ),
   },
   {
     id: ProviderId.Alibaba,
@@ -69,6 +100,9 @@ export const PROVIDERS = [
     apiKeyEnvVar: 'ALIBABA_API_KEY',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     baseUrlEnvVar: 'ALIBABA_BASE_URL',
+    getApiKey: (config) => config.alibaba.apiKey,
+    create: (config) =>
+      new AlibabaProvider(config.alibaba.apiKey!, config.alibaba.baseUrl),
   },
 ] as const satisfies readonly ProviderCatalogEntry[];
 
@@ -79,4 +113,4 @@ export type ProviderConnectionInfo = ProviderCatalogEntry;
 export const PROVIDER_BY_ID: Record<ProviderId, ProviderCatalogEntry> =
   Object.fromEntries(
     PROVIDERS.map((provider) => [provider.id, provider])
-  ) as Record<ProviderId, ProviderCatalogEntry>;
+  ) as unknown as Record<ProviderId, ProviderCatalogEntry>;
