@@ -1,4 +1,5 @@
-import { ProviderId, type ProviderClient } from '@core/ports/chat-model';
+import { type ProviderClient } from '@core/ports/chat-model';
+import { ProviderId } from '@core/ports/provider-catalog';
 import { AlibabaProvider } from '@providers/alibaba/alibaba-provider';
 import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
 import { OpenAiProvider } from '@providers/openai/openai-provider';

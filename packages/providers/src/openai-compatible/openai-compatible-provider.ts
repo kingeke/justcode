@@ -5,8 +5,8 @@ import {
   type ModelInfo,
   type ModelPricing,
   type ProviderClient,
-  type ProviderId,
 } from '@core/ports/chat-model';
+import { type ProviderId } from '@core/ports/provider-catalog';
 import {
   HttpError,
   joinUrl,

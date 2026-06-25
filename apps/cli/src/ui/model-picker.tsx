@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 
-import { ProviderId, type ModelInfo } from '@core/ports/chat-model';
+import { type ModelInfo } from '@core/ports/chat-model';
+import { ProviderId } from '@core/ports/provider-catalog';
 import { PROVIDER_BY_ID } from '@core/ports/provider-catalog';
 import { fuzzyFilter } from './fuzzy-filter.js';
 

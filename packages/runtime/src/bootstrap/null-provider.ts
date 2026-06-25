@@ -1,10 +1,10 @@
 import {
-  ProviderId,
   type ChatRequest,
   type ChatResult,
   type ModelInfo,
   type ProviderClient,
 } from '@core/ports/chat-model';
+import { ProviderId } from '@core/ports/provider-catalog';
 
 /**
  * Placeholder provider used before the user has connected anything. It backs

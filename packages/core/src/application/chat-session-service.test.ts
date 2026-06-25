@@ -3,12 +3,12 @@ import { ChatSessionService } from '@core/application/chat-session-service';
 import { ToolRegistry } from '@core/application/tool-registry';
 import { createConversation } from '@core/domain/conversation';
 import {
-  ProviderId,
   ToolsUnsupportedError,
   type ChatRequest,
   type ChatResult,
   type ProviderClient,
 } from '@core/ports/chat-model';
+import { ProviderId } from '@core/ports/provider-catalog';
 import type { ConversationRepository } from '@core/ports/conversation-repository';
 import type { Tool } from '@core/ports/tool';
 
@@ -264,7 +264,9 @@ describe('ChatSessionService', () => {
         return { content: 'hi from a chat-only model' };
       },
       async listModels() {
-        return [{ id: 'gemma', displayName: 'gemma', providerId: ProviderId.Ollama }];
+        return [
+          { id: 'gemma', displayName: 'gemma', providerId: ProviderId.Ollama },
+        ];
       },
       getDefaultModel() {
         return 'gemma';

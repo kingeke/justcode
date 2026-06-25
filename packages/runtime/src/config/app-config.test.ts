@@ -87,7 +87,10 @@ describe('loadAppConfig', () => {
 
     await loadAppConfig(customDir);
 
-    expect(readFile).toHaveBeenCalledWith(join(customDir, 'config.json'), 'utf8');
+    expect(readFile).toHaveBeenCalledWith(
+      join(customDir, 'config.json'),
+      'utf8'
+    );
   });
 });
 

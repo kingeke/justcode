@@ -1,5 +1,3 @@
-import { ProviderId } from './chat-model.js';
-
 export type ProviderCredentialRequirement = 'required' | 'optional' | 'none';
 
 export interface ProviderCatalogEntry {
@@ -16,6 +14,14 @@ export interface ProviderConfig {
   apiKey?: string;
   baseUrl?: string;
   defaultModel?: string;
+}
+
+export enum ProviderId {
+  Openai = 'openai',
+  Ollama = 'ollama',
+  LmStudio = 'lmstudio',
+  OpenRouter = 'openrouter',
+  Alibaba = 'alibaba',
 }
 
 export const PROVIDERS = [

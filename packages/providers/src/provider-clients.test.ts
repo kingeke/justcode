@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
 import { OllamaProvider } from '@providers/ollama/ollama-provider';
 import { OpenRouterProvider } from '@providers/openrouter/openrouter-provider';
-import { ProviderId } from '@core/ports/chat-model';
+import { ProviderId } from '@core/ports/provider-catalog';
 
 function createJsonResponse(payload: unknown): Response {
   return new Response(JSON.stringify(payload), {

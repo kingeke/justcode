@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { ProviderId } from '@core/ports/chat-model';
+import { ProviderId } from '@core/ports/provider-catalog';
 import type { ProviderConfig } from '@core/ports/provider-catalog';
 
 export interface GlobalConfig {

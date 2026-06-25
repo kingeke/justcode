@@ -1,4 +1,4 @@
-import { ProviderId } from '@core/ports/chat-model';
+import { ProviderId } from '@core/ports/provider-catalog';
 import { OpenAiCompatibleProvider } from '@providers/openai-compatible/openai-compatible-provider';
 
 export class OpenAiProvider extends OpenAiCompatibleProvider {

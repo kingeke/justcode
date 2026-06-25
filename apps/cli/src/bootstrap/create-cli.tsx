@@ -1,9 +1,8 @@
 import { render } from 'ink';
 import { Command, type OptionValues } from 'commander';
 import React from 'react';
-
 import { ChatApp } from '@cli/ui/chat-app';
-import type { ProviderId } from '@core/ports/chat-model';
+import type { ProviderId } from '@core/ports/provider-catalog';
 import { createRuntimeServices } from '@runtime/bootstrap/create-services';
 import { DEFAULT_MAX_READ_BYTES } from '@runtime/tools/read-file-tool';
 import { loadAppConfig, parseProviderId } from '@runtime/config/app-config';
@@ -166,7 +165,8 @@ async function runChat(options: SharedOptions): Promise<void> {
           cache: { ...currentConfig.cache, maxReadBytes: bytes },
         });
       },
-    })
+    }),
+    { exitOnCtrlC: false }
   );
 }
 

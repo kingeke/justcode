@@ -3,11 +3,8 @@ import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import Spinner from 'ink-spinner';
 
-import {
-  ProviderId,
-  type ModelInfo,
-  type ProviderClient,
-} from '@core/ports/chat-model';
+import { type ModelInfo, type ProviderClient } from '@core/ports/chat-model';
+import { ProviderId } from '@core/ports/provider-catalog';
 import {
   PROVIDERS,
   type ProviderConfig,
@@ -226,10 +223,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
           <Text color="cyan">
             <Spinner type="dots" />
           </Text>
-          <Text dimColor>
-            {' '}
-            Connecting and fetching models...
-          </Text>
+          <Text dimColor> Connecting and fetching models...</Text>
         </Box>
       ) : (
         <Box flexDirection="column">

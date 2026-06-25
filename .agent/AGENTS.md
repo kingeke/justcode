@@ -2,13 +2,14 @@ NEVER read entire repositories by default.
 
 Always:
 
-1. Search first.
-2. Identify relevant files.
-3. Read only required files.
-4. Expand context incrementally.
-5. Use absolute imports for project code with `@cli`, `@core`, `@providers`, and `@runtime`.
-6. Run `npm run format` after code changes so the repository stays Prettier-formatted.
-7. Keep the existing app color palette as the default for new UI work unless a change explicitly calls for a new visual language.
+- Search first.
+- Identify relevant files.
+- Read only required files.
+- Expand context incrementally.
+- Use absolute imports for project code with `@cli`, `@core`, `@providers`, and `@runtime`.
+- Run `npm run format` after code changes so the repository stays Prettier-formatted.
+- Run `npm run typecheck` after code changes so you can confirm any typescript errors.
+- Keep the existing app color palette as the default for new UI work unless a change explicitly calls for a new visual language.
 
 Treat full repository reads as a last resort.
 

@@ -1,5 +1,6 @@
 import React, {
   startTransition,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -24,11 +25,7 @@ import type {
 } from '@core/application/chat-session-service';
 import type { Conversation } from '@core/domain/conversation';
 import { createMessage } from '@core/domain/message';
-import type {
-  ModelInfo,
-  ProviderId,
-  ProviderClient,
-} from '@core/ports/chat-model';
+import type { ModelInfo, ProviderClient } from '@core/ports/chat-model';
 import type { GlobalConfig } from '@runtime/persistence/global-config';
 import { mergeProviderConfig } from '@runtime/persistence/global-config';
 import { renderMarkdown, renderMarkdownAsync } from './render-markdown.js';
@@ -38,6 +35,7 @@ import {
   type ConnectedProviderResult,
 } from './connect-picker.js';
 import { ModelPicker } from './model-picker.js';
+import { ProviderId } from '@core/ports/provider-catalog.js';
 
 const MAX_COMMAND_ITEMS = 8;
 
@@ -75,6 +73,7 @@ interface ToolEvent {
 
 const MAX_PREVIEW_LINES = 16;
 const EXIT_HINT = 'Press Ctrl+C again to exit';
+const EXIT_WINDOW_MS = 2000;
 
 function getInitialMetrics(): {
   inputTokens: number;
@@ -212,8 +211,31 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const toolEventKeyRef = useRef(0);
   // Armed by a Ctrl+C that didn't exit (it cleared text or hit an empty input);
-  // the next Ctrl+C exits. Disarmed as soon as the user types again.
+  // the next Ctrl+C exits, but only within the EXIT_WINDOW_MS window. Disarmed
+  // as soon as the user types again, or when the window times out.
   const exitArmedRef = useRef(false);
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const disarmExit = useCallback((): void => {
+    if (exitTimerRef.current) {
+      clearTimeout(exitTimerRef.current);
+      exitTimerRef.current = null;
+    }
+    if (exitArmedRef.current) {
+      exitArmedRef.current = false;
+      setStatus((current) => (current === EXIT_HINT ? 'Ready' : current));
+    }
+  }, []);
+
+  const armExit = useCallback((): void => {
+    exitArmedRef.current = true;
+    setStatus(EXIT_HINT);
+    if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+    exitTimerRef.current = setTimeout(() => {
+      exitTimerRef.current = null;
+      disarmExit();
+    }, EXIT_WINDOW_MS);
+  }, [disarmExit]);
 
   const isCommandMode = input.startsWith('/') && !input.includes(' ');
   const commandQuery = isCommandMode ? (parseCommandInput(input) ?? '') : '';
@@ -290,20 +312,14 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     }
 
     if (key.ctrl && value.toLowerCase() === 'c') {
-      // Clear any typed text first; otherwise arm exit and confirm on the next
-      // Ctrl+C.
-      if (input) {
-        setInputWithCursorAtEnd('');
-        exitArmedRef.current = true;
-        setStatus(EXIT_HINT);
-        return;
-      }
+      // A second Ctrl+C within the window exits.
       if (exitArmedRef.current) {
         exit();
         return;
       }
-      exitArmedRef.current = true;
-      setStatus(EXIT_HINT);
+      // Otherwise clear any typed text and arm exit for EXIT_WINDOW_MS.
+      if (input) setInputWithCursorAtEnd('');
+      armExit();
       return;
     }
 
@@ -315,7 +331,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
       if (input) {
         setInputWithCursorAtEnd('');
-        exitArmedRef.current = false;
+        disarmExit();
         setStatus('Ready');
         return;
       }
@@ -374,16 +390,16 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   useEffect(() => {
     return () => {
       activeRequestControllerRef.current?.abort();
+      if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
     };
   }, []);
 
   // Typing cancels a pending "Ctrl+C again to exit".
   useEffect(() => {
     if (input && exitArmedRef.current) {
-      exitArmedRef.current = false;
-      setStatus((current) => (current === EXIT_HINT ? 'Ready' : current));
+      disarmExit();
     }
-  }, [input]);
+  }, [input, disarmExit]);
 
   const loadSession = (sessionId: string, requestedModel?: string): void => {
     resetFreshSessionState();
@@ -1106,15 +1122,18 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         ) : null}
       </Box>
 
-      {isCommandMode && visibleCommands.length ? (
+      {isCommandMode ? (
         <Box
           marginTop={1}
           flexDirection="column"
           borderStyle="single"
-          borderColor="cyan"
+          borderColor={visibleCommands.length ? 'cyan' : 'yellow'}
           paddingX={1}
         >
           <Text dimColor>commands</Text>
+          {visibleCommands.length === 0 ? (
+            <Text color="yellow">/{commandQuery} doesn&apos;t exist</Text>
+          ) : null}
           {visibleCommands.map((cmd, index) => (
             <Box key={cmd.name}>
               <Text

@@ -2,7 +2,8 @@ import { PromptAttachmentService } from '@core/application/prompt-attachment-ser
 import { ChatSessionService } from '@core/application/chat-session-service';
 import { ListModelsService } from '@core/application/list-models-service';
 import { ToolRegistry } from '@core/application/tool-registry';
-import { ProviderId, type ProviderClient } from '@core/ports/chat-model';
+import { type ProviderClient } from '@core/ports/chat-model';
+import { ProviderId } from '@core/ports/provider-catalog';
 import { PROVIDER_BY_ID } from '@core/ports/provider-catalog';
 import { AlibabaProvider } from '@providers/alibaba/alibaba-provider';
 import { WriteFileTool } from '@runtime/tools/write-file-tool';

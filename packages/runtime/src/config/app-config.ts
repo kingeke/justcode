@@ -2,7 +2,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { readGlobalConfig } from '../persistence/global-config';
-import { ProviderId } from '@core/ports/chat-model';
+import { ProviderId } from '@core/ports/provider-catalog';
 import type { GlobalConfig } from '../persistence/global-config';
 
 export interface AppConfig {
@@ -59,20 +59,26 @@ export async function loadAppConfig(
     sessionsDirectory: join(targetConfigDir, 'sessions'),
     openai: {
       apiKey: globalConfig.providers?.openai?.apiKey,
-      baseUrl: globalConfig.providers?.openai?.baseUrl ?? 'https://api.openai.com/v1',
-      defaultModel: globalConfig.providers?.openai?.defaultModel ?? 'gpt-4.1-mini',
+      baseUrl:
+        globalConfig.providers?.openai?.baseUrl ?? 'https://api.openai.com/v1',
+      defaultModel:
+        globalConfig.providers?.openai?.defaultModel ?? 'gpt-4.1-mini',
     },
     ollama: {
-      baseUrl: globalConfig.providers?.ollama?.baseUrl ?? 'http://127.0.0.1:11434',
+      baseUrl:
+        globalConfig.providers?.ollama?.baseUrl ?? 'http://127.0.0.1:11434',
       apiKey: globalConfig.providers?.ollama?.apiKey,
     },
     lmstudio: {
-      baseUrl: globalConfig.providers?.lmstudio?.baseUrl ?? 'http://127.0.0.1:1234/v1',
+      baseUrl:
+        globalConfig.providers?.lmstudio?.baseUrl ?? 'http://127.0.0.1:1234/v1',
       apiKey: globalConfig.providers?.lmstudio?.apiKey,
     },
     openrouter: {
       apiKey: globalConfig.providers?.openrouter?.apiKey,
-      baseUrl: globalConfig.providers?.openrouter?.baseUrl ?? 'https://openrouter.ai/api/v1',
+      baseUrl:
+        globalConfig.providers?.openrouter?.baseUrl ??
+        'https://openrouter.ai/api/v1',
     },
     alibaba: {
       apiKey: globalConfig.providers?.alibaba?.apiKey,

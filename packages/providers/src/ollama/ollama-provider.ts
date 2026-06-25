@@ -1,4 +1,4 @@
-import { ProviderId } from '@core/ports/chat-model';
+import { ProviderId } from '@core/ports/provider-catalog';
 import { joinUrl } from '@providers/http/http-client';
 import { OpenAiCompatibleProvider } from '@providers/openai-compatible/openai-compatible-provider';
 

@@ -1,14 +1,6 @@
 import type { ChatMessage, ToolCall } from '@core/domain/message';
+import { ProviderId } from '@core/ports/provider-catalog.js';
 import type { ToolDefinition } from '@core/ports/tool';
-
-export enum ProviderId {
-  Openai = 'openai',
-  Ollama = 'ollama',
-  LmStudio = 'lmstudio',
-  OpenRouter = 'openrouter',
-  Alibaba = 'alibaba',
-}
-
 export type {
   ProviderConnectionInfo,
   ProviderCredentialRequirement,
