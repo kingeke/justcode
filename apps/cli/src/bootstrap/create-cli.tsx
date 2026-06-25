@@ -148,7 +148,7 @@ async function runChat(options: SharedOptions): Promise<void> {
       },
       initialThinkingCollapsed: savedConfig.thinkingCollapsed ?? false,
       initialAutoApplyWrites: savedConfig.autoApplyWrites ?? false,
-      initialExpandTools: savedConfig.expandTools ?? false,
+      initialExpandTools: savedConfig.expandTools ?? true,
       initialMaxReadLines:
         savedConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES,
       onModelChange: (modelId: string, modelProviderId: string) => {

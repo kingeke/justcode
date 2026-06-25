@@ -212,7 +212,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   );
   const autoApplyWritesRef = useRef(props.initialAutoApplyWrites ?? false);
   const [expandTools, setExpandTools] = useState(
-    props.initialExpandTools ?? false
+    props.initialExpandTools ?? true
   );
   const maxReadLinesRef = useRef(
     props.initialMaxReadLines ?? DEFAULT_MAX_READ_LINES
