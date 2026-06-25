@@ -1223,7 +1223,8 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
                   </Box>
                 ) : message.role === 'assistant' ? (
                   <Box flexDirection="column">
-                    {message.content ? (
+                    {message.content &&
+                    !(thinking && message.toolCalls?.length) ? (
                       <Text>
                         {renderedContent[message.id] ??
                           renderMarkdown(message.content)}
