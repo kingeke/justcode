@@ -426,6 +426,9 @@ function sumUsage(left: TokenUsage, right: TokenUsage): TokenUsage {
     inputTokens: left.inputTokens + right.inputTokens,
     outputTokens: left.outputTokens + right.outputTokens,
     cachedTokens: left.cachedTokens + right.cachedTokens,
+    ...(left.cost !== undefined || right.cost !== undefined
+      ? { cost: (left.cost ?? 0) + (right.cost ?? 0) }
+      : {}),
   };
 }
 

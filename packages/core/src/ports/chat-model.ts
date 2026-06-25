@@ -26,6 +26,7 @@ export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
   cachedTokens: number;
+  cost?: number;
 }
 
 export interface ChatRequest {

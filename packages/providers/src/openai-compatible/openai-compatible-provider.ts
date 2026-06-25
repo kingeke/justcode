@@ -45,6 +45,7 @@ interface OpenAiChatResponse {
     prompt_tokens?: number;
     completion_tokens?: number;
     prompt_tokens_details?: { cached_tokens?: number };
+    cost?: number;
   };
 }
 
@@ -196,6 +197,7 @@ export class OpenAiCompatibleProvider implements ProviderClient {
           outputTokens: response.usage.completion_tokens ?? 0,
           cachedTokens:
             response.usage.prompt_tokens_details?.cached_tokens ?? 0,
+          ...(response.usage.cost != null ? { cost: response.usage.cost } : {}),
         }
       : undefined;
 

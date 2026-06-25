@@ -41,6 +41,7 @@ interface OpenRouterChatResponse {
   usage?: {
     prompt_tokens?: number;
     completion_tokens?: number;
+    cost?: number;
   };
 }
 
@@ -124,6 +125,7 @@ export class OpenRouterProvider implements ProviderClient {
           inputTokens: response.usage.prompt_tokens ?? 0,
           outputTokens: response.usage.completion_tokens ?? 0,
           cachedTokens: 0,
+          ...(response.usage.cost != null ? { cost: response.usage.cost } : {}),
         }
       : undefined;
     const extraSpread = {

@@ -1297,18 +1297,23 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         0
       );
       const sessionTotals = sessionStatsRef.current;
-      const nextOutputTokens = estimateTokenCount(
+      const estimatedTurnOutputTokens = estimateTokenCount(
         capturedThinking + capturedContent
       );
+      const turnUsage = result.usage;
+      const turnInputTokens = turnUsage?.inputTokens;
+      const turnOutputTokens =
+        turnUsage?.outputTokens ?? estimatedTurnOutputTokens;
+      const turnCachedTokens = turnUsage?.cachedTokens;
+      const turnCost = turnUsage?.cost;
       const nextTotalOutputTokens =
-        sessionTotals.outputTokens + nextOutputTokens;
+        sessionTotals.outputTokens + turnOutputTokens;
       const nextGenerationMs =
         sessionTotals.generationMs + capturedGenerationMs;
       const nextAverageTokensPerSecond = getAverageTokensPerSecond(
         nextTotalOutputTokens,
         nextGenerationMs
       );
-
       clearInterval(flushInterval);
       streamingBufferRef.current = '';
       thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
@@ -1333,7 +1338,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           const genSeconds = Math.max(capturedGenerationMs, 1) / 1000;
           setLastStats({
             ttftMs,
-            tokensPerSecond: nextOutputTokens / genSeconds,
+            tokensPerSecond: turnOutputTokens / genSeconds,
             avgTokensPerSecond: nextAverageTokensPerSecond,
           });
           sessionStatsRef.current = {
@@ -1341,21 +1346,35 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             generationMs: nextGenerationMs,
           };
         }
-        if (result.usage) {
-          const u = result.usage;
+        if (turnUsage || turnInputTokens !== undefined) {
+          const u = turnUsage ?? {
+            inputTokens: turnInputTokens ?? 0,
+            outputTokens: turnOutputTokens,
+            cachedTokens: turnCachedTokens ?? 0,
+          };
           const pricing = activeModelInfo?.pricing;
-          const requestCost = pricing
-            ? u.inputTokens * pricing.inputPerToken +
-              u.outputTokens * pricing.outputPerToken +
-              u.cachedTokens *
-                (pricing.cacheReadPerToken ?? pricing.inputPerToken)
-            : 0;
+          const requestCost =
+            turnCost ??
+            (pricing
+              ? u.inputTokens * pricing.inputPerToken +
+                u.outputTokens * pricing.outputPerToken +
+                u.cachedTokens *
+                  (pricing.cacheReadPerToken ?? pricing.inputPerToken)
+              : 0);
           setMetrics((prev) => ({
             inputTokens: prev.inputTokens + u.inputTokens,
             outputTokens: prev.outputTokens + u.outputTokens,
             cachedTokens: prev.cachedTokens + u.cachedTokens,
             cost: prev.cost + requestCost,
             lastInputTokens: u.inputTokens,
+          }));
+        } else {
+          setMetrics((prev) => ({
+            inputTokens: prev.inputTokens,
+            outputTokens: prev.outputTokens + turnOutputTokens,
+            cachedTokens: prev.cachedTokens,
+            cost: prev.cost,
+            lastInputTokens: prev.lastInputTokens,
           }));
         }
       });
