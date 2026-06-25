@@ -10,11 +10,6 @@ import {
   type ProviderConfig,
   type ProviderConnectionInfo,
 } from '@core/ports/provider-catalog';
-import { AlibabaProvider } from '@providers/alibaba/alibaba-provider';
-import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
-import { OllamaProvider } from '@providers/ollama/ollama-provider';
-import { OpenAiProvider } from '@providers/openai/openai-provider';
-import { OpenRouterProvider } from '@providers/openrouter/openrouter-provider';
 import { fuzzyFilter } from './fuzzy-filter.js';
 
 const VISIBLE_ROWS = 12;
@@ -275,7 +270,10 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
     setStep('connecting');
 
     try {
-      const client = createProviderClient(provider.id, nextApiKey, nextBaseUrl);
+      const client = provider.create({
+        apiKey: nextApiKey,
+        baseUrl: nextBaseUrl,
+      });
       const models = await client.listModels();
       const firstModel = models[0];
       if (!firstModel) {
@@ -320,26 +318,5 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
   function nextApiKeyValue(current: string): string | undefined {
     const trimmed = current.trim();
     return trimmed ? trimmed : undefined;
-  }
-}
-
-function createProviderClient(
-  providerId: ProviderId,
-  apiKey: string | undefined,
-  baseUrl: string
-): ProviderClient {
-  switch (providerId) {
-    case ProviderId.Openai:
-      return new OpenAiProvider(apiKey ?? '', baseUrl, 'gpt-4.1-mini');
-    case ProviderId.OpenRouter:
-      return new OpenRouterProvider(apiKey ?? '', baseUrl);
-    case ProviderId.Alibaba:
-      return new AlibabaProvider(apiKey ?? '', baseUrl);
-    case ProviderId.Ollama:
-      return new OllamaProvider(baseUrl, apiKey);
-    case ProviderId.LmStudio:
-      return new LmStudioProvider(baseUrl, apiKey);
-    default:
-      throw new Error(`Unsupported provider '${providerId}'.`);
   }
 }

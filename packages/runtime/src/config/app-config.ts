@@ -1,6 +1,5 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-
 import { readGlobalConfig } from '../persistence/global-config';
 import { ProviderId } from '@core/ports/provider-catalog';
 import type { GlobalConfig } from '../persistence/global-config';

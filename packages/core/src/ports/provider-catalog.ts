@@ -8,6 +8,13 @@ import type { AppConfig } from '@runtime/config/app-config';
 
 export type ProviderCredentialRequirement = 'required' | 'optional' | 'none';
 
+/** The minimal credentials needed to construct any provider client. */
+export interface ProviderCredentials {
+  apiKey?: string | undefined;
+  baseUrl: string;
+  defaultModel?: string | undefined;
+}
+
 export interface ProviderCatalogEntry {
   id: ProviderId;
   name: string;
@@ -16,10 +23,10 @@ export interface ProviderCatalogEntry {
   apiKeyEnvVar?: string;
   baseUrl?: string;
   baseUrlEnvVar?: string;
-  /** Reads this provider's API key out of the app config. */
-  getApiKey: (config: AppConfig) => string | undefined;
-  /** Constructs the concrete client for this provider. */
-  create: (config: AppConfig) => ProviderClient;
+  /** Extracts this provider's credentials from the saved app config. */
+  credentialsFromConfig: (config: AppConfig) => ProviderCredentials;
+  /** Constructs the concrete client from a set of credentials. */
+  create: (credentials: ProviderCredentials) => ProviderClient;
 }
 
 export interface ProviderConfig {
@@ -45,37 +52,17 @@ export const PROVIDERS = [
     apiKeyEnvVar: 'OPENAI_API_KEY',
     baseUrl: 'https://api.openai.com/v1',
     baseUrlEnvVar: 'OPENAI_BASE_URL',
-    getApiKey: (config) => config.openai.apiKey,
-    create: (config) =>
+    credentialsFromConfig: (config) => ({
+      apiKey: config.openai.apiKey,
+      baseUrl: config.openai.baseUrl,
+      defaultModel: config.openai.defaultModel,
+    }),
+    create: (credentials) =>
       new OpenAiProvider(
-        config.openai.apiKey!,
-        config.openai.baseUrl,
-        config.openai.defaultModel
+        credentials.apiKey ?? '',
+        credentials.baseUrl,
+        credentials.defaultModel ?? 'gpt-4.1-mini'
       ),
-  },
-  {
-    id: ProviderId.Ollama,
-    name: 'Ollama',
-    description: 'Local OpenAI-compatible server',
-    apiKeyRequired: false,
-    apiKeyEnvVar: 'OLLAMA_API_KEY',
-    baseUrl: 'http://127.0.0.1:11434',
-    baseUrlEnvVar: 'OLLAMA_BASE_URL',
-    getApiKey: (config) => config.ollama.apiKey,
-    create: (config) =>
-      new OllamaProvider(config.ollama.baseUrl, config.ollama.apiKey),
-  },
-  {
-    id: ProviderId.LmStudio,
-    name: 'LM Studio',
-    description: 'Local OpenAI-compatible server',
-    apiKeyRequired: false,
-    apiKeyEnvVar: 'LMSTUDIO_API_KEY',
-    baseUrl: 'http://127.0.0.1:1234/v1',
-    baseUrlEnvVar: 'LMSTUDIO_BASE_URL',
-    getApiKey: (config) => config.lmstudio.apiKey,
-    create: (config) =>
-      new LmStudioProvider(config.lmstudio.baseUrl, config.lmstudio.apiKey),
   },
   {
     id: ProviderId.OpenRouter,
@@ -85,12 +72,12 @@ export const PROVIDERS = [
     apiKeyEnvVar: 'OPENROUTER_API_KEY',
     baseUrl: 'https://openrouter.ai/api/v1',
     baseUrlEnvVar: 'OPENROUTER_BASE_URL',
-    getApiKey: (config) => config.openrouter.apiKey,
-    create: (config) =>
-      new OpenRouterProvider(
-        config.openrouter.apiKey!,
-        config.openrouter.baseUrl
-      ),
+    credentialsFromConfig: (config) => ({
+      apiKey: config.openrouter.apiKey,
+      baseUrl: config.openrouter.baseUrl,
+    }),
+    create: (credentials) =>
+      new OpenRouterProvider(credentials.apiKey ?? '', credentials.baseUrl),
   },
   {
     id: ProviderId.Alibaba,
@@ -100,9 +87,42 @@ export const PROVIDERS = [
     apiKeyEnvVar: 'ALIBABA_API_KEY',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     baseUrlEnvVar: 'ALIBABA_BASE_URL',
-    getApiKey: (config) => config.alibaba.apiKey,
-    create: (config) =>
-      new AlibabaProvider(config.alibaba.apiKey!, config.alibaba.baseUrl),
+    credentialsFromConfig: (config) => ({
+      apiKey: config.alibaba.apiKey,
+      baseUrl: config.alibaba.baseUrl,
+    }),
+    create: (credentials) =>
+      new AlibabaProvider(credentials.apiKey ?? '', credentials.baseUrl),
+  },
+  {
+    id: ProviderId.Ollama,
+    name: 'Ollama',
+    description: 'Local OpenAI-compatible server',
+    apiKeyRequired: false,
+    apiKeyEnvVar: 'OLLAMA_API_KEY',
+    baseUrl: 'http://127.0.0.1:11434',
+    baseUrlEnvVar: 'OLLAMA_BASE_URL',
+    credentialsFromConfig: (config) => ({
+      apiKey: config.ollama.apiKey,
+      baseUrl: config.ollama.baseUrl,
+    }),
+    create: (credentials) =>
+      new OllamaProvider(credentials.baseUrl, credentials.apiKey),
+  },
+  {
+    id: ProviderId.LmStudio,
+    name: 'LM Studio',
+    description: 'Local OpenAI-compatible server',
+    apiKeyRequired: false,
+    apiKeyEnvVar: 'LMSTUDIO_API_KEY',
+    baseUrl: 'http://127.0.0.1:1234/v1',
+    baseUrlEnvVar: 'LMSTUDIO_BASE_URL',
+    credentialsFromConfig: (config) => ({
+      apiKey: config.lmstudio.apiKey,
+      baseUrl: config.lmstudio.baseUrl,
+    }),
+    create: (credentials) =>
+      new LmStudioProvider(credentials.baseUrl, credentials.apiKey),
   },
 ] as const satisfies readonly ProviderCatalogEntry[];
 
@@ -114,3 +134,8 @@ export const PROVIDER_BY_ID: Record<ProviderId, ProviderCatalogEntry> =
   Object.fromEntries(
     PROVIDERS.map((provider) => [provider.id, provider])
   ) as unknown as Record<ProviderId, ProviderCatalogEntry>;
+
+/** Canonical display order for providers, taken straight from the catalog. */
+export const PROVIDER_IDS: ProviderId[] = PROVIDERS.map(
+  (provider) => provider.id
+);

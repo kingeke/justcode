@@ -85,10 +85,11 @@ function createAllProviders(config: AppConfig): ProviderClient[] {
       return [];
     }
 
-    if (provider.apiKeyRequired && !provider.getApiKey(config)) {
+    const credentials = provider.credentialsFromConfig(config);
+    if (provider.apiKeyRequired && !credentials.apiKey) {
       return [];
     }
 
-    return [provider.create(config)];
+    return [provider.create(credentials)];
   });
 }
