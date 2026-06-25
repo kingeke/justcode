@@ -7,6 +7,7 @@ import { ProviderId, PROVIDERS } from '@core/ports/provider-catalog';
 import { WriteFileTool } from '@runtime/tools/write-file-tool';
 import { EditFileTool } from '@runtime/tools/edit-file-tool';
 import { BashTool } from '@runtime/tools/bash-tool';
+import { GrepTool } from '@runtime/tools/grep-tool';
 import {
   ReadFileTool,
   DEFAULT_MAX_READ_LINES,
@@ -58,6 +59,7 @@ export async function createRuntimeServices(
     new WriteFileTool(workspaceFiles),
     new EditFileTool(workspaceFiles),
     new ReadFileTool(workspaceFiles, () => readSettings.maxReadLines),
+    new GrepTool(workspaceFiles),
     new BashTool(),
   ]);
   const allProviders = createAllProviders(config);
