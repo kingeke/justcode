@@ -7,8 +7,9 @@ import type {
   ToolResult,
 } from '@core/ports/tool';
 
-/** Default window size if the user hasn't configured one. */
-export const DEFAULT_MAX_READ_BYTES = 2 * 1024;
+// Re-exported from core so the read_file tool and @-mention attachments share a
+// single default; the runtime still overrides it from user config.
+export { DEFAULT_MAX_READ_BYTES } from '@core/application/limits';
 
 interface ReadFileArguments {
   path: string;

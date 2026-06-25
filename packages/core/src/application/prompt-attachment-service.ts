@@ -1,16 +1,16 @@
+import { DEFAULT_MAX_READ_BYTES } from '@core/application/limits';
 import type { MessageAttachment } from '@core/domain/message';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 
 const ACTIVE_MENTION_PATTERN = /(?:^|\s)@([^\s@]*)$/;
 const MENTION_PATTERN = /(?:^|\s)@([^\s@]+)/g;
 const TRAILING_PUNCTUATION_PATTERN = /[),.:;!?\]]+$/;
-const DEFAULT_MAX_ATTACHMENT_BYTES = 5 * 1024;
 
 export class PromptAttachmentService {
   public constructor(
     private readonly workspaceFiles: WorkspaceFilePort,
     private readonly getMaxAttachmentBytes: () => number = () =>
-      DEFAULT_MAX_ATTACHMENT_BYTES
+      DEFAULT_MAX_READ_BYTES
   ) {}
 
   public async listFiles(): Promise<string[]> {
