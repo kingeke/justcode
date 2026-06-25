@@ -6,6 +6,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { randomUUID } from 'node:crypto';
 import {
   createTextAttributes,
   parseColor,
@@ -327,6 +328,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setInput(next);
     setInputKey((key) => key + 1);
   }, []);
+  const currentSessionLabel = conversation?.title ?? currentSessionId;
   const activeRequestControllerRef = useRef<AbortController | null>(null);
   const nextSessionRequestedModelRef = useRef<string | undefined>(undefined);
   // The raw prompt of the in-flight request, restored to the input if the user
@@ -1030,7 +1032,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
     if (name === 'new-session') {
       resetFreshSessionState();
-      const newId = `session-${Date.now()}`;
+      const newId = randomUUID();
       const nextRequestedModel = activeModel || props.requestedModel;
       nextSessionRequestedModelRef.current = nextRequestedModel;
       setCurrentSessionId(newId);
@@ -1504,7 +1506,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           JustCode
         </text>
         <text fg={MUTED} flexShrink={0}>
-          Provider: {activeProviderId} | Session: {currentSessionId}
+          Provider: {activeProviderId} | Session: {currentSessionLabel}
         </text>
         <text fg={MUTED} flexShrink={0}>
           Enter to send · Tab to complete @file or /command · Esc to cancel or

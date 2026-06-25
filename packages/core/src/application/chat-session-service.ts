@@ -31,6 +31,12 @@ import {
 
 /** Hard cap on tool round-trips per user message, to bound runaway loops. */
 const MAX_TOOL_STEPS = 12;
+const SESSION_TITLE_SYSTEM_PROMPT = [
+  'You are a session name generator.',
+  'You output ONLY a short session title. Nothing else.',
+  'Generate a brief name that would help the user find this conversation later.',
+  'No explanations or quotes.',
+].join(' ');
 
 export interface StartSessionInput {
   sessionId: string;
@@ -252,6 +258,18 @@ export class ChatSessionService {
 
     await this.repository.save(updatedConversation);
 
+    if (!updatedConversation.title) {
+      const generatedTitle = await this.generateSessionTitle({
+        model: input.model,
+        userMessage: trimmedContent,
+      });
+
+      if (generatedTitle) {
+        updatedConversation.title = generatedTitle;
+        await this.repository.save(updatedConversation);
+      }
+    }
+
     return {
       conversation: updatedConversation,
       reply,
@@ -311,6 +329,25 @@ export class ChatSessionService {
       const agentsMd = await this.workspaceFiles.readFile('AGENTS.md');
       const trimmed = agentsMd.trim();
       return trimmed.length > 0 ? trimmed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async generateSessionTitle(input: {
+    model: string;
+    userMessage: string;
+  }): Promise<string | undefined> {
+    try {
+      const result = await this.provider.sendChat({
+        model: input.model,
+        messages: [
+          createMessage('system', SESSION_TITLE_SYSTEM_PROMPT),
+          createMessage('user', input.userMessage),
+        ],
+      });
+
+      return normalizeSessionTitle(result.content);
     } catch {
       return undefined;
     }
@@ -439,6 +476,11 @@ function awaitWithAbort<T>(
 
 function createAbortError(): Error {
   return new DOMException('The operation was aborted.', 'AbortError');
+}
+
+function normalizeSessionTitle(content: string): string | undefined {
+  const title = content.replace(/[\r\n]+/g, ' ').trim();
+  return title || undefined;
 }
 
 export function createEmptyConversation(sessionId: string): Conversation {

@@ -60,7 +60,9 @@ function sessionLineContent(
   const chunks: TextChunk[] = [];
   const lead = isSelected ? { fg: 'cyan' } : {};
   chunks.push(tc(isSelected ? '› ' : '  ', lead));
-  chunks.push(tc(session.sessionId, { ...lead, bold: isSelected }));
+  chunks.push(
+    tc(session.title ?? session.sessionId, { ...lead, bold: isSelected })
+  );
   chunks.push(tc('  ', lead));
   chunks.push(tc(formatTimestamp(session.updatedAt), { fg: MUTED }));
   chunks.push(tc('  ', lead));

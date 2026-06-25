@@ -173,6 +173,37 @@ function createAbortableProvider(): ProviderClient {
   };
 }
 
+function createTitleGeneratingProvider(): ProviderClient {
+  let callCount = 0;
+  return {
+    providerId: ProviderId.Ollama,
+    async sendChat({ messages }): Promise<ChatResult> {
+      callCount += 1;
+      if (callCount === 1) {
+        return { content: 'reply:Hello there' };
+      }
+
+      expect(messages.map((message) => message.role)).toEqual([
+        'system',
+        'user',
+      ]);
+      return { content: 'Project Planning' };
+    },
+    async listModels() {
+      return [
+        {
+          id: 'llama3.1',
+          displayName: 'llama3.1',
+          providerId: ProviderId.Ollama,
+        },
+      ];
+    },
+    getDefaultModel() {
+      return undefined;
+    },
+  };
+}
+
 describe('ChatSessionService', () => {
   it('loads available models and picks the first model when none is requested', async () => {
     const service = new ChatSessionService(
@@ -210,6 +241,26 @@ describe('ChatSessionService', () => {
     expect(result.conversation.messages[0]?.role).toBe('user');
     expect(result.conversation.messages[1]?.role).toBe('assistant');
     expect(repository.conversation.messages).toHaveLength(2);
+  });
+
+  it('generates and saves a session title after the first turn', async () => {
+    const repository = new InMemoryConversationRepository();
+    const service = new ChatSessionService(
+      repository,
+      createTitleGeneratingProvider()
+    );
+
+    const startedSession = await service.startSession({
+      sessionId: 'session-1',
+    });
+    const result = await service.submitMessage({
+      conversation: startedSession.conversation,
+      model: startedSession.activeModel,
+      content: 'Hello there',
+    });
+
+    expect(result.conversation.title).toMatch(/^Project Planning$/);
+    expect(repository.conversation.title).toBe(result.conversation.title);
   });
 
   it('lists saved sessions', async () => {

@@ -1,5 +1,6 @@
 import { Command, type OptionValues } from 'commander';
 import React from 'react';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { ProviderId } from '@core/ports/provider-catalog';
 import { createRuntimeServices } from '@runtime/bootstrap/create-services';
@@ -157,7 +158,7 @@ async function runChat(options: SharedOptions): Promise<void> {
       configFilePath: join(appConfig.configDirectory, 'config.json'),
       chatSessionService: runtime.chatSessionService,
       promptAttachmentService: runtime.promptAttachmentService,
-      sessionId: options.session ?? `session-${Date.now()}`,
+      sessionId: options.session ?? randomUUID(),
       requestedModel: options.model ?? savedConfig.lastModel,
       allProviders: runtime.allProviders,
       createProvider: runtime.createProvider,

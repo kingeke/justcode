@@ -31,6 +31,7 @@ describe('FileConversationRepository', () => {
   it('persists and reloads conversation history', async () => {
     const repository = new FileConversationRepository(directory);
     const conversation = createConversation('my/session');
+    conversation.title = 'project-planning-2026-06-26-1530';
     conversation.messages.push(createMessage('user', 'Hello'));
     conversation.messages.push(
       createMessage('assistant', 'partial answer', new Date(), undefined, {
@@ -42,6 +43,7 @@ describe('FileConversationRepository', () => {
 
     const reloadedConversation = await repository.load('my/session');
 
+    expect(reloadedConversation.title).toBe('project-planning-2026-06-26-1530');
     expect(reloadedConversation.messages).toHaveLength(2);
     expect(reloadedConversation.messages[0]?.content).toBe('Hello');
     expect(reloadedConversation.messages[1]?.thinking).toEqual({

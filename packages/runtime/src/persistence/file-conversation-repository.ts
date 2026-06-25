@@ -70,6 +70,7 @@ export class FileConversationRepository implements ConversationRepository {
             const fileStat = await stat(filePath);
             return {
               sessionId: conversation.sessionId,
+              ...(conversation.title ? { title: conversation.title } : {}),
               createdAt:
                 conversation.createdAt ?? fileStat.birthtime.toISOString(),
               updatedAt: conversation.updatedAt ?? fileStat.mtime.toISOString(),

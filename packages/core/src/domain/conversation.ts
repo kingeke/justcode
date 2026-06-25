@@ -2,6 +2,7 @@ import type { ChatMessage } from '@core/domain/message';
 
 export interface Conversation {
   sessionId: string;
+  title?: string;
   messages: ChatMessage[];
   createdAt: string;
   updatedAt: string;

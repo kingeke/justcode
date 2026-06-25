@@ -2,6 +2,7 @@ import type { Conversation } from '@core/domain/conversation';
 
 export interface ConversationSummary {
   sessionId: string;
+  title?: string;
   createdAt: string;
   updatedAt: string;
   messageCount: number;
