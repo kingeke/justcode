@@ -8,6 +8,7 @@ export interface GlobalConfig {
   lastModel?: string;
   lastProvider?: string;
   providers?: Partial<Record<ProviderId, ProviderConfig>>;
+  systemPrompt?: string;
   thinkingCollapsed?: boolean;
   /** When true, file-writing tools run without per-call confirmation. */
   autoApplyWrites?: boolean;

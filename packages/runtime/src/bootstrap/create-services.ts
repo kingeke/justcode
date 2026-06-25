@@ -72,6 +72,7 @@ export async function createRuntimeServices(
       toolRegistry,
       workspaceRoot,
       workspaceFiles,
+      systemPrompt: config.systemPrompt,
     }),
     listModelsService: new ListModelsService(provider),
     promptAttachmentService: new PromptAttachmentService(

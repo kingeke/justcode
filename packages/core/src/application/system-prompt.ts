@@ -4,16 +4,19 @@ import type { ToolDefinition } from '@core/ports/tool';
  * Builds the system prompt that grounds the model as justcode's coding agent.
  * It is injected at send time and is not persisted into the conversation.
  */
+export const DEFAULT_SYSTEM_PROMPT = [
+  "You are JustCode, an AI coding assistant operating inside a user's terminal,",
+  'in their current working directory (the workspace).',
+  'Help with software engineering tasks: understanding code, writing files, and',
+  'making changes. Be concise and direct.',
+].join(' ');
+
 export function buildSystemPrompt(
+  systemPrompt: string = DEFAULT_SYSTEM_PROMPT,
   tools: ToolDefinition[] = [],
   projectInstructions?: string
 ): string {
-  const base = [
-    "You are JustCode, an AI coding assistant operating inside a user's terminal,",
-    'in their current working directory (the workspace).',
-    'Help with software engineering tasks: understanding code, writing files, and',
-    'making changes. Be concise and direct.',
-  ].join(' ');
+  const base = systemPrompt;
 
   const sections = [base];
 

@@ -49,6 +49,7 @@ import {
   filterCommands,
   parseCommandInput,
 } from '@cli/ui/commands.js';
+import { openFileInEditor } from '@cli/ui/open-file.js';
 import {
   ConnectPicker,
   type ConnectedProviderResult,
@@ -70,6 +71,7 @@ interface ChatAppProps {
   /** Active provider, or undefined when nothing is connected yet. */
   providerId: ProviderId | undefined;
   savedConfig: GlobalConfig;
+  configFilePath: string;
   chatSessionService: ChatSessionService;
   promptAttachmentService: PromptAttachmentService;
   sessionId: string;
@@ -236,6 +238,12 @@ function metricsLineContent(
   return new StyledText(chunks);
 }
 
+function statusLineContent(status: string): StyledText {
+  return new StyledText([
+    { __isChunk: true, text: status, fg: parseColor(MUTED) },
+  ]);
+}
+
 function getInitialMetrics(): {
   inputTokens: number;
   outputTokens: number;
@@ -306,17 +314,18 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   // we replace the value programmatically (tab-completion); ink-text-input
   // otherwise keeps its own cursor offset.
   const [inputKey, setInputKey] = useState(0);
-  let promptArea: TextareaRenderable | null | undefined;
+  const promptAreaRef = useRef<TextareaRenderable | null>(null);
 
-  const setInputWithCursorAtEnd = (next: string): void => {
+  const setInputWithCursorAtEnd = useCallback((next: string): void => {
     setInput(next);
     setInputKey((key) => key + 1);
-  };
+  }, []);
   const activeRequestControllerRef = useRef<AbortController | null>(null);
   const nextSessionRequestedModelRef = useRef<string | undefined>(undefined);
   // The raw prompt of the in-flight request, restored to the input if the user
   // interrupts so they can edit and resend without retyping.
   const submittedPromptRef = useRef<string>('');
+  const interruptedPromptRef = useRef<string | null>(null);
 
   const cancelActiveRequest = (): void => {
     activeRequestControllerRef.current?.abort();
@@ -419,6 +428,17 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     browseIndex !== null ? bashToolMessages[browseIndex] : undefined;
   const selectedBashId = selectedBashMessage?.id;
 
+  const refreshWorkspaceFiles = useCallback((): void => {
+    void props.promptAttachmentService
+      .listFiles()
+      .then((files) => {
+        startTransition(() => setWorkspaceFiles(files));
+      })
+      .catch((caughtError: unknown) => {
+        setError(getErrorMessage(caughtError));
+      });
+  }, [props.promptAttachmentService]);
+
   const toggleBashExpanded = (id: string): void => {
     setExpandedBashIds((prev) => {
       const next = new Set(prev);
@@ -494,7 +514,20 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     mentionSuggestions[selectedSuggestionIndex] ?? mentionSuggestions[0];
 
   useEffect(() => {
-    const area = promptArea;
+    if (!activeMentionTrigger || isCommandMode) {
+      return;
+    }
+
+    refreshWorkspaceFiles();
+  }, [
+    activeMentionQuery,
+    activeMentionTrigger,
+    isCommandMode,
+    refreshWorkspaceFiles,
+  ]);
+
+  useEffect(() => {
+    const area = promptAreaRef.current;
     if (!area || area.isDestroyed) return;
 
     if (area.plainText !== input) {
@@ -505,15 +538,15 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     if (!isSending && browseIndex === null) {
       queueMicrotask(() => {
         if (
-          !promptArea ||
-          promptArea.isDestroyed ||
+          !promptAreaRef.current ||
+          promptAreaRef.current.isDestroyed ||
           isSending ||
           browseIndex !== null
         ) {
           return;
         }
 
-        promptArea.focus();
+        promptAreaRef.current.focus();
       });
     }
   }, [browseIndex, input, isSending]);
@@ -531,7 +564,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       return;
     }
 
-    const area = promptArea;
+    const area = promptAreaRef.current;
     if (!area || area.isDestroyed) {
       return;
     }
@@ -694,6 +727,22 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setSelectedSuggestionIndex(0);
   }, [activeMentionQuery]);
 
+  useEffect(() => {
+    if (isSending) return;
+
+    const restoredPrompt = interruptedPromptRef.current;
+    if (restoredPrompt === null) return;
+
+    interruptedPromptRef.current = null;
+    setInput(restoredPrompt);
+
+    const promptArea = promptAreaRef.current;
+    if (promptArea && !promptArea.isDestroyed) {
+      promptArea.setText(restoredPrompt);
+      promptArea.cursorOffset = restoredPrompt.length;
+    }
+  }, [isSending]);
+
   // Snap the transcript to the bottom when a message is committed. Per-token
   // streaming growth is handled by the scrollbox's stickyScroll, so this only
   // fires on discrete message changes and never yanks the user back while they
@@ -769,15 +818,21 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   }, [currentSessionId]);
 
   useEffect(() => {
-    void props.promptAttachmentService
-      .listFiles()
-      .then((files) => {
-        startTransition(() => setWorkspaceFiles(files));
-      })
-      .catch((caughtError: unknown) => {
-        setError(getErrorMessage(caughtError));
-      });
-  }, [props.promptAttachmentService]);
+    refreshWorkspaceFiles();
+  }, [refreshWorkspaceFiles]);
+
+  useEffect(() => {
+    if (!activeMentionTrigger || isCommandMode) {
+      return;
+    }
+
+    refreshWorkspaceFiles();
+  }, [
+    activeMentionQuery,
+    activeMentionTrigger,
+    isCommandMode,
+    refreshWorkspaceFiles,
+  ]);
 
   useEffect(() => {
     void Promise.allSettled(availableProviders.map((p) => p.listModels())).then(
@@ -871,6 +926,17 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     if (name === 'connect') {
       setStatus('Select a provider to connect');
       setShowConnectPicker(true);
+      return;
+    }
+
+    if (name === 'config') {
+      void openFileInEditor(props.configFilePath)
+        .then(() => {
+          setStatus('Opened config file');
+        })
+        .catch((caughtError: unknown) => {
+          setError(getErrorMessage(caughtError));
+        });
       return;
     }
 
@@ -1311,9 +1377,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         setError(null);
         setStatus('Interrupted');
         // Put the interrupted prompt back so the user can tweak and resend.
-        if (submittedPromptRef.current) {
-          setInputWithCursorAtEnd(submittedPromptRef.current);
-        }
+        interruptedPromptRef.current = submittedPromptRef.current || null;
       } else {
         streamingBufferRef.current = '';
         thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
@@ -1680,9 +1744,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             cursorColor="white"
             focused={terminalFocused && !isSending && browseIndex === null}
             onSubmit={() => {
-              void submit(promptArea?.plainText ?? input);
+              void submit(promptAreaRef.current?.plainText ?? input);
             }}
             onKeyDown={(event) => {
+              const promptArea = promptAreaRef.current;
               if (!promptArea || promptArea.isDestroyed) return;
 
               if (
@@ -1700,11 +1765,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
               }
             }}
             onContentChange={() => {
+              const promptArea = promptAreaRef.current;
               if (!promptArea || promptArea.isDestroyed) return;
               setInput(promptArea.plainText);
             }}
             ref={(next) => {
-              promptArea = next;
+              promptAreaRef.current = next;
             }}
           />
         </box>
@@ -1760,7 +1826,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
               }
             />
           ) : (
-            <text fg={MUTED}>{status}</text>
+            <text content={statusLineContent(status)} />
           )}
         </box>
         {error ? (

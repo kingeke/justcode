@@ -248,6 +248,51 @@ describe('ChatSessionService', () => {
     expect(seenMessages[0]?.content).toContain('2. Read only required files.');
   });
 
+  it('uses the configured system prompt when sending chat messages', async () => {
+    const repository = new InMemoryConversationRepository();
+    const seenMessages: Array<{ role: string; content: string }> = [];
+    const provider: ProviderClient = {
+      providerId: ProviderId.Ollama,
+      async sendChat({ messages }): Promise<ChatResult> {
+        seenMessages.push(
+          ...messages.map((message) => ({
+            role: message.role,
+            content: message.content,
+          }))
+        );
+        return { content: 'ok' };
+      },
+      async listModels() {
+        return [
+          {
+            id: 'llama3.1',
+            displayName: 'llama3.1',
+            providerId: ProviderId.Ollama,
+          },
+        ];
+      },
+      getDefaultModel() {
+        return undefined;
+      },
+    };
+
+    const service = new ChatSessionService(repository, provider, {
+      systemPrompt: 'Custom prompt line 1\nCustom prompt line 2',
+    });
+
+    await service.submitMessage({
+      conversation: createConversation('session-1'),
+      model: 'llama3.1',
+      content: 'Hello',
+    });
+
+    expect(seenMessages[0]).toEqual({
+      role: 'system',
+      content: expect.stringContaining('Custom prompt line 1'),
+    });
+    expect(seenMessages[0]?.content).toContain('Custom prompt line 2');
+  });
+
   it('stores message attachments when files are included in a prompt', async () => {
     const repository = new InMemoryConversationRepository();
     const service = new ChatSessionService(repository, createProviderStub());

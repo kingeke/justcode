@@ -37,6 +37,10 @@ export const COMMANDS: Command[] = [
     description:
       'Set how many lines of a file the model reads at once, e.g. /read-limit 500',
   },
+  {
+    name: 'config',
+    description: 'Open the config file in your editor',
+  },
 ];
 
 export function filterCommands(query: string): Command[] {

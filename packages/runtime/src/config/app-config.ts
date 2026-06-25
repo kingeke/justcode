@@ -1,8 +1,12 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { readGlobalConfig } from '../persistence/global-config';
+import {
+  readGlobalConfig,
+  writeGlobalConfig,
+} from '@runtime/persistence/global-config';
 import { ProviderId } from '@core/ports/provider-catalog';
-import type { GlobalConfig } from '../persistence/global-config';
+import type { GlobalConfig } from '@runtime/persistence/global-config';
+import { DEFAULT_SYSTEM_PROMPT } from '@core/application/system-prompt';
 
 export interface AppConfig {
   /** Provider to use on launch, or undefined when nothing is configured yet. */
@@ -11,6 +15,7 @@ export interface AppConfig {
   configuredProviders: ProviderId[];
   configDirectory: string;
   sessionsDirectory: string;
+  systemPrompt: string;
   openai: {
     apiKey: string | undefined;
     baseUrl: string;
@@ -41,48 +46,63 @@ export async function loadAppConfig(
     configDirectory ?? join(homedir(), '.cache', 'justcode');
 
   const globalConfig = await readGlobalConfig(targetConfigDir);
+  const configWithDefaults =
+    globalConfig.systemPrompt === undefined
+      ? {
+          ...globalConfig,
+          systemPrompt: DEFAULT_SYSTEM_PROMPT,
+        }
+      : globalConfig;
 
-  const configuredProviders = Object.keys(globalConfig.providers ?? {})
+  if (globalConfig.systemPrompt === undefined) {
+    await writeGlobalConfig(targetConfigDir, configWithDefaults);
+  }
+
+  const configuredProviders = Object.keys(configWithDefaults.providers ?? {})
     .map((id) => parseProviderId(id))
     .filter((id): id is ProviderId => id !== undefined);
 
   // Nothing is used by default: only a provider the user explicitly connected
   // (the last one they picked, or any configured one) is selected. When none
   // exist, defaultProvider is undefined and the CLI shows the connect screen.
-  const requestedProvider = parseProviderId(globalConfig.lastProvider);
+  const requestedProvider = parseProviderId(configWithDefaults.lastProvider);
 
   return {
     defaultProvider: requestedProvider ?? configuredProviders[0],
     configuredProviders,
     configDirectory: targetConfigDir,
     sessionsDirectory: join(targetConfigDir, 'sessions'),
+    systemPrompt: configWithDefaults.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
     openai: {
-      apiKey: globalConfig.providers?.openai?.apiKey,
+      apiKey: configWithDefaults.providers?.openai?.apiKey,
       baseUrl:
-        globalConfig.providers?.openai?.baseUrl ?? 'https://api.openai.com/v1',
+        configWithDefaults.providers?.openai?.baseUrl ??
+        'https://api.openai.com/v1',
       defaultModel:
-        globalConfig.providers?.openai?.defaultModel ?? 'gpt-4.1-mini',
+        configWithDefaults.providers?.openai?.defaultModel ?? 'gpt-4.1-mini',
     },
     ollama: {
       baseUrl:
-        globalConfig.providers?.ollama?.baseUrl ?? 'http://127.0.0.1:11434',
-      apiKey: globalConfig.providers?.ollama?.apiKey,
+        configWithDefaults.providers?.ollama?.baseUrl ??
+        'http://127.0.0.1:11434',
+      apiKey: configWithDefaults.providers?.ollama?.apiKey,
     },
     lmstudio: {
       baseUrl:
-        globalConfig.providers?.lmstudio?.baseUrl ?? 'http://127.0.0.1:1234/v1',
-      apiKey: globalConfig.providers?.lmstudio?.apiKey,
+        configWithDefaults.providers?.lmstudio?.baseUrl ??
+        'http://127.0.0.1:1234/v1',
+      apiKey: configWithDefaults.providers?.lmstudio?.apiKey,
     },
     openrouter: {
-      apiKey: globalConfig.providers?.openrouter?.apiKey,
+      apiKey: configWithDefaults.providers?.openrouter?.apiKey,
       baseUrl:
-        globalConfig.providers?.openrouter?.baseUrl ??
+        configWithDefaults.providers?.openrouter?.baseUrl ??
         'https://openrouter.ai/api/v1',
     },
     alibaba: {
-      apiKey: globalConfig.providers?.alibaba?.apiKey,
+      apiKey: configWithDefaults.providers?.alibaba?.apiKey,
       baseUrl:
-        globalConfig.providers?.alibaba?.baseUrl ??
+        configWithDefaults.providers?.alibaba?.baseUrl ??
         'https://dashscope.aliyuncs.com/compatible-mode/v1',
     },
   };

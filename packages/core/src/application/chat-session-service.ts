@@ -23,7 +23,10 @@ import type {
 } from '@core/ports/tool';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 import type { ToolRegistry } from '@core/application/tool-registry';
-import { buildSystemPrompt } from '@core/application/system-prompt';
+import {
+  DEFAULT_SYSTEM_PROMPT,
+  buildSystemPrompt,
+} from '@core/application/system-prompt';
 
 /** Hard cap on tool round-trips per user message, to bound runaway loops. */
 const MAX_TOOL_STEPS = 12;
@@ -73,6 +76,7 @@ export interface ChatSessionOptions {
   toolRegistry?: ToolRegistry;
   workspaceRoot?: string;
   workspaceFiles?: WorkspaceFilePort;
+  systemPrompt?: string;
   /**
    * Whether to also list the available tools (with their descriptions) in the
    * prose system prompt. Tools are always advertised to the provider via
@@ -87,6 +91,7 @@ export class ChatSessionService {
   private readonly toolRegistry: ToolRegistry | undefined;
   private readonly workspaceRoot: string;
   private readonly workspaceFiles: WorkspaceFilePort | undefined;
+  private readonly systemPrompt: string;
   private readonly describeToolsInSystemPrompt: boolean;
   /** Models that rejected tools once; we send their requests chat-only after. */
   private readonly toolUnsupportedModels = new Set<string>();
@@ -100,6 +105,7 @@ export class ChatSessionService {
     this.toolRegistry = options.toolRegistry;
     this.workspaceRoot = options.workspaceRoot ?? process.cwd();
     this.workspaceFiles = options.workspaceFiles;
+    this.systemPrompt = options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     this.describeToolsInSystemPrompt =
       options.describeToolsInSystemPrompt ?? false;
   }
@@ -168,6 +174,7 @@ export class ChatSessionService {
       const systemMessage = createMessage(
         'system',
         buildSystemPrompt(
+          this.systemPrompt,
           toolsEnabled && this.describeToolsInSystemPrompt
             ? toolDefinitions
             : [],

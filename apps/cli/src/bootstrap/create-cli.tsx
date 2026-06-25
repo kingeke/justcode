@@ -1,5 +1,6 @@
 import { Command, type OptionValues } from 'commander';
 import React from 'react';
+import { join } from 'node:path';
 import type { ProviderId } from '@core/ports/provider-catalog';
 import { createRuntimeServices } from '@runtime/bootstrap/create-services';
 import { DEFAULT_MAX_READ_LINES } from '@runtime/tools/read-file-tool';
@@ -153,6 +154,7 @@ async function runChat(options: SharedOptions): Promise<void> {
       onExit: exit,
       providerId: runtime.providerId,
       savedConfig,
+      configFilePath: join(appConfig.configDirectory, 'config.json'),
       chatSessionService: runtime.chatSessionService,
       promptAttachmentService: runtime.promptAttachmentService,
       sessionId: options.session ?? `session-${Date.now()}`,
