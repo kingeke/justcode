@@ -3,7 +3,7 @@ import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 
 import { type ModelInfo } from '@core/ports/chat-model';
-import { ProviderId } from '@core/ports/provider-catalog';
+import { PROVIDER_IDS } from '@core/ports/provider-catalog';
 import { PROVIDER_BY_ID } from '@core/ports/provider-catalog';
 import { fuzzyFilter } from './fuzzy-filter.js';
 
@@ -271,17 +271,10 @@ function compareModels(
   sortState: SortState
 ): number {
   if (sortState.mode === 'provider') {
-    const providerOrder = [
-      ProviderId.OpenRouter,
-      ProviderId.Openai,
-      ProviderId.Alibaba,
-      ProviderId.Ollama,
-      ProviderId.LmStudio,
-    ];
     const orderedProviders =
       sortState.direction === 'asc'
-        ? providerOrder
-        : [...providerOrder].reverse();
+        ? PROVIDER_IDS
+        : [...PROVIDER_IDS].reverse();
     const ai = orderedProviders.indexOf(a.providerId);
     const bi = orderedProviders.indexOf(b.providerId);
     if (ai !== bi) return ai - bi;

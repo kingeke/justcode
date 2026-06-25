@@ -51,6 +51,8 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
   const [error, setError] = useState<string | null>(null);
   const scrollOffsetRef = useRef(0);
 
+  // Display order comes straight from the catalog (PROVIDERS) — the single
+  // source of truth — so there's no separate ordering to keep in sync here.
   const providers = useMemo(
     () =>
       fuzzyFilter(
@@ -62,36 +64,14 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
     [query]
   );
 
-  const sortedProviders = useMemo(() => {
-    const providerOrder = [
-      ProviderId.Openai,
-      ProviderId.OpenRouter,
-      ProviderId.Alibaba,
-      ProviderId.Ollama,
-      ProviderId.LmStudio,
-    ];
-
-    return [...providers].sort((a, b) => {
-      const ai = providerOrder.indexOf(a.id);
-      const bi = providerOrder.indexOf(b.id);
-      if (ai !== bi) return ai - bi;
-      return a.name.localeCompare(b.name);
-    });
-  }, [providers]);
-
   const clampFocus = (next: number) =>
-    Math.max(0, Math.min(next, sortedProviders.length - 1));
+    Math.max(0, Math.min(next, providers.length - 1));
 
   useEffect(() => {
     if (step !== 'provider') return;
     setFocusedIndex(0);
     scrollOffsetRef.current = 0;
   }, [query, step]);
-
-  const groupedLengthRef = useRef(sortedProviders.length);
-  useEffect(() => {
-    groupedLengthRef.current = sortedProviders.length;
-  }, [sortedProviders.length]);
 
   useInput((_, key) => {
     if (step !== 'provider') {
@@ -108,7 +88,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
     }
 
     if (key.return) {
-      const entry = sortedProviders[focusedIndex];
+      const entry = providers[focusedIndex];
       if (!entry) return;
       setSelectedProvider(entry);
       const existing = props.configuredProviders[entry.id] ?? {};
@@ -137,7 +117,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
     }
   });
 
-  const visibleRows = sortedProviders.slice(
+  const visibleRows = providers.slice(
     scrollOffsetRef.current,
     scrollOffsetRef.current + VISIBLE_ROWS
   );
@@ -183,7 +163,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
             />
           </Box>
 
-          {sortedProviders.length === 0 ? (
+          {providers.length === 0 ? (
             <Text dimColor>No providers match.</Text>
           ) : (
             <Box flexDirection="column">
@@ -206,12 +186,11 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
                   </Box>
                 );
               })}
-              {sortedProviders.length > VISIBLE_ROWS ? (
+              {providers.length > VISIBLE_ROWS ? (
                 <Text dimColor>
                   {'\n'}
-                  {scrollOffsetRef.current + VISIBLE_ROWS <
-                  sortedProviders.length
-                    ? `↓ ${sortedProviders.length - scrollOffsetRef.current - VISIBLE_ROWS} more`
+                  {scrollOffsetRef.current + VISIBLE_ROWS < providers.length
+                    ? `↓ ${providers.length - scrollOffsetRef.current - VISIBLE_ROWS} more`
                     : ''}
                 </Text>
               ) : null}
