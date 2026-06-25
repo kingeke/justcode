@@ -15,8 +15,8 @@ import {
   type TextChunk,
 } from '@opentui/core';
 import { useKeyboard, useTerminalDimensions } from '@opentui/react';
-import { Spinner } from './spinner.js';
-import { ansiToStyledText } from './ansi-to-styled-text.js';
+import { Spinner } from '@cli/ui/spinner.js';
+import { ansiToStyledText } from '@cli/ui/ansi-to-styled-text.js';
 
 import {
   applyMentionSuggestion,
@@ -36,14 +36,14 @@ import { createMessage } from '@core/domain/message';
 import type { ModelInfo, ProviderClient } from '@core/ports/chat-model';
 import type { GlobalConfig } from '@runtime/persistence/global-config';
 import { mergeProviderConfig } from '@runtime/persistence/global-config';
-import { renderDiff } from './render-diff.js';
+import { renderDiff } from '@cli/ui/render-diff.js';
 import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
-import { COMMANDS, filterCommands, parseCommandInput } from './commands.js';
+import { COMMANDS, filterCommands, parseCommandInput } from '@cli/ui/commands.js';
 import {
   ConnectPicker,
   type ConnectedProviderResult,
-} from './connect-picker.js';
-import { ModelPicker } from './model-picker.js';
+} from '@cli/ui/connect-picker.js';
+import { ModelPicker } from '@cli/ui/model-picker.js';
 import { ProviderId } from '@core/ports/provider-catalog.js';
 import { TextArea } from '@cli/ui/text-area.js';
 

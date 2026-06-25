@@ -1,6 +1,5 @@
+import { renderDiff } from '@cli/ui/render-diff';
 import { describe, expect, it } from 'vitest';
-
-import { renderDiff } from './render-diff.js';
 
 // Strip ANSI color codes so assertions test structure, not exact escape codes.
 // (chalk also disables color entirely when stdout is not a TTY, e.g. in CI.)

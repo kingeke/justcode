@@ -6,7 +6,7 @@ import {
   type TextChunk,
 } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
-import { pasteFromClipboard } from './clipboard.js';
+import { pasteFromClipboard } from '@cli/ui/clipboard';
 
 export interface TextAreaProps {
   readonly value: string;

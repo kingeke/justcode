@@ -16,9 +16,9 @@ import {
   type ProviderConfig,
   type ProviderConnectionInfo,
 } from '@core/ports/provider-catalog';
-import { normalizeSingleLinePaste, pasteFromClipboard } from './clipboard.js';
-import { fuzzyFilter } from './fuzzy-filter.js';
-import { Spinner } from './spinner.js';
+import { normalizeSingleLinePaste, pasteFromClipboard } from '@cli/ui/clipboard.js';
+import { fuzzyFilter } from '@cli/ui/fuzzy-filter.js';
+import { Spinner } from '@cli/ui/spinner.js';
 
 const VISIBLE_ROWS = 12;
 const BOLD = createTextAttributes({ bold: true });
