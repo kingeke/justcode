@@ -7,7 +7,7 @@ This document tracks the implementation status of CLI tools.
 | ☑ | **write** | Create new files or overwrite existing files. |
 | ☑ | **read** | Read the contents of files. |
 | ☑ | **edit** | Modify existing files or selected portions of files. |
-| ☐ | **bash** | Execute shell commands in a sandboxed environment. |
+| ☑ | **bash** | Execute shell commands in a sandboxed environment. |
 | ☐ | **grep** | Search file contents using text or regular expressions. |
 | ☐ | **apply_patch** | Apply unified diff patches to files. |
 | ☐ | **glob** | Find files using glob patterns. |

@@ -57,6 +57,8 @@ interface ChatAppProps {
   onThinkingCollapsedChange?: (collapsed: boolean) => void;
   initialAutoApplyWrites?: boolean;
   onAutoApplyWritesChange?: (autoApply: boolean) => void;
+  initialExpandTools?: boolean;
+  onExpandToolsChange?: (expand: boolean) => void;
   initialMaxReadLines?: number;
   onMaxReadLinesChange?: (lines: number) => void;
 }
@@ -144,6 +146,9 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   };
   const activeRequestControllerRef = useRef<AbortController | null>(null);
   const nextSessionRequestedModelRef = useRef<string | undefined>(undefined);
+  // The raw prompt of the in-flight request, restored to the input if the user
+  // interrupts so they can edit and resend without retyping.
+  const submittedPromptRef = useRef<string>('');
 
   const cancelActiveRequest = (): void => {
     activeRequestControllerRef.current?.abort();
@@ -206,6 +211,9 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     props.initialAutoApplyWrites ?? false
   );
   const autoApplyWritesRef = useRef(props.initialAutoApplyWrites ?? false);
+  const [expandTools, setExpandTools] = useState(
+    props.initialExpandTools ?? false
+  );
   const maxReadLinesRef = useRef(
     props.initialMaxReadLines ?? DEFAULT_MAX_READ_LINES
   );
@@ -216,6 +224,47 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     useState<PendingApproval | null>(null);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const toolEventKeyRef = useRef(0);
+  // The synthetic tool-call id of the bash command currently running, so its
+  // optimistic placeholder message can be filled in when the call finishes.
+  const liveBashCallRef = useRef<string | null>(null);
+  // Index into the finished bash rows while browsing them with the keyboard;
+  // null means we're not browsing (the prompt has focus as usual).
+  const [browseIndex, setBrowseIndex] = useState<number | null>(null);
+  const [expandedBashIds, setExpandedBashIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  // Pair each bash result with the command that produced it: the command lives
+  // on the assistant's tool call, the output on the following `tool` message.
+  const bashCommandByCallId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const message of conversation?.messages ?? []) {
+      if (message.role !== 'assistant' || !message.toolCalls) continue;
+      for (const call of message.toolCalls) {
+        if (call.name === 'bash') map.set(call.id, call.arguments);
+      }
+    }
+    return map;
+  }, [conversation]);
+  // The finished bash results, in conversation order — what the user browses.
+  const bashToolMessages = useMemo(
+    () =>
+      (conversation?.messages ?? []).filter(
+        (message) => message.role === 'tool' && message.name === 'bash'
+      ),
+    [conversation]
+  );
+  const selectedBashMessage =
+    browseIndex !== null ? bashToolMessages[browseIndex] : undefined;
+  const selectedBashId = selectedBashMessage?.id;
+
+  const toggleBashExpanded = (id: string): void => {
+    setExpandedBashIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
   // Armed by a Ctrl+C that didn't exit (it cleared text or hit an empty input);
   // the next Ctrl+C exits, but only within the EXIT_WINDOW_MS window. Disarmed
   // as soon as the user types again, or when the window times out.
@@ -329,6 +378,48 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       return;
     }
 
+    // Browsing finished bash commands: arrows move the selection, Enter/Space
+    // toggle the selected command's output box, Esc returns to the prompt.
+    if (browseIndex !== null) {
+      if (key.escape) {
+        setBrowseIndex(null);
+        return;
+      }
+      if (key.upArrow) {
+        setBrowseIndex((i) => Math.max(0, (i ?? 0) - 1));
+        return;
+      }
+      if (key.downArrow) {
+        setBrowseIndex((i) =>
+          Math.min(bashToolMessages.length - 1, (i ?? 0) + 1)
+        );
+        return;
+      }
+      if (key.return || value === ' ') {
+        if (selectedBashId !== undefined) {
+          toggleBashExpanded(selectedBashId);
+        }
+        return;
+      }
+      // Swallow everything else so stray keys don't leak while browsing.
+      return;
+    }
+
+    // Enter browse mode from an empty prompt when there are bash results.
+    // Skipped when /expand-tools is on, since every box is already inline.
+    if (
+      key.upArrow &&
+      !input &&
+      !isSending &&
+      !expandTools &&
+      bashToolMessages.length > 0 &&
+      !isCommandMode &&
+      !showMentionSuggestions
+    ) {
+      setBrowseIndex(bashToolMessages.length - 1);
+      return;
+    }
+
     if (key.escape) {
       if (isSending) {
         cancelActiveRequest();
@@ -392,6 +483,16 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   useEffect(() => {
     setSelectedSuggestionIndex(0);
   }, [activeMentionQuery]);
+
+  // Leave browse mode if there are no rows to point at, and clamp the cursor if
+  // the list shrank (e.g. a new session cleared the conversation).
+  useEffect(() => {
+    setBrowseIndex((current) => {
+      if (current === null) return null;
+      if (bashToolMessages.length === 0) return null;
+      return Math.min(current, bashToolMessages.length - 1);
+    });
+  }, [bashToolMessages.length]);
 
   useEffect(() => {
     return () => {
@@ -607,6 +708,16 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       return;
     }
 
+    if (name === 'expand-tools') {
+      const next = !expandTools;
+      setExpandTools(next);
+      props.onExpandToolsChange?.(next);
+      setStatus(
+        next ? 'Showing full tool output inline' : 'Collapsing tool output'
+      );
+      return;
+    }
+
     if (name === 'thinking') {
       const next = !thinkingCollapsed;
       setThinkingCollapsed(next);
@@ -681,6 +792,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
     const requestController = new AbortController();
     activeRequestControllerRef.current = requestController;
+    submittedPromptRef.current = value;
 
     const baseConversation = conversation;
 
@@ -696,6 +808,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     setStreamingThinking('');
     setThinkingDuration(null);
     setToolEvents([]);
+    setBrowseIndex(null);
     streamingBufferRef.current = '';
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
     responseTimingRef.current = { startMs: Date.now(), firstTokenMs: null };
@@ -724,10 +837,51 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
     const onToolActivity = (event: ToolActivityEvent): void => {
       if (event.phase === 'start') {
-        // A turn finished and tools are running; drop the streamed preamble so
-        // the next turn's text renders cleanly.
+        // A tool is running; drop the streamed preamble (text + thinking) so it
+        // doesn't render out of order below the tool. Thinking is preserved in
+        // thinkingRef and re-anchored to the turn's first message at the end.
         streamingBufferRef.current = '';
         setStreamingContent('');
+        setStreamingThinking('');
+
+        if (event.toolName === 'bash') {
+          // Splice an optimistic assistant(tool call) + tool(running) pair into
+          // the displayed transcript so the box renders in place immediately,
+          // not in a trailing block. The real messages replace these when the
+          // turn commits (see the success path's setConversation).
+          const callId = `live-${(toolEventKeyRef.current += 1)}`;
+          liveBashCallRef.current = callId;
+          const command = event.view.preview ?? '';
+          setConversation((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  messages: [
+                    ...prev.messages,
+                    createMessage('assistant', '', new Date(), undefined, {
+                      toolCalls: [
+                        {
+                          id: callId,
+                          name: 'bash',
+                          arguments: JSON.stringify({ command }),
+                        },
+                      ],
+                    }),
+                    // Empty content marks it as still running (a finished call
+                    // always has non-empty content, e.g. "(no output)").
+                    createMessage('tool', '', new Date(), undefined, {
+                      toolCallId: callId,
+                      name: 'bash',
+                    }),
+                  ],
+                }
+              : prev
+          );
+          return;
+        }
+
+        // Non-bash tools (file writes/edits) keep the live bottom indicator:
+        // their diff preview isn't stored on the conversation message.
         const key = (toolEventKeyRef.current += 1);
         setToolEvents((prev) => [
           ...prev,
@@ -741,6 +895,27 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         ]);
         return;
       }
+
+      if (event.toolName === 'bash') {
+        const callId = liveBashCallRef.current;
+        liveBashCallRef.current = null;
+        if (!callId) return;
+        const content = event.result?.content || '(no output)';
+        setConversation((prev) =>
+          prev
+            ? {
+                ...prev,
+                messages: prev.messages.map((message) =>
+                  message.role === 'tool' && message.toolCallId === callId
+                    ? { ...message, content }
+                    : message
+                ),
+              }
+            : prev
+        );
+        return;
+      }
+
       setToolEvents((prev) => {
         const next = [...prev];
         for (let index = next.length - 1; index >= 0; index -= 1) {
@@ -797,8 +972,15 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
       const endMs = Date.now();
       const timing = responseTimingRef.current;
-      const lastMsg =
-        result.conversation.messages[result.conversation.messages.length - 1];
+      // Attach the turn's thinking to the FIRST assistant message it produced,
+      // not the last: the reasoning precedes any tool calls, so anchoring it
+      // here keeps the transcript order thinking → tool use → answer.
+      const newMessages = result.conversation.messages.slice(
+        baseConversation.messages.length
+      );
+      const thinkingAnchor = newMessages.find(
+        (message) => message.role === 'assistant'
+      );
       const capturedThinking = thinkingRef.current.buffer;
       const capturedContent = streamingBufferRef.current;
       const capturedDuration =
@@ -833,10 +1015,10 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         setThinkingDuration(null);
         setConversation(result.conversation);
         setStatus('Ready');
-        if (lastMsg && capturedThinking) {
+        if (thinkingAnchor && capturedThinking) {
           setMessageThinking((prev) => ({
             ...prev,
-            [lastMsg.id]: {
+            [thinkingAnchor.id]: {
               content: capturedThinking,
               durationMs: capturedDuration,
             },
@@ -886,31 +1068,42 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
             ? Date.now() - thinkingRef.current.startMs
             : 0);
 
-        if (capturedThinking || capturedContent) {
-          const interruptedMessage = createMessage(
-            'assistant',
-            capturedContent,
-            new Date(),
-            undefined,
-            capturedThinking
-              ? {
-                  thinking: {
-                    content: capturedThinking,
-                    durationMs: capturedDuration,
-                  },
-                }
-              : undefined
-          );
+        const interruptedMessage =
+          capturedThinking || capturedContent
+            ? createMessage(
+                'assistant',
+                capturedContent,
+                new Date(),
+                undefined,
+                capturedThinking
+                  ? {
+                      thinking: {
+                        content: capturedThinking,
+                        durationMs: capturedDuration,
+                      },
+                    }
+                  : undefined
+              )
+            : null;
 
-          setConversation((current) =>
-            current
-              ? {
-                  ...current,
-                  messages: [...current.messages, interruptedMessage],
-                }
-              : current
+        setConversation((current) => {
+          if (!current) return current;
+          // Settle any optimistic bash placeholder still marked running, then
+          // append whatever partial assistant response was captured.
+          const messages = current.messages.map((message) =>
+            message.role === 'tool' &&
+            message.name === 'bash' &&
+            message.content === ''
+              ? { ...message, content: 'Command was cancelled.' }
+              : message
           );
-        }
+          return {
+            ...current,
+            messages: interruptedMessage
+              ? [...messages, interruptedMessage]
+              : messages,
+          };
+        });
 
         streamingBufferRef.current = '';
         thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
@@ -919,6 +1112,10 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         setThinkingDuration(null);
         setError(null);
         setStatus('Interrupted');
+        // Put the interrupted prompt back so the user can tweak and resend.
+        if (submittedPromptRef.current) {
+          setInputWithCursorAtEnd(submittedPromptRef.current);
+        }
       } else {
         streamingBufferRef.current = '';
         thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
@@ -929,6 +1126,10 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         setStatus('Request failed');
       }
     } finally {
+      // The live tool boxes are only an in-flight indicator; once the turn is
+      // done the finished conversation renders every tool call inline, in order.
+      setToolEvents([]);
+      liveBashCallRef.current = null;
       setIsSending(false);
       activeRequestControllerRef.current = null;
     }
@@ -1028,17 +1229,37 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
                           renderMarkdown(message.content)}
                       </Text>
                     ) : null}
-                    {message.toolCalls?.map((call) => (
-                      <Text key={call.id} color="magenta">
-                        ⚙ {call.name}({summarizeToolArgs(call.arguments)})
-                      </Text>
-                    ))}
+                    {/* bash calls are shown by their result box below, so skip
+                        them here to avoid a redundant ⚙ line. */}
+                    {message.toolCalls
+                      ?.filter((call) => call.name !== 'bash')
+                      .map((call) => (
+                        <Text key={call.id} color="magenta">
+                          ⚙ {call.name}({summarizeToolArgs(call.arguments)})
+                        </Text>
+                      ))}
                   </Box>
                 ) : message.role === 'tool' ? (
-                  <Text dimColor>
-                    {'  ↳ '}
-                    {firstLine(message.content)}
-                  </Text>
+                  message.name === 'bash' ? (
+                    // When /expand-tools is off, inline stays a one-line summary
+                    // (the box opens in a pinned panel via browsing); when on,
+                    // every command shows its full input/output inline.
+                    <BashResult
+                      command={bashCommandFromArgs(
+                        message.toolCallId
+                          ? bashCommandByCallId.get(message.toolCallId)
+                          : undefined
+                      )}
+                      output={message.content}
+                      expanded={expandTools}
+                      selected={message.id === selectedBashId}
+                    />
+                  ) : (
+                    <Text dimColor>
+                      {'  ↳ '}
+                      {firstLine(message.content)}
+                    </Text>
+                  )
                 ) : (
                   <Text>
                     <Text color="yellow">{message.role}</Text>
@@ -1173,6 +1394,14 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
                     </Text>
                   </Text>
                 ) : null}
+                {cmd.name === 'expand-tools' ? (
+                  <Text>
+                    {'  '}
+                    <Text color={expandTools ? 'green' : 'yellow'}>
+                      [{expandTools ? 'on' : 'off'}]
+                    </Text>
+                  </Text>
+                ) : null}
                 {cmd.name === 'read-limit' ? (
                   <Text>
                     {'  '}
@@ -1185,6 +1414,39 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         </Box>
       ) : null}
 
+      {/* The expanded command opens here, pinned above the prompt, so it's
+          always visible without scrolling up to where it sits in the transcript. */}
+      {selectedBashMessage && expandedBashIds.has(selectedBashMessage.id) ? (
+        <Box marginTop={1} flexDirection="column">
+          <Text dimColor>
+            command {(browseIndex ?? 0) + 1} of {bashToolMessages.length}
+          </Text>
+          <BashResult
+            command={bashCommandFromArgs(
+              selectedBashMessage.toolCallId
+                ? bashCommandByCallId.get(selectedBashMessage.toolCallId)
+                : undefined
+            )}
+            output={selectedBashMessage.content}
+            expanded
+            selected
+          />
+        </Box>
+      ) : null}
+
+      {browseIndex !== null ? (
+        <Box marginTop={1}>
+          <Text dimColor>
+            browsing commands · ↑/↓ select · enter show/hide output · esc back to
+            prompt
+          </Text>
+        </Box>
+      ) : bashToolMessages.length > 0 && !input && !isSending && !expandTools ? (
+        <Box marginTop={1}>
+          <Text dimColor>↑ to browse {bashToolMessages.length} command output(s)</Text>
+        </Box>
+      ) : null}
+
       <Box marginTop={1}>
         <Text>{isSending ? 'sending' : 'prompt'}&gt; </Text>
         <TextInput
@@ -1192,7 +1454,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
           value={input}
           onChange={setInput}
           onSubmit={submit}
-          focus={!isSending}
+          focus={!isSending && browseIndex === null}
         />
       </Box>
 
@@ -1296,6 +1558,92 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
         </Box>
       ) : null}
     </Box>
+  );
+}
+
+/**
+ * Inline rendering of a finished bash call in the transcript: a one-line
+ * summary that, when expanded, opens a box with the command and its output
+ * split by a horizontal rule. Selection (while browsing) tints it cyan.
+ */
+function BashResult({
+  command,
+  output,
+  expanded,
+  selected,
+}: {
+  command: string;
+  output: string;
+  expanded: boolean;
+  selected: boolean;
+}): React.ReactElement {
+  // Empty output means the call is still running (a finished call always has
+  // non-empty content). Running calls always show the box so it's visible
+  // in place; finished calls show it only when expanded.
+  const running = output === '';
+  const error = !running && isBashErrorOutput(output);
+  const summary = firstLine(command || output);
+  const showBox = running || expanded;
+  const color = selected
+    ? 'cyan'
+    : running
+      ? 'yellow'
+      : error
+        ? 'red'
+        : 'green';
+  return (
+    <Box flexDirection="column">
+      <Text color={color}>
+        {selected ? '› ' : '  '}
+        {running ? '⚙ ' : error ? '✗ ' : '✓ '}bash: {summary}
+        {!showBox ? (
+          <Text dimColor> {selected ? '(enter to expand)' : '▸'}</Text>
+        ) : null}
+      </Text>
+      {showBox ? (
+        <Box
+          flexDirection="column"
+          marginLeft={2}
+          borderStyle="round"
+          borderColor={selected ? 'cyan' : error ? 'red' : 'gray'}
+          paddingX={1}
+        >
+          <Text color="cyan">$ {command}</Text>
+          {/* A full-width box with only a top border draws the horizontal rule
+              that splits the command from its output. */}
+          <Box
+            borderStyle="single"
+            borderColor="gray"
+            borderBottom={false}
+            borderLeft={false}
+            borderRight={false}
+          />
+          {running ? (
+            <Text dimColor>running…</Text>
+          ) : (
+            <Text dimColor>{truncatePreview(output)}</Text>
+          )}
+        </Box>
+      ) : null}
+    </Box>
+  );
+}
+
+function bashCommandFromArgs(rawArguments: string | undefined): string {
+  if (!rawArguments) return '';
+  try {
+    const parsed = JSON.parse(rawArguments) as { command?: unknown };
+    return typeof parsed.command === 'string' ? parsed.command : '';
+  } catch {
+    return '';
+  }
+}
+
+// Best-effort: the BashTool prefixes failed runs with one of these phrases, so
+// we can colour the summary red without threading isError through the message.
+function isBashErrorOutput(content: string): boolean {
+  return /^(Command failed|Command timed out|Command was cancelled|Failed to run command|Invalid arguments)/.test(
+    content
   );
 }
 

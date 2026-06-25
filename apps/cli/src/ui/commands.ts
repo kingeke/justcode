@@ -29,6 +29,10 @@ export const COMMANDS: Command[] = [
     description: 'Toggle auto-applying file writes without confirmation',
   },
   {
+    name: 'expand-tools',
+    description: 'Toggle showing full tool input/output inline by default',
+  },
+  {
     name: 'read-limit',
     description:
       'Set how many lines of a file the model reads at once, e.g. /read-limit 500',

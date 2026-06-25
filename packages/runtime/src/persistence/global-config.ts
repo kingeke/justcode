@@ -11,6 +11,8 @@ export interface GlobalConfig {
   thinkingCollapsed?: boolean;
   /** When true, file-writing tools run without per-call confirmation. */
   autoApplyWrites?: boolean;
+  /** When true, finished tool calls render their full input/output inline. */
+  expandTools?: boolean;
   /** Tunables for how the agent reads from the workspace. */
   cache?: {
     /** Max lines returned by a single file read before it is paged. */
