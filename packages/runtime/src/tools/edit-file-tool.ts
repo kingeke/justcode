@@ -12,13 +12,22 @@ interface EditFileArguments {
   oldString: string;
   newString: string;
   replaceAll: boolean;
+  startLine?: number | undefined;
+  endLine?: number | undefined;
 }
+
+/** How many matches to enumerate in an ambiguous-match error. */
+const MAX_LISTED_MATCHES = 10;
+/** Truncate context lines so the error stays readable. */
+const MAX_CONTEXT_LENGTH = 100;
 
 /**
  * Edits a file in place by replacing an exact occurrence of `old_string` with
  * `new_string`. By default the match must be unique so an edit can never touch
- * more of the file than intended; pass `replace_all` to rewrite every
- * occurrence. Path-safety is enforced by the underlying `WorkspaceFilePort`.
+ * more of the file than intended. When the same text repeats, the match can be
+ * disambiguated three ways: include more surrounding context in `old_string`,
+ * scope the search to a `start_line`/`end_line` window, or pass `replace_all`.
+ * Path-safety is enforced by the underlying `WorkspaceFilePort`.
  */
 export class EditFileTool implements Tool {
   public readonly requiresApproval = true;
@@ -28,8 +37,11 @@ export class EditFileTool implements Tool {
     description:
       'Replace an exact string in an existing workspace file. The path is ' +
       'relative to the workspace root. "old_string" must match the file ' +
-      'exactly (including whitespace) and, unless "replace_all" is true, must ' +
-      'appear exactly once. To create a new file use write_file instead.',
+      'exactly (including whitespace). Unless "replace_all" is true, the match ' +
+      'must be unique; if the text repeats, either add surrounding lines to ' +
+      'old_string or scope the edit with "start_line"/"end_line" (1-based, ' +
+      'inclusive — the line numbers shown by read_file). To create a new file ' +
+      'use write_file instead.',
     parameters: {
       type: 'object',
       properties: {
@@ -48,8 +60,20 @@ export class EditFileTool implements Tool {
         replace_all: {
           type: 'boolean',
           description:
-            'Replace every occurrence instead of requiring a unique match. ' +
-            'Defaults to false.',
+            'Replace every occurrence (within the line window if given) ' +
+            'instead of requiring a unique match. Defaults to false.',
+        },
+        start_line: {
+          type: 'number',
+          description:
+            'Optional 1-based line number to start searching from (inclusive). ' +
+            'Use with end_line to target a repeated string in one region.',
+        },
+        end_line: {
+          type: 'number',
+          description:
+            'Optional 1-based line number to stop searching at (inclusive). ' +
+            'Defaults to the end of the file.',
         },
       },
       required: ['path', 'old_string', 'new_string'],
@@ -64,8 +88,12 @@ export class EditFileTool implements Tool {
     if (!parsed) {
       return { title: 'edit_file (unparseable arguments)' };
     }
+    const scope =
+      parsed.startLine !== undefined || parsed.endLine !== undefined
+        ? ` (lines ${parsed.startLine ?? 1}-${parsed.endLine ?? 'end'})`
+        : '';
     return {
-      title: `edit ${parsed.path}`,
+      title: `edit ${parsed.path}${scope}`,
       preview: `${parsed.oldString}\n→\n${parsed.newString}`,
     };
   }
@@ -84,12 +112,10 @@ export class EditFileTool implements Tool {
       };
     }
 
-    const { path, oldString, newString, replaceAll } = parsed;
+    const { path, oldString, newString, replaceAll, startLine, endLine } =
+      parsed;
     if (!path) {
-      return {
-        content: 'Invalid arguments: "path" is required.',
-        isError: true,
-      };
+      return { content: 'Invalid arguments: "path" is required.', isError: true };
     }
     if (oldString.length === 0) {
       return {
@@ -101,7 +127,8 @@ export class EditFileTool implements Tool {
     }
     if (oldString === newString) {
       return {
-        content: 'Invalid arguments: "old_string" and "new_string" are identical.',
+        content:
+          'Invalid arguments: "old_string" and "new_string" are identical.',
         isError: true,
       };
     }
@@ -118,25 +145,37 @@ export class EditFileTool implements Tool {
       };
     }
 
-    const occurrences = countOccurrences(original, oldString);
-    if (occurrences === 0) {
+    const lineStarts = getLineStarts(original);
+    const lineCount = lineStarts.length;
+
+    // Resolve the search window (defaults to the whole file).
+    const window = resolveWindow(startLine, endLine, lineCount, lineStarts, original);
+    if ('error' in window) {
+      return { content: `${window.error} (${path} has ${lineCount} lines).`, isError: true };
+    }
+
+    const matches = findMatches(
+      original,
+      oldString,
+      window.from,
+      window.to
+    );
+
+    const where = describeWindow(startLine, endLine);
+    if (matches.length === 0) {
       return {
-        content: `No match for "old_string" in ${path}.`,
+        content: `No match for "old_string" in ${path}${where}.`,
         isError: true,
       };
     }
-    if (occurrences > 1 && !replaceAll) {
+    if (matches.length > 1 && !replaceAll) {
       return {
-        content:
-          `"old_string" appears ${occurrences} times in ${path}. Provide more ` +
-          'surrounding context to make it unique, or pass replace_all=true.',
+        content: ambiguousMessage(path, oldString, matches, original, where),
         isError: true,
       };
     }
 
-    const updated = replaceAll
-      ? original.split(oldString).join(newString)
-      : original.replace(oldString, newString);
+    const updated = applyReplacements(original, oldString, newString, matches);
 
     try {
       await this.workspace.writeFile(path, updated);
@@ -149,20 +188,142 @@ export class EditFileTool implements Tool {
       };
     }
 
-    const replaced = replaceAll ? occurrences : 1;
+    const replaced = matches.length;
     const noun = replaced === 1 ? 'occurrence' : 'occurrences';
     return { content: `Edited ${path} (${replaced} ${noun} replaced).` };
   }
 }
 
-function countOccurrences(haystack: string, needle: string): number {
-  let count = 0;
-  let index = haystack.indexOf(needle);
-  while (index !== -1) {
-    count += 1;
-    index = haystack.indexOf(needle, index + needle.length);
+/** Character offset at which each 1-based line begins. */
+function getLineStarts(content: string): number[] {
+  const starts = [0];
+  for (let index = 0; index < content.length; index += 1) {
+    if (content[index] === '\n') {
+      starts.push(index + 1);
+    }
   }
-  return count;
+  return starts;
+}
+
+type Window = { from: number; to: number } | { error: string };
+
+function resolveWindow(
+  startLine: number | undefined,
+  endLine: number | undefined,
+  lineCount: number,
+  lineStarts: number[],
+  content: string
+): Window {
+  if (startLine === undefined && endLine === undefined) {
+    return { from: 0, to: content.length };
+  }
+
+  const start = startLine ?? 1;
+  const end = endLine ?? lineCount;
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < 1) {
+    return { error: 'Invalid arguments: line numbers must be positive integers' };
+  }
+  if (start > end) {
+    return { error: `Invalid arguments: start_line ${start} is after end_line ${end}` };
+  }
+  if (start > lineCount) {
+    return { error: `Invalid arguments: start_line ${start} is past the end of the file` };
+  }
+
+  const from = lineStarts[start - 1] ?? 0;
+  // Include the full text of `end` (up to, but not including, the next line).
+  const to = end < lineCount ? (lineStarts[end] ?? content.length) : content.length;
+  return { from, to };
+}
+
+/** Absolute offsets of every full occurrence of `needle` within [from, to). */
+function findMatches(
+  content: string,
+  needle: string,
+  from: number,
+  to: number
+): number[] {
+  const indices: number[] = [];
+  let index = content.indexOf(needle, from);
+  while (index !== -1 && index + needle.length <= to) {
+    indices.push(index);
+    index = content.indexOf(needle, index + needle.length);
+  }
+  return indices;
+}
+
+/** Replace each match, working back-to-front so earlier offsets stay valid. */
+function applyReplacements(
+  content: string,
+  oldString: string,
+  newString: string,
+  matches: number[]
+): string {
+  let updated = content;
+  for (let index = matches.length - 1; index >= 0; index -= 1) {
+    const at = matches[index] ?? 0;
+    updated =
+      updated.slice(0, at) + newString + updated.slice(at + oldString.length);
+  }
+  return updated;
+}
+
+function describeWindow(
+  startLine: number | undefined,
+  endLine: number | undefined
+): string {
+  if (startLine === undefined && endLine === undefined) {
+    return '';
+  }
+  return ` within lines ${startLine ?? 1}-${endLine ?? 'end'}`;
+}
+
+function ambiguousMessage(
+  path: string,
+  oldString: string,
+  matches: number[],
+  content: string,
+  where: string
+): string {
+  const lines = content.split('\n');
+  const shown = matches.slice(0, MAX_LISTED_MATCHES);
+  const listing = shown
+    .map((offset) => {
+      const lineNo = lineNumberOf(content, offset);
+      const current = truncate((lines[lineNo - 1] ?? '').trim());
+      const previous = truncate((lines[lineNo - 2] ?? '').trim());
+      const context = previous ? `${previous} / ${current}` : current;
+      return `  line ${lineNo}: ${context}`;
+    })
+    .join('\n');
+  const more =
+    matches.length > shown.length
+      ? `\n  …and ${matches.length - shown.length} more`
+      : '';
+
+  return (
+    `"${truncate(oldString)}" appears ${matches.length} times in ${path}${where}. ` +
+    'Re-issue with a unique old_string (add surrounding lines), scope it with ' +
+    'start_line/end_line, or pass replace_all=true. Matches:\n' +
+    listing +
+    more
+  );
+}
+
+function lineNumberOf(content: string, offset: number): number {
+  let line = 1;
+  for (let index = 0; index < offset && index < content.length; index += 1) {
+    if (content[index] === '\n') {
+      line += 1;
+    }
+  }
+  return line;
+}
+
+function truncate(text: string): string {
+  return text.length > MAX_CONTEXT_LENGTH
+    ? `${text.slice(0, MAX_CONTEXT_LENGTH)}…`
+    : text;
 }
 
 function tryParse(rawArguments: string): EditFileArguments | undefined {
@@ -182,6 +343,9 @@ function tryParse(rawArguments: string): EditFileArguments | undefined {
       oldString: parsed.old_string,
       newString: parsed.new_string,
       replaceAll: parsed.replace_all === true,
+      startLine:
+        typeof parsed.start_line === 'number' ? parsed.start_line : undefined,
+      endLine: typeof parsed.end_line === 'number' ? parsed.end_line : undefined,
     };
   } catch {
     return undefined;

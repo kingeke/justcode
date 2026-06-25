@@ -64,6 +64,8 @@ describe('EditFileTool', () => {
     );
     expect(ambiguous.isError).toBe(true);
     expect(ambiguous.content).toContain('appears 3 times');
+    // The error enumerates each match with its line number to guide a retry.
+    expect(ambiguous.content).toContain('line 1');
 
     const all = await tool.execute(
       JSON.stringify({
@@ -77,6 +79,85 @@ describe('EditFileTool', () => {
     expect(all.isError).toBeFalsy();
     expect(all.content).toContain('3 occurrences replaced');
     expect(await readFile(join(workspaceRoot, 'a.txt'), 'utf8')).toBe('y y y');
+  });
+
+  it('scopes a repeated string to a line window to make it unique', async () => {
+    // Mirrors the index.html case: the same <p> repeats in three divs.
+    await seed(
+      'index.html',
+      [
+        '<div>',
+        '  <h1>One</h1>',
+        '  <p>This is a serious file</p>',
+        '</div>',
+        '<div>',
+        '  <h1>Two</h1>',
+        '  <p>This is a serious file</p>',
+        '</div>',
+        '<div>',
+        '  <h1>Three</h1>',
+        '  <p>This is a serious file</p>',
+        '</div>',
+        '',
+      ].join('\n')
+    );
+
+    const result = await tool.execute(
+      JSON.stringify({
+        path: 'index.html',
+        old_string: 'This is a serious file',
+        new_string: 'This is a not serious file',
+        start_line: 9,
+        end_line: 12,
+      }),
+      { workspaceRoot }
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content).toContain('1 occurrence replaced');
+
+    const after = await readFile(join(workspaceRoot, 'index.html'), 'utf8');
+    // Only the third div changed; the first two are untouched.
+    expect(after).toContain('<h1>Three</h1>\n  <p>This is a not serious file</p>');
+    expect(
+      after.match(/This is a serious file/g)?.length
+    ).toBe(2);
+  });
+
+  it('errors when old_string is absent from the given line window', async () => {
+    await seed('a.txt', 'alpha\nbeta\ngamma\n');
+
+    const result = await tool.execute(
+      JSON.stringify({
+        path: 'a.txt',
+        old_string: 'gamma',
+        new_string: 'delta',
+        start_line: 1,
+        end_line: 2,
+      }),
+      { workspaceRoot }
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('within lines 1-2');
+  });
+
+  it('rejects an inverted line window', async () => {
+    await seed('a.txt', 'alpha\nbeta\n');
+
+    const result = await tool.execute(
+      JSON.stringify({
+        path: 'a.txt',
+        old_string: 'beta',
+        new_string: 'b',
+        start_line: 5,
+        end_line: 1,
+      }),
+      { workspaceRoot }
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('start_line 5 is after end_line 1');
   });
 
   it('rejects an empty old_string', async () => {

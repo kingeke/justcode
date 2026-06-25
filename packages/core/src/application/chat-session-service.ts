@@ -66,12 +66,20 @@ export interface SubmitMessageResult {
 export interface ChatSessionOptions {
   toolRegistry?: ToolRegistry;
   workspaceRoot?: string;
+  /**
+   * Whether to also list the available tools (with their descriptions) in the
+   * prose system prompt. Tools are always advertised to the provider via
+   * proper function-calling regardless of this flag — this only controls the
+   * redundant prose listing. Defaults to false.
+   */
+  describeToolsInSystemPrompt?: boolean;
 }
 
 export class ChatSessionService {
   private provider: ProviderClient;
   private readonly toolRegistry: ToolRegistry | undefined;
   private readonly workspaceRoot: string;
+  private readonly describeToolsInSystemPrompt: boolean;
   /** Models that rejected tools once; we send their requests chat-only after. */
   private readonly toolUnsupportedModels = new Set<string>();
 
@@ -83,6 +91,8 @@ export class ChatSessionService {
     this.provider = provider;
     this.toolRegistry = options.toolRegistry;
     this.workspaceRoot = options.workspaceRoot ?? process.cwd();
+    this.describeToolsInSystemPrompt =
+      options.describeToolsInSystemPrompt ?? false;
   }
 
   public switchProvider(provider: ProviderClient): void {
@@ -147,7 +157,9 @@ export class ChatSessionService {
       throwIfAborted(input.signal);
       const systemMessage = createMessage(
         'system',
-        buildSystemPrompt(toolsEnabled ? toolDefinitions : [])
+        buildSystemPrompt(
+          toolsEnabled && this.describeToolsInSystemPrompt ? toolDefinitions : []
+        )
       );
 
       let response;
