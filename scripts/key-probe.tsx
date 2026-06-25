@@ -27,8 +27,8 @@ function Probe() {
   return (
     <Box flexDirection="column" padding={1}>
       <Text color="cyan">
-        Key probe. Press, in order: Enter, then Shift+Enter, then Option/Alt+Enter,
-        then Ctrl+J. Press q to quit.
+        Key probe. Press, in order: Enter, then Shift+Enter, then
+        Option/Alt+Enter, then Ctrl+J. Press q to quit.
       </Text>
       {rows.map((r, i) => (
         <Text key={i}>{r}</Text>

@@ -1,6 +1,6 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -20,8 +20,11 @@ describe('GrepTool', () => {
     await rm(workspaceRoot, { recursive: true, force: true });
   });
 
-  const seed = (path: string, content: string): Promise<void> =>
-    writeFile(join(workspaceRoot, path), content, 'utf8');
+  const seed = async (path: string, content: string): Promise<void> => {
+    const absolute = join(workspaceRoot, path);
+    await mkdir(dirname(absolute), { recursive: true });
+    await writeFile(absolute, content, 'utf8');
+  };
 
   const run = (args: Record<string, unknown>) =>
     tool.execute(JSON.stringify(args), { workspaceRoot });

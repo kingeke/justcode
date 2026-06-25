@@ -8,6 +8,7 @@ import { WriteFileTool } from '@runtime/tools/write-file-tool';
 import { EditFileTool } from '@runtime/tools/edit-file-tool';
 import { BashTool } from '@runtime/tools/bash-tool';
 import { GrepTool } from '@runtime/tools/grep-tool';
+import { GlobTool } from '@runtime/tools/glob-tool';
 import {
   ReadFileTool,
   DEFAULT_MAX_READ_LINES,
@@ -60,6 +61,7 @@ export async function createRuntimeServices(
     new EditFileTool(workspaceFiles),
     new ReadFileTool(workspaceFiles, () => readSettings.maxReadLines),
     new GrepTool(workspaceFiles),
+    new GlobTool(workspaceFiles),
     new BashTool(),
   ]);
   const allProviders = createAllProviders(config);
