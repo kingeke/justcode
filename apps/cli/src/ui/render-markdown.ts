@@ -3,7 +3,6 @@ import { markedTerminal } from 'marked-terminal';
 import markedShiki from 'marked-shiki';
 import { codeToANSI } from '@shikijs/cli';
 import type { BundledLanguage, BundledTheme } from 'shiki';
-import Table from 'cli-table3';
 import chalk from 'chalk';
 
 const FALLBACK_WIDTH = 80;
@@ -118,17 +117,78 @@ function renderTableToken(
   );
 
   const widths = computeColumnWidths([header, ...rows]);
-  const table = new Table({
-    head: header.map((cell) => chalk.bold.cyan(cell)),
-    colWidths: widths,
-    wordWrap: true,
-    wrapOnWordBoundary: true,
-    style: { head: [], border: ['grey'] },
-  });
-  for (const row of rows) {
-    table.push(row);
+  const styledHeader = header.map((cell) => chalk.bold.cyan(cell));
+  return drawTable(styledHeader, rows, widths);
+}
+
+// Proper SGR strip (the module-level ANSI_PATTERN omits the leading ESC).
+// eslint-disable-next-line no-control-regex
+const SGR = /\x1b\[[0-9;]*m/g;
+
+function visibleLen(text: string): number {
+  return lineWidth(text.replace(SGR, ''));
+}
+
+// Pad a (possibly ANSI-coloured) cell line to a target visible width.
+function padTo(text: string, width: number): string {
+  const gap = width - visibleLen(text);
+  return gap > 0 ? text + ' '.repeat(gap) : text;
+}
+
+// Word-wrap a cell to `width` visible cells. Wrapping happens on spaces so the
+// ANSI escapes that chalk wraps around each inline token stay intact.
+function wrapCell(text: string, width: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [''];
+
+  const lines: string[] = [];
+  let line = '';
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (!line || visibleLen(candidate) <= width) {
+      line = candidate;
+    } else {
+      lines.push(line);
+      line = word;
+    }
   }
-  return `${table.toString()}\n`;
+  if (line) lines.push(line);
+  return lines;
+}
+
+// Renders a bordered table without cli-table3 (whose bundled string-width breaks
+// under Bun). `widths` are full column widths including one space of padding per side.
+function drawTable(
+  header: string[],
+  rows: string[][],
+  widths: number[]
+): string {
+  const grey = (text: string): string => chalk.grey(text);
+  const rule = (left: string, mid: string, right: string): string =>
+    grey(left + widths.map((w) => '─'.repeat(w)).join(mid) + right);
+
+  const renderRow = (cells: string[]): string => {
+    const wrapped = cells.map((cell, column) =>
+      wrapCell(cell, Math.max(1, (widths[column] ?? 2) - 2))
+    );
+    const height = Math.max(1, ...wrapped.map((lines) => lines.length));
+    const out: string[] = [];
+    for (let row = 0; row < height; row += 1) {
+      const columns = wrapped.map((lines, column) => {
+        const content = padTo(lines[row] ?? '', (widths[column] ?? 2) - 2);
+        return ` ${content} `;
+      });
+      out.push(grey('│') + columns.join(grey('│')) + grey('│'));
+    }
+    return out.join('\n');
+  };
+
+  const lines = [rule('┌', '┬', '┐'), renderRow(header), rule('├', '┼', '┤')];
+  for (const row of rows) {
+    lines.push(renderRow(row));
+  }
+  lines.push(rule('└', '┴', '┘'));
+  return `${lines.join('\n')}\n`;
 }
 
 // marked-terminal's `text` renderer returns the token's raw `.text`, ignoring its

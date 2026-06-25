@@ -6,8 +6,17 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Box, Text, useApp, useInput } from 'ink';
-import Spinner from 'ink-spinner';
+import {
+  createTextAttributes,
+  parseColor,
+  StyledText,
+  SyntaxStyle,
+  type ScrollBoxRenderable,
+  type TextChunk,
+} from '@opentui/core';
+import { useKeyboard, useTerminalDimensions } from '@opentui/react';
+import { Spinner } from './spinner.js';
+import { ansiToStyledText } from './ansi-to-styled-text.js';
 
 import {
   applyMentionSuggestion,
@@ -27,7 +36,6 @@ import { createMessage } from '@core/domain/message';
 import type { ModelInfo, ProviderClient } from '@core/ports/chat-model';
 import type { GlobalConfig } from '@runtime/persistence/global-config';
 import { mergeProviderConfig } from '@runtime/persistence/global-config';
-import { renderMarkdown, renderMarkdownAsync } from './render-markdown.js';
 import { renderDiff } from './render-diff.js';
 import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
 import { COMMANDS, filterCommands, parseCommandInput } from './commands.js';
@@ -41,7 +49,15 @@ import { TextArea } from '@cli/ui/text-area.js';
 
 const MAX_COMMAND_ITEMS = 8;
 
+const BOLD = createTextAttributes({ bold: true });
+// Muted text uses an explicit grey foreground rather than the SGR "dim" attribute:
+// dim renders inconsistently (often near-white) across terminals, whereas a grey
+// fg reads as reliably subdued — matching the previous Ink look.
+const MUTED = '#8a8a8a';
+
 interface ChatAppProps {
+  /** Exits the app (tears down the OpenTUI renderer). */
+  onExit: () => void;
   /** Active provider, or undefined when nothing is connected yet. */
   providerId: ProviderId | undefined;
   savedConfig: GlobalConfig;
@@ -80,6 +96,135 @@ interface ToolEvent {
 const MAX_PREVIEW_LINES = 16;
 const EXIT_HINT = 'Press Ctrl+C again to exit';
 const EXIT_WINDOW_MS = 2000;
+const MARKDOWN_FG = '#d4d4d4';
+
+// One shared SyntaxStyle for all markdown rendering. Created lazily on first use
+// (after the native renderer is initialised) so it isn't constructed at import time.
+let sharedSyntaxStyle: SyntaxStyle | null = null;
+function getSyntaxStyle(): SyntaxStyle {
+  if (!sharedSyntaxStyle) {
+    sharedSyntaxStyle = SyntaxStyle.create();
+  }
+  return sharedSyntaxStyle;
+}
+
+// Renders raw markdown with OpenTUI's native <markdown> renderable, which lays out
+// tables, headings, lists and code blocks correctly inside the TUI (the previous
+// marked-terminal → ANSI pipeline mangled tables). Mirrors opencode's approach.
+function MarkdownView({
+  content,
+  streaming = false,
+}: {
+  content: string;
+  streaming?: boolean;
+}): React.ReactNode {
+  return (
+    <markdown
+      content={content}
+      syntaxStyle={getSyntaxStyle()}
+      streaming={streaming}
+      tableOptions={{ style: 'grid' }}
+      fg={MARKDOWN_FG}
+      flexShrink={0}
+    />
+  );
+}
+
+// OpenTUI's <text> mis-lays-out a mix of bare-string and <span> inline children,
+// so any styled-inline line is built as a single StyledText (`content`) of chunks.
+function tc(
+  text: string,
+  opts: { fg?: string; bold?: boolean } = {}
+): TextChunk {
+  const chunk: TextChunk = { __isChunk: true, text };
+  if (opts.fg) chunk.fg = parseColor(opts.fg);
+  if (opts.bold) chunk.attributes = BOLD;
+  return chunk;
+}
+
+function commandLineContent(
+  cmd: (typeof COMMANDS)[number],
+  isSelected: boolean,
+  state: {
+    thinkingCollapsed: boolean;
+    autoApplyWrites: boolean;
+    expandTools: boolean;
+    maxReadLines: number;
+  }
+): StyledText {
+  const lead = isSelected ? { fg: 'cyan' } : {};
+  const chunks: TextChunk[] = [
+    tc(isSelected ? '› ' : '  ', lead),
+    tc(`/${cmd.name}`, { ...lead, bold: isSelected }),
+    tc('  ', lead),
+  ];
+  const description =
+    cmd.name === 'thinking'
+      ? state.thinkingCollapsed
+        ? 'Expand thinking'
+        : 'Collapse thinking'
+      : cmd.description;
+  chunks.push(tc(description, { fg: MUTED }));
+
+  if (cmd.name === 'auto-writes') {
+    chunks.push(
+      tc('  '),
+      tc(`[${state.autoApplyWrites ? 'on' : 'off'}]`, {
+        fg: state.autoApplyWrites ? 'green' : 'yellow',
+      })
+    );
+  } else if (cmd.name === 'expand-tools') {
+    chunks.push(
+      tc('  '),
+      tc(`[${state.expandTools ? 'on' : 'off'}]`, {
+        fg: state.expandTools ? 'green' : 'yellow',
+      })
+    );
+  } else if (cmd.name === 'read-limit') {
+    chunks.push(tc('  '), tc(`[${state.maxReadLines} lines]`, { fg: 'green' }));
+  }
+
+  return new StyledText(chunks);
+}
+
+function metricsLineContent(
+  metrics: ReturnType<typeof getInitialMetrics>,
+  activeModelInfo: ModelInfo | null
+): StyledText {
+  const chunks: TextChunk[] = [
+    tc('in ', { fg: MUTED }),
+    tc(metrics.inputTokens.toLocaleString(), { fg: 'white' }),
+    tc(' out ', { fg: MUTED }),
+    tc(metrics.outputTokens.toLocaleString(), { fg: 'white' }),
+  ];
+
+  if (metrics.cachedTokens > 0) {
+    chunks.push(
+      tc(' cached ', { fg: MUTED }),
+      tc(metrics.cachedTokens.toLocaleString(), { fg: 'white' })
+    );
+  }
+
+  if (activeModelInfo?.contextWindow) {
+    const pct = contextPct(
+      metrics.lastInputTokens,
+      activeModelInfo.contextWindow
+    );
+    chunks.push(
+      tc(' ctx ', { fg: MUTED }),
+      tc(`${pct}%`, { fg: pct > 80 ? 'yellow' : 'white' })
+    );
+  }
+
+  if (metrics.cost > 0) {
+    chunks.push(
+      tc(' $', { fg: MUTED }),
+      tc(metrics.cost.toFixed(4), { fg: 'white' })
+    );
+  }
+
+  return new StyledText(chunks);
+}
 
 function getInitialMetrics(): {
   inputTokens: number;
@@ -97,8 +242,19 @@ function getInitialMetrics(): {
   };
 }
 
-export function ChatApp(props: ChatAppProps): React.ReactElement {
-  const { exit } = useApp();
+export function ChatApp(props: ChatAppProps): React.ReactNode {
+  const exit = props.onExit;
+  // Full-screen layout: the root fills the terminal and the transcript lives in a
+  // bottom-sticky <scrollbox>, since OpenTUI runs in the alternate screen and does
+  // not use the terminal's native scrollback the way Ink's flowing output did.
+  const dimensions = useTerminalDimensions();
+  const scrollRef = useRef<ScrollBoxRenderable | null>(null);
+  const scrollToBottom = useCallback((): void => {
+    const scroll = scrollRef.current;
+    if (scroll && !scroll.isDestroyed) {
+      scroll.scrollTo(scroll.scrollHeight);
+    }
+  }, []);
   // No provider connected yet: open straight into the connect screen and hold
   // off on starting a session until the user picks one.
   const needsConnect = props.providerId === undefined;
@@ -170,7 +326,6 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     setThinkingDuration(null);
     setToolEvents([]);
     setMessageThinking({});
-    setRenderedContent({});
     streamingBufferRef.current = '';
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
     responseTimingRef.current = { startMs: 0, firstTokenMs: null };
@@ -196,11 +351,6 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     Record<string, { content: string; durationMs: number }>
   >({});
   const [error, setError] = useState<string | null>(null);
-  // Shiki highlighting is async, so finalized assistant messages are rendered
-  // off the render path and cached here by message id.
-  const [renderedContent, setRenderedContent] = useState<
-    Record<string, string>
-  >({});
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
@@ -345,28 +495,30 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     availableProviders.find((provider) => provider.providerId === providerId) ??
     props.createProvider(providerId);
 
-  useInput((value, key) => {
+  useKeyboard((key) => {
     if (showModelPicker || showConnectPicker) return;
+
+    const value = key.sequence ?? '';
 
     if (pendingApproval) {
       const choice = value.toLowerCase();
-      if (key.ctrl && choice === 'c') {
+      if (key.ctrl && key.name === 'c') {
         exit();
         return;
       }
-      if (choice === 'y' || key.return) {
+      if (choice === 'y' || key.name === 'return') {
         resolveApproval(true, false);
       } else if (choice === 'a') {
         resolveApproval(true, true);
       } else if (choice === 'n') {
         resolveApproval(false, false);
-      } else if (key.escape) {
+      } else if (key.name === 'escape') {
         cancelActiveRequest();
       }
       return;
     }
 
-    if (key.ctrl && value.toLowerCase() === 'c') {
+    if (key.ctrl && key.name === 'c') {
       // A second Ctrl+C within the window exits.
       if (exitArmedRef.current) {
         exit();
@@ -381,21 +533,21 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     // Browsing finished bash commands: arrows move the selection, Enter/Space
     // toggle the selected command's output box, Esc returns to the prompt.
     if (browseIndex !== null) {
-      if (key.escape) {
+      if (key.name === 'escape') {
         setBrowseIndex(null);
         return;
       }
-      if (key.upArrow) {
+      if (key.name === 'up') {
         setBrowseIndex((i) => Math.max(0, (i ?? 0) - 1));
         return;
       }
-      if (key.downArrow) {
+      if (key.name === 'down') {
         setBrowseIndex((i) =>
           Math.min(bashToolMessages.length - 1, (i ?? 0) + 1)
         );
         return;
       }
-      if (key.return || value === ' ') {
+      if (key.name === 'return' || key.name === 'space') {
         if (selectedBashId !== undefined) {
           toggleBashExpanded(selectedBashId);
         }
@@ -408,7 +560,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     // Enter browse mode from an empty prompt when there are bash results.
     // Skipped when /expand-tools is on, since every box is already inline.
     if (
-      key.upArrow &&
+      key.name === 'up' &&
       !input &&
       !isSending &&
       !expandTools &&
@@ -420,7 +572,7 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       return;
     }
 
-    if (key.escape) {
+    if (key.name === 'escape') {
       if (isSending) {
         cancelActiveRequest();
         return;
@@ -438,17 +590,17 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
     }
 
     if (isCommandMode && visibleCommands.length) {
-      if (key.downArrow) {
+      if (key.name === 'down') {
         setSelectedCommandIndex((i) =>
           Math.min(i + 1, visibleCommands.length - 1)
         );
         return;
       }
-      if (key.upArrow) {
+      if (key.name === 'up') {
         setSelectedCommandIndex((i) => Math.max(i - 1, 0));
         return;
       }
-      if (key.tab) {
+      if (key.name === 'tab') {
         const cmd = visibleCommands[selectedCommandIndex];
         if (cmd) setInputWithCursorAtEnd(`/${cmd.name} `);
         return;
@@ -458,17 +610,17 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
 
     if (!showMentionSuggestions) return;
 
-    if (key.downArrow) {
+    if (key.name === 'down') {
       setSelectedSuggestionIndex((i) =>
         Math.min(i + 1, mentionSuggestions.length - 1)
       );
       return;
     }
-    if (key.upArrow) {
+    if (key.name === 'up') {
       setSelectedSuggestionIndex((i) => Math.max(i - 1, 0));
       return;
     }
-    if (key.tab) {
+    if (key.name === 'tab') {
       if (selectedSuggestion) {
         setInput((cur) => applyMentionSuggestion(cur, selectedSuggestion));
         setInputKey((key) => key + 1);
@@ -483,6 +635,14 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   useEffect(() => {
     setSelectedSuggestionIndex(0);
   }, [activeMentionQuery]);
+
+  // Snap the transcript to the bottom when a message is committed. Per-token
+  // streaming growth is handled by the scrollbox's stickyScroll, so this only
+  // fires on discrete message changes and never yanks the user back while they
+  // scroll up through history mid-response.
+  useEffect(() => {
+    scrollToBottom();
+  }, [conversation?.messages.length, scrollToBottom]);
 
   // Leave browse mode if there are no rows to point at, and clamp the cursor if
   // the list shrank (e.g. a new session cleared the conversation).
@@ -571,26 +731,6 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
       }
     );
   }, [availableProviders]);
-
-  useEffect(() => {
-    const messages = conversation?.messages;
-    if (!messages) return;
-    let cancelled = false;
-    void (async () => {
-      for (const message of messages) {
-        if (message.role !== 'assistant' || !message.content) continue;
-        if (renderedContent[message.id]) continue;
-        const rendered = await renderMarkdownAsync(message.content);
-        if (cancelled) return;
-        setRenderedContent((prev) =>
-          prev[message.id] ? prev : { ...prev, [message.id]: rendered }
-        );
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [conversation, renderedContent]);
 
   const handleModelSelect = (model: ModelInfo): void => {
     setShowModelPicker(false);
@@ -1175,17 +1315,35 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
   }
 
   return (
-    <Box flexDirection="column" padding={1}>
-      <Text color="cyan">justcode</Text>
-      <Text dimColor>
-        provider: {activeProviderId} | session: {currentSessionId}
-      </Text>
-      <Text dimColor>
-        Enter to send · Tab to complete @file or /command · Esc to cancel or
-        interrupt · Ctrl+C to exit
-      </Text>
+    <box
+      flexDirection="column"
+      height={dimensions.height}
+      width={dimensions.width}
+      padding={1}
+    >
+      <box flexDirection="column" flexShrink={0}>
+        <text fg="cyan" flexShrink={0}>
+          JustCode
+        </text>
+        <text fg={MUTED} flexShrink={0}>
+          Provider: {activeProviderId} | Session: {currentSessionId}
+        </text>
+        <text fg={MUTED} flexShrink={0}>
+          Enter to send · Tab to complete @file or /command · Esc to cancel or
+          interrupt · Ctrl+C to exit
+        </text>
+      </box>
 
-      <Box marginTop={1} flexDirection="column">
+      <scrollbox
+        ref={scrollRef}
+        flexGrow={1}
+        flexShrink={1}
+        minHeight={0}
+        marginTop={1}
+        stickyScroll
+        stickyStart="bottom"
+        contentOptions={{ flexDirection: 'column' }}
+      >
         {conversation?.messages.length ? (
           conversation.messages.map((message) => {
             const thinking =
@@ -1193,53 +1351,48 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
                 ? (message.thinking ?? messageThinking[message.id])
                 : undefined;
             return (
-              <Box key={message.id} flexDirection="column">
+              <box key={message.id} flexDirection="column">
                 {thinking ? (
-                  <Box flexDirection="column" marginBottom={0}>
-                    <Text color="yellow">
+                  <box flexDirection="column" marginBottom={0}>
+                    <text fg="yellow">
                       {thinkingCollapsed ? '+ ' : ''}Thought:{' '}
                       {formatDuration(thinking.durationMs)}
-                    </Text>
+                    </text>
                     {thinkingCollapsed ? null : (
-                      <Text dimColor>{thinking.content}</Text>
+                      <text fg={MUTED}>{thinking.content}</text>
                     )}
-                  </Box>
+                  </box>
                 ) : null}
                 {message.role === 'user' ? (
-                  <Box
+                  <box
                     flexDirection="column"
-                    borderStyle="round"
+                    border={['left']}
+                    borderStyle="rounded"
                     borderColor="cyan"
-                    borderTop={false}
-                    borderRight={false}
-                    borderBottom={false}
                     paddingLeft={1}
                     marginY={1}
                   >
-                    <Text bold color="white">
+                    <text fg="white" attributes={BOLD}>
                       {message.content}
-                    </Text>
-                    <Text dimColor>{formatTime(message.createdAt)}</Text>
-                  </Box>
+                    </text>
+                    <text fg={MUTED}>{formatTime(message.createdAt)}</text>
+                  </box>
                 ) : message.role === 'assistant' ? (
-                  <Box flexDirection="column">
+                  <box flexDirection="column">
                     {message.content &&
                     !(thinking && message.toolCalls?.length) ? (
-                      <Text>
-                        {renderedContent[message.id] ??
-                          renderMarkdown(message.content)}
-                      </Text>
+                      <MarkdownView content={message.content} />
                     ) : null}
                     {/* bash calls are shown by their result box below, so skip
                         them here to avoid a redundant ⚙ line. */}
                     {message.toolCalls
                       ?.filter((call) => call.name !== 'bash')
                       .map((call) => (
-                        <Text key={call.id} color="magenta">
+                        <text key={call.id} fg="magenta">
                           ⚙ {call.name}({summarizeToolArgs(call.arguments)})
-                        </Text>
+                        </text>
                       ))}
-                  </Box>
+                  </box>
                 ) : message.role === 'tool' ? (
                   message.name === 'bash' ? (
                     // When /expand-tools is off, inline stays a one-line summary
@@ -1256,53 +1409,57 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
                       selected={message.id === selectedBashId}
                     />
                   ) : (
-                    <Text dimColor>
+                    <text fg={MUTED}>
                       {'  ↳ '}
                       {firstLine(message.content)}
-                    </Text>
+                    </text>
                   )
                 ) : (
-                  <Text>
-                    <Text color="yellow">{message.role}</Text>
-                    <Text>: {message.content}</Text>
-                  </Text>
+                  <text
+                    content={
+                      new StyledText([
+                        tc(message.role, { fg: 'yellow' }),
+                        tc(`: ${message.content}`),
+                      ])
+                    }
+                  />
                 )}
                 {message.attachments?.map((attachment) => (
-                  <Text key={`${message.id}:${attachment.path}`} dimColor>
+                  <text key={`${message.id}:${attachment.path}`} fg={MUTED}>
                     attached: @{attachment.path}
-                  </Text>
+                  </text>
                 ))}
-              </Box>
+              </box>
             );
           })
         ) : (
-          <Text dimColor>No messages yet.</Text>
+          <text fg={MUTED}>No messages yet.</text>
         )}
         {streamingThinking || streamingContent ? (
-          <Box flexDirection="column">
+          <box flexDirection="column">
             {streamingThinking ? (
-              <Box flexDirection="column">
-                <Text color="yellow">
+              <box flexDirection="column">
+                <text fg="yellow">
                   {thinkingDuration !== null
                     ? `${thinkingCollapsed ? '+ ' : ''}Thought: ${formatDuration(thinkingDuration)}`
                     : 'thinking...'}
-                </Text>
+                </text>
                 {thinkingCollapsed ? null : (
-                  <Text dimColor>{streamingThinking}</Text>
+                  <text fg={MUTED}>{streamingThinking}</text>
                 )}
-              </Box>
+              </box>
             ) : null}
             {streamingContent ? (
-              <Text>{renderMarkdown(streamingContent)}</Text>
+              <MarkdownView content={streamingContent} streaming />
             ) : null}
-          </Box>
+          </box>
         ) : null}
         {toolEvents.length ? (
-          <Box flexDirection="column" marginTop={1}>
+          <box flexDirection="column" marginTop={1}>
             {toolEvents.map((event) => (
-              <Box key={event.key} flexDirection="column">
-                <Text
-                  color={
+              <box key={event.key} flexDirection="column">
+                <text
+                  fg={
                     event.status === 'error'
                       ? 'red'
                       : event.status === 'done'
@@ -1316,254 +1473,208 @@ export function ChatApp(props: ChatAppProps): React.ReactElement {
                       ? '✓ '
                       : '✗ '}
                   {event.title}
-                </Text>
+                </text>
                 {event.diff ? (
-                  <Box marginLeft={2}>
-                    <Text>{event.diff}</Text>
-                  </Box>
+                  <box marginLeft={2}>
+                    <text content={ansiToStyledText(event.diff)} />
+                  </box>
                 ) : null}
-              </Box>
+              </box>
             ))}
-          </Box>
+          </box>
         ) : null}
         {pendingApproval ? (
-          <Box
+          <box
             flexDirection="column"
             marginTop={1}
-            borderStyle="round"
+            border
+            borderStyle="rounded"
             borderColor="yellow"
             paddingX={1}
           >
-            <Text bold color="yellow">
+            <text fg="yellow" attributes={BOLD}>
               Run {pendingApproval.request.toolName}?
-            </Text>
-            <Text>{pendingApproval.request.title}</Text>
+            </text>
+            <text>{pendingApproval.request.title}</text>
             {pendingApproval.request.diff ? (
-              <Box marginTop={1} marginLeft={1}>
-                <Text>{renderDiff(pendingApproval.request.diff)}</Text>
-              </Box>
-            ) : pendingApproval.request.preview ? (
-              <Box marginTop={1}>
-                <Text dimColor>
-                  {truncatePreview(pendingApproval.request.preview)}
-                </Text>
-              </Box>
-            ) : null}
-            <Box marginTop={1}>
-              <Text>
-                <Text color="green">[y]</Text>es{'  '}
-                <Text color="cyan">[a]</Text>lways{'  '}
-                <Text color="red">[n]</Text>o
-              </Text>
-            </Box>
-          </Box>
-        ) : null}
-      </Box>
-
-      {isCommandMode ? (
-        <Box
-          marginTop={1}
-          flexDirection="column"
-          borderStyle="single"
-          borderColor={visibleCommands.length ? 'cyan' : 'yellow'}
-          paddingX={1}
-        >
-          <Text dimColor>commands</Text>
-          {visibleCommands.length === 0 ? (
-            <Text color="yellow">/{commandQuery} doesn&apos;t exist</Text>
-          ) : null}
-          {visibleCommands.map((cmd, index) => (
-            <Box key={cmd.name}>
-              <Text
-                {...(index === selectedCommandIndex ? { color: 'cyan' } : {})}
-              >
-                {index === selectedCommandIndex ? '›' : ' '}{' '}
-                <Text bold={index === selectedCommandIndex}>/{cmd.name}</Text>
-                {'  '}
-                <Text dimColor>
-                  {cmd.name === 'thinking'
-                    ? thinkingCollapsed
-                      ? 'Expand thinking'
-                      : 'Collapse thinking'
-                    : cmd.description}
-                </Text>
-                {cmd.name === 'auto-writes' ? (
-                  <Text>
-                    {'  '}
-                    <Text color={autoApplyWrites ? 'green' : 'yellow'}>
-                      [{autoApplyWrites ? 'on' : 'off'}]
-                    </Text>
-                  </Text>
-                ) : null}
-                {cmd.name === 'expand-tools' ? (
-                  <Text>
-                    {'  '}
-                    <Text color={expandTools ? 'green' : 'yellow'}>
-                      [{expandTools ? 'on' : 'off'}]
-                    </Text>
-                  </Text>
-                ) : null}
-                {cmd.name === 'read-limit' ? (
-                  <Text>
-                    {'  '}
-                    <Text color="green">[{maxReadLines} lines]</Text>
-                  </Text>
-                ) : null}
-              </Text>
-            </Box>
-          ))}
-        </Box>
-      ) : null}
-
-      {/* The expanded command opens here, pinned above the prompt, so it's
-          always visible without scrolling up to where it sits in the transcript. */}
-      {selectedBashMessage && expandedBashIds.has(selectedBashMessage.id) ? (
-        <Box marginTop={1} flexDirection="column">
-          <Text dimColor>
-            command {(browseIndex ?? 0) + 1} of {bashToolMessages.length}
-          </Text>
-          <BashResult
-            command={bashCommandFromArgs(
-              selectedBashMessage.toolCallId
-                ? bashCommandByCallId.get(selectedBashMessage.toolCallId)
-                : undefined
-            )}
-            output={selectedBashMessage.content}
-            expanded
-            selected
-          />
-        </Box>
-      ) : null}
-
-      {browseIndex !== null ? (
-        <Box marginTop={1}>
-          <Text dimColor>
-            browsing commands · ↑/↓ select · enter show/hide output · esc back
-            to prompt
-          </Text>
-        </Box>
-      ) : bashToolMessages.length > 0 &&
-        !input &&
-        !isSending &&
-        !expandTools ? (
-        <Box marginTop={1}>
-          <Text dimColor>
-            ↑ to browse {bashToolMessages.length} command output(s)
-          </Text>
-        </Box>
-      ) : null}
-
-      <Box marginTop={1}>
-        <Text>{isSending ? 'sending' : 'prompt'}&gt; </Text>
-        <TextArea
-          key={inputKey}
-          value={input}
-          onChange={setInput}
-          onSubmit={submit}
-          focus={!isSending && browseIndex === null}
-        />
-      </Box>
-
-      {!isCommandMode && showMentionSuggestions ? (
-        <Box marginTop={1} flexDirection="column">
-          <Text dimColor>file suggestions:</Text>
-          {mentionSuggestions.map((suggestion, index) => (
-            <Text
-              key={suggestion}
-              {...(index === selectedSuggestionIndex ? { color: 'cyan' } : {})}
-            >
-              {index === selectedSuggestionIndex ? '>' : ' '} @{suggestion}
-            </Text>
-          ))}
-          {noMentionMatches ? <Text dimColor>no file found</Text> : null}
-        </Box>
-      ) : null}
-
-      <Box marginTop={1} justifyContent="space-between">
-        {/* flexShrink={0} stops yoga from compressing this row and wrapping the
-            model name mid-word during the transition back from the picker. */}
-        <Box flexShrink={0}>
-          {isSending ? (
-            <Text color="yellow">
-              <Spinner type="dots" />{' '}
-            </Text>
-          ) : null}
-          <Text color="cyan" bold wrap="truncate-end">
-            {`${activeModelInfo?.providerId ?? props.providerId ?? ''}/${
-              activeModel || session?.activeModel || 'loading'
-            }`}
-          </Text>
-          {showInterruptHint ? (
-            <Text dimColor> · Press Esc to interrupt</Text>
-          ) : null}
-        </Box>
-      </Box>
-      {metrics.inputTokens > 0 ? (
-        <Box marginTop={1}>
-          <Text dimColor>
-            in <Text color="white">{metrics.inputTokens.toLocaleString()}</Text>{' '}
-            out{' '}
-            <Text color="white">{metrics.outputTokens.toLocaleString()}</Text>
-            {metrics.cachedTokens > 0 ? (
-              <>
-                {' '}
-                cached{' '}
-                <Text color="white">
-                  {metrics.cachedTokens.toLocaleString()}
-                </Text>
-              </>
-            ) : null}
-            {activeModelInfo?.contextWindow ? (
-              <>
-                {' '}
-                ctx{' '}
-                <Text
-                  color={
-                    contextPct(
-                      metrics.lastInputTokens,
-                      activeModelInfo.contextWindow
-                    ) > 80
-                      ? 'yellow'
-                      : 'white'
-                  }
-                >
-                  {contextPct(
-                    metrics.lastInputTokens,
-                    activeModelInfo.contextWindow
+              <box marginTop={1} marginLeft={1}>
+                <text
+                  content={ansiToStyledText(
+                    renderDiff(pendingApproval.request.diff)
                   )}
-                  %
-                </Text>
-              </>
+                />
+              </box>
+            ) : pendingApproval.request.preview ? (
+              <box marginTop={1}>
+                <text fg={MUTED}>
+                  {truncatePreview(pendingApproval.request.preview)}
+                </text>
+              </box>
             ) : null}
-            {metrics.cost > 0 ? (
-              <>
-                {' '}
-                $<Text color="white">{metrics.cost.toFixed(4)}</Text>
-              </>
+            <box marginTop={1}>
+              <text
+                content={
+                  new StyledText([
+                    tc('[y]', { fg: 'green' }),
+                    tc('es  '),
+                    tc('[a]', { fg: 'cyan' }),
+                    tc('lways  '),
+                    tc('[n]', { fg: 'red' }),
+                    tc('o'),
+                  ])
+                }
+              />
+            </box>
+          </box>
+        ) : null}
+      </scrollbox>
+
+      <box flexDirection="column" flexShrink={0}>
+        {isCommandMode ? (
+          <box
+            marginTop={1}
+            flexDirection="column"
+            flexShrink={0}
+            border
+            borderStyle="single"
+            borderColor={visibleCommands.length ? 'cyan' : 'yellow'}
+            paddingX={1}
+          >
+            <text fg={MUTED}>commands</text>
+            {visibleCommands.length === 0 ? (
+              <text fg="yellow">/{commandQuery} doesn&apos;t exist</text>
             ) : null}
-          </Text>
-        </Box>
-      ) : null}
-      <Box marginTop={1} justifyContent="flex-end">
-        {displayStats ? (
-          <Text dimColor>
-            TTFT {formatDuration(displayStats.ttftMs)} ·{' '}
-            <Text color="white">{displayStats.tokensPerSecond.toFixed(1)}</Text>{' '}
-            tok/s · AVG{' '}
-            <Text color="white">
-              {displayStats.avgTokensPerSecond.toFixed(1)}
-            </Text>
-          </Text>
-        ) : (
-          <Text dimColor>{status}</Text>
-        )}
-      </Box>
-      {error ? (
-        <Box marginTop={1}>
-          <Text color="red">Error: {error}</Text>
-        </Box>
-      ) : null}
-    </Box>
+            {visibleCommands.map((cmd, index) => (
+              <box key={cmd.name} flexShrink={0}>
+                <text
+                  content={commandLineContent(
+                    cmd,
+                    index === selectedCommandIndex,
+                    {
+                      thinkingCollapsed,
+                      autoApplyWrites,
+                      expandTools,
+                      maxReadLines,
+                    }
+                  )}
+                />
+              </box>
+            ))}
+          </box>
+        ) : null}
+
+        {/* The expanded command opens here, pinned above the prompt, so it's
+          always visible without scrolling up to where it sits in the transcript. */}
+        {selectedBashMessage && expandedBashIds.has(selectedBashMessage.id) ? (
+          <box marginTop={1} flexDirection="column">
+            <text fg={MUTED}>
+              command {(browseIndex ?? 0) + 1} of {bashToolMessages.length}
+            </text>
+            <BashResult
+              command={bashCommandFromArgs(
+                selectedBashMessage.toolCallId
+                  ? bashCommandByCallId.get(selectedBashMessage.toolCallId)
+                  : undefined
+              )}
+              output={selectedBashMessage.content}
+              expanded
+              selected
+            />
+          </box>
+        ) : null}
+
+        {browseIndex !== null ? (
+          <box marginTop={1}>
+            <text fg={MUTED}>
+              browsing commands · ↑/↓ select · enter show/hide output · esc back
+              to prompt
+            </text>
+          </box>
+        ) : bashToolMessages.length > 0 &&
+          !input &&
+          !isSending &&
+          !expandTools ? (
+          <box marginTop={1}>
+            <text fg={MUTED}>
+              ↑ to browse {bashToolMessages.length} command output(s)
+            </text>
+          </box>
+        ) : null}
+
+        <box marginTop={1} flexDirection="row">
+          <text>{isSending ? 'sending' : 'prompt'}&gt; </text>
+          <TextArea
+            key={inputKey}
+            value={input}
+            onChange={setInput}
+            onSubmit={submit}
+            focus={!isSending && browseIndex === null}
+          />
+        </box>
+
+        {!isCommandMode && showMentionSuggestions ? (
+          <box marginTop={1} flexDirection="column">
+            <text fg={MUTED}>file suggestions:</text>
+            {mentionSuggestions.map((suggestion, index) => (
+              <text
+                key={suggestion}
+                {...(index === selectedSuggestionIndex ? { fg: 'cyan' } : {})}
+              >
+                {index === selectedSuggestionIndex ? '>' : ' '} @{suggestion}
+              </text>
+            ))}
+            {noMentionMatches ? <text fg={MUTED}>no file found</text> : null}
+          </box>
+        ) : null}
+
+        <box marginTop={1} flexDirection="row" justifyContent="space-between">
+          {/* flexShrink={0} stops yoga from compressing this row and wrapping the
+            model name mid-word during the transition back from the picker. */}
+          <box flexDirection="row" flexShrink={0}>
+            {isSending ? <Spinner fg="yellow" /> : null}
+            {isSending ? <text> </text> : null}
+            <text fg="cyan" attributes={BOLD} wrapMode="none">
+              {`${activeModelInfo?.providerId ?? props.providerId ?? ''}/${
+                activeModel || session?.activeModel || 'loading'
+              }`}
+            </text>
+            {showInterruptHint ? (
+              <text fg={MUTED}> · Press Esc to interrupt</text>
+            ) : null}
+          </box>
+        </box>
+        {metrics.inputTokens > 0 ? (
+          <box marginTop={1}>
+            <text content={metricsLineContent(metrics, activeModelInfo)} />
+          </box>
+        ) : null}
+        <box marginTop={1} flexDirection="row" justifyContent="flex-end">
+          {displayStats ? (
+            <text
+              content={
+                new StyledText([
+                  tc(`TTFT ${formatDuration(displayStats.ttftMs)} · `, {
+                    fg: MUTED,
+                  }),
+                  tc(displayStats.tokensPerSecond.toFixed(1), { fg: 'white' }),
+                  tc(' tok/s · AVG ', { fg: MUTED }),
+                  tc(displayStats.avgTokensPerSecond.toFixed(1), {
+                    fg: 'white',
+                  }),
+                ])
+              }
+            />
+          ) : (
+            <text fg={MUTED}>{status}</text>
+          )}
+        </box>
+        {error ? (
+          <box marginTop={1}>
+            <text fg="red">Error: {error}</text>
+          </box>
+        ) : null}
+      </box>
+    </box>
   );
 }
 
@@ -1582,7 +1693,7 @@ function BashResult({
   output: string;
   expanded: boolean;
   selected: boolean;
-}): React.ReactElement {
+}): React.ReactNode {
   // Empty output means the call is still running (a finished call always has
   // non-empty content). Running calls always show the box so it's visible
   // in place; finished calls show it only when expanded.
@@ -1598,40 +1709,41 @@ function BashResult({
         ? 'red'
         : 'green';
   return (
-    <Box flexDirection="column">
-      <Text color={color}>
-        {selected ? '› ' : '  '}
-        {running ? '⚙ ' : error ? '✗ ' : '✓ '}bash: {summary}
-        {!showBox ? (
-          <Text dimColor> {selected ? '(enter to expand)' : '▸'}</Text>
-        ) : null}
-      </Text>
+    <box flexDirection="column">
+      <text
+        content={
+          new StyledText([
+            tc(
+              `${selected ? '› ' : '  '}${running ? '⚙ ' : error ? '✗ ' : '✓ '}bash: ${summary}`,
+              { fg: color }
+            ),
+            ...(!showBox
+              ? [tc(` ${selected ? '(enter to expand)' : '▸'}`, { fg: MUTED })]
+              : []),
+          ])
+        }
+      />
       {showBox ? (
-        <Box
+        <box
           flexDirection="column"
           marginLeft={2}
-          borderStyle="round"
+          border
+          borderStyle="rounded"
           borderColor={selected ? 'cyan' : error ? 'red' : 'gray'}
           paddingX={1}
         >
-          <Text color="cyan">$ {command}</Text>
+          <text fg="cyan">$ {command}</text>
           {/* A full-width box with only a top border draws the horizontal rule
               that splits the command from its output. */}
-          <Box
-            borderStyle="single"
-            borderColor="gray"
-            borderBottom={false}
-            borderLeft={false}
-            borderRight={false}
-          />
+          <box border={['top']} borderStyle="single" borderColor="gray" />
           {running ? (
-            <Text dimColor>running…</Text>
+            <text fg={MUTED}>running…</text>
           ) : (
-            <Text dimColor>{truncatePreview(output)}</Text>
+            <text content={ansiToStyledText(truncatePreview(output))} />
           )}
-        </Box>
+        </box>
       ) : null}
-    </Box>
+    </box>
   );
 }
 

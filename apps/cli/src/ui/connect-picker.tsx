@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text, useInput } from 'ink';
-import TextInput from 'ink-text-input';
-import Spinner from 'ink-spinner';
+import {
+  StyledText,
+  createTextAttributes,
+  RGBA,
+  type KeyEvent,
+  type TextChunk,
+} from '@opentui/core';
+import { useKeyboard } from '@opentui/react';
 
 import { type ModelInfo, type ProviderClient } from '@core/ports/chat-model';
 import { ProviderId } from '@core/ports/provider-catalog';
@@ -11,10 +16,51 @@ import {
   type ProviderConnectionInfo,
 } from '@core/ports/provider-catalog';
 import { fuzzyFilter } from './fuzzy-filter.js';
+import { Spinner } from './spinner.js';
 
 const VISIBLE_ROWS = 12;
+const BOLD = createTextAttributes({ bold: true });
+const MUTED = '#8a8a8a';
+const MUTED_RGBA = RGBA.fromHex(MUTED);
+const INVERSE = createTextAttributes({ inverse: true });
 
 type WizardStep = 'provider' | 'api-key' | 'base-url' | 'connecting';
+
+// Literal character to append to the search query, or undefined for control keys.
+function printableInput(key: KeyEvent): string | undefined {
+  if (key.ctrl || key.meta) return undefined;
+  const sequence = key.sequence;
+  if (!sequence) return undefined;
+  for (const char of sequence) {
+    if (char < ' ' || char === '\x7f') return undefined;
+  }
+  return sequence;
+}
+
+// Renders "> query" with a trailing inverse cursor cell for the provider search.
+function queryLineContent(query: string, placeholder: string): StyledText {
+  const chunks: TextChunk[] = [{ __isChunk: true, text: '> ', fg: MUTED_RGBA }];
+  chunks.push(...fieldChunks(query, placeholder));
+  return new StyledText(chunks);
+}
+
+// Renders a typed value (or dim placeholder) with a trailing inverse cursor cell.
+// Used for the API key / base URL fields, which are edited with the same simple
+// keyboard handling as the provider search rather than a separate input widget.
+function fieldChunks(value: string, placeholder: string): TextChunk[] {
+  const chunks: TextChunk[] = [];
+  if (value.length === 0) {
+    chunks.push({ __isChunk: true, text: placeholder, fg: MUTED_RGBA });
+  } else {
+    chunks.push({ __isChunk: true, text: value });
+  }
+  chunks.push({ __isChunk: true, text: ' ', attributes: INVERSE });
+  return chunks;
+}
+
+function fieldContent(value: string, placeholder: string): StyledText {
+  return new StyledText(fieldChunks(value, placeholder));
+}
 
 export interface ConnectedProviderResult {
   providerId: ProviderId;
@@ -35,7 +81,7 @@ interface ConnectPickerProps {
   onCancel: () => void;
 }
 
-export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
+export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
   const [query, setQuery] = useState('');
   const [step, setStep] = useState<WizardStep>('provider');
   const [focusedIndex, setFocusedIndex] = useState(0);
@@ -68,21 +114,23 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
     scrollOffsetRef.current = 0;
   }, [query, step]);
 
-  useInput((_, key) => {
+  useKeyboard((key) => {
     if (step !== 'provider') {
-      if (key.escape) {
+      // The api-key / base-url steps own keyboard input via <input>; here we only
+      // intercept Escape to step back. Enter is handled by the input's onSubmit.
+      if (key.name === 'escape') {
         setError(null);
         setStep('provider');
       }
       return;
     }
 
-    if (key.escape) {
+    if (key.name === 'escape') {
       props.onCancel();
       return;
     }
 
-    if (key.return) {
+    if (key.name === 'return') {
       const entry = providers[focusedIndex];
       if (!entry) return;
       setSelectedProvider(entry);
@@ -94,7 +142,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
       return;
     }
 
-    if (key.downArrow) {
+    if (key.name === 'down') {
       const next = clampFocus(focusedIndex + 1);
       setFocusedIndex(next);
       if (next >= scrollOffsetRef.current + VISIBLE_ROWS) {
@@ -103,12 +151,23 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
       return;
     }
 
-    if (key.upArrow) {
+    if (key.name === 'up') {
       const next = clampFocus(focusedIndex - 1);
       setFocusedIndex(next);
       if (next < scrollOffsetRef.current) {
         scrollOffsetRef.current = next;
       }
+      return;
+    }
+
+    if (key.name === 'backspace' || key.name === 'delete') {
+      setQuery((prev) => prev.slice(0, -1));
+      return;
+    }
+
+    const input = printableInput(key);
+    if (input) {
+      setQuery((prev) => prev + input);
     }
   });
 
@@ -120,15 +179,16 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
   const configuredProviderSet = new Set(props.configuredProviderIds);
 
   return (
-    <Box
+    <box
       flexDirection="column"
-      borderStyle="round"
+      border
+      borderStyle="rounded"
       borderColor="cyan"
-      paddingX={1}
-      paddingY={0}
+      paddingLeft={1}
+      paddingRight={1}
     >
-      <Box justifyContent="space-between" marginBottom={1}>
-        <Text bold color="cyan">
+      <box flexDirection="row" justifyContent="space-between" marginBottom={1}>
+        <text fg="cyan" attributes={BOLD}>
           {step === 'provider'
             ? 'Connect provider'
             : step === 'api-key'
@@ -136,93 +196,92 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
               : step === 'base-url'
                 ? `Base URL - ${selectedProvider?.name ?? ''}`
                 : `Fetching models - ${selectedProvider?.name ?? ''}`}
-        </Text>
-        <Text dimColor>
+        </text>
+        <text fg={MUTED}>
           {step === 'provider'
             ? 'enter to configure · esc to cancel'
             : step === 'connecting'
               ? 'fetching models...'
               : 'enter to continue · esc to go back'}
-        </Text>
-      </Box>
+        </text>
+      </box>
 
       {step === 'provider' ? (
         <>
-          <Box marginBottom={1}>
-            <Text dimColor>{'> '}</Text>
-            <TextInput
-              value={query}
-              onChange={setQuery}
-              placeholder="search providers..."
-              focus
-            />
-          </Box>
+          <box marginBottom={1}>
+            <text content={queryLineContent(query, 'search providers...')} />
+          </box>
 
           {providers.length === 0 ? (
-            <Text dimColor>No providers match.</Text>
+            <text fg={MUTED}>No providers match.</text>
           ) : (
-            <Box flexDirection="column">
+            <box flexDirection="column">
               {visibleRows.map((entry, index) => {
                 const absoluteIndex = scrollOffsetRef.current + index;
                 const isFocused = absoluteIndex === focusedIndex;
                 const isConnected = configuredProviderSet.has(entry.id);
 
                 return (
-                  <Box key={entry.id}>
-                    <Text
-                      {...(isFocused
-                        ? { backgroundColor: 'cyan', color: 'black' }
-                        : {})}
-                    >
+                  <box key={entry.id}>
+                    <text {...(isFocused ? { bg: 'cyan', fg: 'black' } : {})}>
                       {isFocused ? '› ' : '  '}
                       {entry.name}
                       {isConnected ? ' ✓' : ''}
-                    </Text>
-                  </Box>
+                    </text>
+                  </box>
                 );
               })}
               {providers.length > VISIBLE_ROWS ? (
-                <Text dimColor>
+                <text fg={MUTED}>
                   {'\n'}
                   {scrollOffsetRef.current + VISIBLE_ROWS < providers.length
                     ? `↓ ${providers.length - scrollOffsetRef.current - VISIBLE_ROWS} more`
                     : ''}
-                </Text>
+                </text>
               ) : null}
-            </Box>
+            </box>
           )}
         </>
       ) : step === 'connecting' ? (
-        <Box>
-          <Text color="cyan">
-            <Spinner type="dots" />
-          </Text>
-          <Text dimColor> Connecting and fetching models...</Text>
-        </Box>
+        <box flexDirection="row">
+          <Spinner fg="cyan" />
+          <text fg={MUTED}> Connecting and fetching models...</text>
+        </box>
       ) : (
-        <Box flexDirection="column">
-          <Text dimColor>
+        <box flexDirection="column">
+          <text fg={MUTED}>
             {step === 'api-key'
               ? selectedProvider?.apiKeyRequired
                 ? 'Enter the API key for this provider.'
                 : 'Optional API key. Leave blank and press enter to skip.'
               : `Confirm or edit the base URL for ${selectedProvider?.name ?? ''}.`}
-          </Text>
+          </text>
 
-          <Box marginTop={1}>
-            <Text dimColor>{step === 'api-key' ? 'key> ' : 'url> '}</Text>
-            <TextInput
-              // Remount when the step changes so ink-text-input's cursor jumps
-              // to the end of the pre-filled value instead of staying at 0.
+          <box marginTop={1} flexDirection="row">
+            <text fg={MUTED}>{step === 'api-key' ? 'key> ' : 'url> '}</text>
+            <input
+              // Uncontrolled: seed the value once and read the result from
+              // onSubmit. Passing a controlled `value` on every keystroke fights
+              // the input's internal cursor (typing jumps around). The key={step}
+              // remount re-seeds the field (and lands the cursor at the end) when
+              // switching between the api-key and base-url steps.
               key={step}
               value={step === 'api-key' ? apiKey : baseUrl}
-              onChange={step === 'api-key' ? setApiKey : setBaseUrl}
               placeholder={
                 step === 'api-key' ? 'paste api key...' : 'base url...'
               }
-              focus
-              onSubmit={(value) => {
+              focused
+              onSubmit={(submitted) => {
                 if (!selectedProvider) return;
+
+                // The React <input> passes the committed string; fall back to the
+                // seeded state for the inherited option's event-shaped overload.
+                const value =
+                  typeof submitted === 'string'
+                    ? submitted
+                    : step === 'api-key'
+                      ? apiKey
+                      : baseUrl;
 
                 if (step === 'api-key') {
                   const nextApiKey = value.trim();
@@ -250,16 +309,16 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactElement {
                 );
               }}
             />
-          </Box>
+          </box>
 
           {error ? (
-            <Box marginTop={1}>
-              <Text color="yellow">{error}</Text>
-            </Box>
+            <box marginTop={1}>
+              <text fg="yellow">{error}</text>
+            </box>
           ) : null}
-        </Box>
+        </box>
       )}
-    </Box>
+    </box>
   );
 
   async function connectProvider(

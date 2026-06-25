@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text, useInput } from 'ink';
-import TextInput from 'ink-text-input';
+import {
+  StyledText,
+  createTextAttributes,
+  RGBA,
+  type KeyEvent,
+  type TextChunk,
+} from '@opentui/core';
+import { useKeyboard } from '@opentui/react';
 
 import { type ModelInfo } from '@core/ports/chat-model';
 import { PROVIDER_IDS } from '@core/ports/provider-catalog';
@@ -8,6 +14,11 @@ import { PROVIDER_BY_ID } from '@core/ports/provider-catalog';
 import { fuzzyFilter } from './fuzzy-filter.js';
 
 const VISIBLE_ROWS = 18;
+const BOLD = createTextAttributes({ bold: true });
+const MUTED = '#8a8a8a';
+const MUTED_RGBA = RGBA.fromHex(MUTED);
+const INVERSE = createTextAttributes({ inverse: true });
+
 const SORT_MODES = [
   'provider',
   'input-cost',
@@ -33,11 +44,16 @@ const SORT_STATES: SortState[] = SORT_MODES.flatMap((mode) => [
   { mode, direction: 'desc' },
 ]);
 
-// SGR mouse reports (ESC[<b;x;yM) get fed into stdin while mouse tracking is on.
-// Ink passes them through to TextInput as typed text, so strip them from the query.
-const MOUSE_SEQUENCE = /\x1b?\[<\d+;\d+;\d+[Mm]/g;
-const stripMouseSequences = (value: string): string =>
-  value.replace(MOUSE_SEQUENCE, '').replace(/\x1b?\[<[\d;]*$/g, '');
+// Literal character to append to the search query, or undefined for control keys.
+function printableInput(key: KeyEvent): string | undefined {
+  if (key.ctrl || key.meta) return undefined;
+  const sequence = key.sequence;
+  if (!sequence) return undefined;
+  for (const char of sequence) {
+    if (char < ' ' || char === '\x7f') return undefined;
+  }
+  return sequence;
+}
 
 interface ModelPickerProps {
   models: ModelInfo[];
@@ -52,7 +68,7 @@ interface GroupedModel {
   groupName: string;
 }
 
-export function ModelPicker(props: ModelPickerProps): React.ReactElement {
+export function ModelPicker(props: ModelPickerProps): React.ReactNode {
   const [query, setQuery] = useState('');
   const [sortState, setSortState] = useState<SortState>({
     mode: 'provider',
@@ -100,63 +116,24 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
     scrollOffsetRef.current = 0;
   }, [query, sortState]);
 
-  const groupedLengthRef = useRef(grouped.length);
-  useEffect(() => {
-    groupedLengthRef.current = grouped.length;
-  }, [grouped.length]);
-
-  // Mouse wheel scroll support (SGR mouse protocol)
-  useEffect(() => {
-    process.stdout.write('\x1b[?1006h\x1b[?1000h');
-
-    const onData = (chunk: Buffer) => {
-      const str = chunk.toString('utf8');
-      const match = /\x1b\[<(\d+);\d+;\d+M/.exec(str);
-      if (!match) return;
-      const btn = Number(match[1]);
-
-      if (btn === 64) {
-        setFocusedIndex((prev) => {
-          const next = Math.max(0, prev - 1);
-          if (next < scrollOffsetRef.current) scrollOffsetRef.current = next;
-          return next;
-        });
-      } else if (btn === 65) {
-        setFocusedIndex((prev) => {
-          const next = Math.min(groupedLengthRef.current - 1, prev + 1);
-          if (next >= scrollOffsetRef.current + VISIBLE_ROWS) {
-            scrollOffsetRef.current = next - VISIBLE_ROWS + 1;
-          }
-          return next;
-        });
-      }
-    };
-
-    process.stdin.on('data', onData);
-    return () => {
-      process.stdout.write('\x1b[?1006l\x1b[?1000l');
-      process.stdin.off('data', onData);
-    };
-  }, []);
-
-  useInput((_, key) => {
-    if (key.escape) {
+  useKeyboard((key) => {
+    if (key.name === 'escape') {
       props.onCancel();
       return;
     }
 
-    if (key.return) {
+    if (key.name === 'return') {
       const entry = grouped[focusedIndex];
       if (entry) props.onSelect(entry.model);
       return;
     }
 
-    if (key.tab) {
+    if (key.name === 'tab') {
       setSortState((prev) => cycleSortState(prev, key.shift ? -1 : 1));
       return;
     }
 
-    if (key.downArrow) {
+    if (key.name === 'down') {
       const next = clampFocus(focusedIndex + 1);
       setFocusedIndex(next);
       if (next >= scrollOffsetRef.current + VISIBLE_ROWS) {
@@ -165,12 +142,23 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
       return;
     }
 
-    if (key.upArrow) {
+    if (key.name === 'up') {
       const next = clampFocus(focusedIndex - 1);
       setFocusedIndex(next);
       if (next < scrollOffsetRef.current) {
         scrollOffsetRef.current = next;
       }
+      return;
+    }
+
+    if (key.name === 'backspace' || key.name === 'delete') {
+      setQuery((prev) => prev.slice(0, -1));
+      return;
+    }
+
+    const input = printableInput(key);
+    if (input) {
+      setQuery((prev) => prev + input);
     }
   });
 
@@ -180,89 +168,92 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
   );
 
   return (
-    <Box
+    <box
       flexDirection="column"
-      borderStyle="round"
+      border
+      borderStyle="rounded"
       borderColor="cyan"
-      paddingX={1}
-      paddingY={0}
+      paddingLeft={1}
+      paddingRight={1}
     >
-      <Box justifyContent="space-between" marginBottom={1}>
-        <Text bold color="cyan">
+      <box flexDirection="row" justifyContent="space-between" marginBottom={1}>
+        <text fg="cyan" attributes={BOLD}>
           Select model
-        </Text>
-        <Text dimColor>
+        </text>
+        <text fg={MUTED}>
           tab sort · {formatSortState(sortState)} · esc to cancel
-        </Text>
-      </Box>
+        </text>
+      </box>
 
-      <Box marginBottom={1}>
-        <Text dimColor>{'> '}</Text>
-        <TextInput
-          value={query}
-          onChange={(value) => setQuery(stripMouseSequences(value))}
-          placeholder="search..."
-          focus
-        />
-      </Box>
+      <box marginBottom={1}>
+        <text content={queryLineContent(query)} />
+      </box>
 
       {grouped.length === 0 ? (
-        <Text dimColor>
+        <text fg={MUTED}>
           {props.models.length === 0 ? 'Loading models...' : 'No models match.'}
-        </Text>
+        </text>
       ) : (
-        <Box flexDirection="column">
+        <box flexDirection="column">
           {visibleRows.map((entry, i) => {
             const absoluteIndex = scrollOffsetRef.current + i;
             const isFocused = absoluteIndex === focusedIndex;
             const isCurrent = entry.model.id === props.currentModel;
 
             return (
-              <Box
+              <box
                 key={`${entry.model.providerId}:${entry.model.id}`}
                 flexDirection="column"
               >
                 {entry.isFirstInGroup ? (
-                  <Text bold color="cyan">
+                  <text fg="cyan" attributes={BOLD}>
                     {'\n'}
                     {entry.groupName}
-                  </Text>
+                  </text>
                 ) : null}
-                <Box justifyContent="space-between">
-                  <Text
-                    {...(isFocused
-                      ? { backgroundColor: 'cyan', color: 'black' }
-                      : {})}
-                  >
+                <box flexDirection="row" justifyContent="space-between">
+                  <text {...(isFocused ? { bg: 'cyan', fg: 'black' } : {})}>
                     {isFocused ? '› ' : '  '}
                     {entry.model.displayName}
                     {sortState.mode === 'provider' ? null : (
-                      <Text dimColor>
+                      <span fg={MUTED}>
                         {' '}
                         ·{' '}
                         {PROVIDER_BY_ID[entry.model.providerId]?.name ??
                           entry.model.providerId}
-                      </Text>
+                      </span>
                     )}
-                    {isCurrent ? <Text dimColor> ✓</Text> : null}
-                  </Text>
-                  <Text dimColor>{formatModelMeta(entry.model)}</Text>
-                </Box>
-              </Box>
+                    {isCurrent ? <span fg={MUTED}> ✓</span> : null}
+                  </text>
+                  <text fg={MUTED}>{formatModelMeta(entry.model)}</text>
+                </box>
+              </box>
             );
           })}
           {grouped.length > VISIBLE_ROWS ? (
-            <Text dimColor>
+            <text fg={MUTED}>
               {'\n'}
               {scrollOffsetRef.current + VISIBLE_ROWS < grouped.length
                 ? `↓ ${grouped.length - scrollOffsetRef.current - VISIBLE_ROWS} more`
                 : ''}
-            </Text>
+            </text>
           ) : null}
-        </Box>
+        </box>
       )}
-    </Box>
+    </box>
   );
+}
+
+// Renders the search prompt "> query" with a trailing inverse cursor cell.
+function queryLineContent(query: string): StyledText {
+  const chunks: TextChunk[] = [{ __isChunk: true, text: '> ', fg: MUTED_RGBA }];
+  if (query.length === 0) {
+    chunks.push({ __isChunk: true, text: 'search...', fg: MUTED_RGBA });
+  } else {
+    chunks.push({ __isChunk: true, text: query });
+  }
+  chunks.push({ __isChunk: true, text: ' ', attributes: INVERSE });
+  return new StyledText(chunks);
 }
 
 function compareModels(

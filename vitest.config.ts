@@ -16,6 +16,8 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // `opencode/` is a vendored reference checkout (gitignored); never run its tests.
+    exclude: ['**/node_modules/**', '**/dist/**', 'opencode/**'],
     coverage: {
       reporter: ['text', 'lcov'],
     },

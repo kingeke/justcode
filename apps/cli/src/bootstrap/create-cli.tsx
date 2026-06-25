@@ -1,7 +1,5 @@
-import { render } from 'ink';
 import { Command, type OptionValues } from 'commander';
 import React from 'react';
-import { ChatApp } from '@cli/ui/chat-app';
 import type { ProviderId } from '@core/ports/provider-catalog';
 import { createRuntimeServices } from '@runtime/bootstrap/create-services';
 import { DEFAULT_MAX_READ_LINES } from '@runtime/tools/read-file-tool';
@@ -133,8 +131,26 @@ async function runChat(options: SharedOptions): Promise<void> {
     void writeGlobalConfig(appConfig.configDirectory, currentConfig);
   };
 
-  render(
+  // Lazily load the OpenTUI renderer + UI so the `models` command (and unit tests
+  // that import createCli) never pull the native FFI renderer into their module graph.
+  const { createCliRenderer } = await import('@opentui/core');
+  const { createRoot } = await import('@opentui/react');
+  const { ChatApp } = await import('@cli/ui/chat-app');
+
+  const renderer = await createCliRenderer({
+    // We arm/handle Ctrl+C ourselves (double-press to exit); mouse drives the
+    // scrollback wheel in the chat view.
+    exitOnCtrlC: false,
+    useMouse: true,
+  });
+  const exit = (): void => {
+    renderer.destroy();
+    process.exit(0);
+  };
+
+  createRoot(renderer).render(
     React.createElement(ChatApp, {
+      onExit: exit,
       providerId: runtime.providerId,
       savedConfig,
       chatSessionService: runtime.chatSessionService,
@@ -169,8 +185,7 @@ async function runChat(options: SharedOptions): Promise<void> {
           cache: { ...currentConfig.cache, maxReadLines: lines },
         });
       },
-    }),
-    { exitOnCtrlC: false }
+    })
   );
 }
 
