@@ -5,6 +5,7 @@ import { ToolRegistry } from '@core/application/tool-registry';
 import { type ProviderClient } from '@core/ports/chat-model';
 import { ProviderId, PROVIDERS } from '@core/ports/provider-catalog';
 import { WriteFileTool } from '@runtime/tools/write-file-tool';
+import { EditFileTool } from '@runtime/tools/edit-file-tool';
 import {
   ReadFileTool,
   DEFAULT_MAX_READ_BYTES,
@@ -54,6 +55,7 @@ export async function createRuntimeServices(
   };
   const toolRegistry = new ToolRegistry([
     new WriteFileTool(workspaceFiles),
+    new EditFileTool(workspaceFiles),
     new ReadFileTool(workspaceFiles, () => readSettings.maxReadBytes),
   ]);
   const allProviders = createAllProviders(config);
