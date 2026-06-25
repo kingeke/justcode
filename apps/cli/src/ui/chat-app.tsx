@@ -12,6 +12,7 @@ import {
   StyledText,
   SyntaxStyle,
   type ScrollBoxRenderable,
+  type TextareaRenderable,
   type TextChunk,
 } from '@opentui/core';
 import { useKeyboard, useTerminalDimensions } from '@opentui/react';
@@ -45,7 +46,6 @@ import {
 } from '@cli/ui/connect-picker.js';
 import { ModelPicker } from '@cli/ui/model-picker.js';
 import { ProviderId } from '@core/ports/provider-catalog.js';
-import { TextArea } from '@cli/ui/text-area.js';
 
 const MAX_COMMAND_ITEMS = 8;
 
@@ -295,6 +295,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   // we replace the value programmatically (tab-completion); ink-text-input
   // otherwise keeps its own cursor offset.
   const [inputKey, setInputKey] = useState(0);
+  let promptArea: TextareaRenderable | null | undefined;
 
   const setInputWithCursorAtEnd = (next: string): void => {
     setInput(next);
@@ -480,6 +481,26 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     mentionSuggestions.length === 0;
   const selectedSuggestion =
     mentionSuggestions[selectedSuggestionIndex] ?? mentionSuggestions[0];
+
+  useEffect(() => {
+    const area = promptArea;
+    if (!area || area.isDestroyed) return;
+
+    if (area.plainText !== input) {
+      area.setText(input);
+      area.cursorOffset = input.length;
+    }
+
+    if (!isSending && browseIndex === null) {
+      queueMicrotask(() => {
+        if (!promptArea || promptArea.isDestroyed || isSending || browseIndex !== null) {
+          return;
+        }
+
+        promptArea.focus();
+      });
+    }
+  }, [browseIndex, input, isSending]);
 
   const configuredProviderIds = Object.keys(
     savedConfig.providers ?? {}
@@ -1603,12 +1624,40 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
         <box marginTop={1} flexDirection="row">
           <text>{isSending ? 'sending' : 'prompt'}&gt; </text>
-          <TextArea
+          <textarea
             key={inputKey}
-            value={input}
-            onChange={setInput}
-            onSubmit={submit}
-            focus={!isSending && browseIndex === null}
+            initialValue={input}
+            minHeight={1}
+            maxHeight={6}
+            wrapMode="word"
+            placeholder="Ask anything..."
+            focusedTextColor="white"
+            textColor="white"
+            cursorColor="white"
+            focused={!isSending && browseIndex === null}
+            onSubmit={() => {
+              void submit(promptArea?.plainText ?? input);
+            }}
+            onKeyDown={(event) => {
+              if (!promptArea || promptArea.isDestroyed) return;
+
+              if (event.name === 'return' || event.name === 'kpenter' || event.name === 'linefeed') {
+                event.preventDefault();
+                if (event.shift) {
+                  promptArea.insertText('\n');
+                  return;
+                }
+
+                void submit(promptArea.plainText);
+              }
+            }}
+            onContentChange={() => {
+              if (!promptArea || promptArea.isDestroyed) return;
+              setInput(promptArea.plainText);
+            }}
+            ref={(next) => {
+              promptArea = next;
+            }}
           />
         </box>
 
