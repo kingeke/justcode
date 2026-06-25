@@ -1,64 +1,23 @@
 import { type ProviderClient } from '@core/ports/chat-model';
-import { ProviderId } from '@core/ports/provider-catalog';
-import { AlibabaProvider } from '@providers/alibaba/alibaba-provider';
-import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
-import { OpenAiProvider } from '@providers/openai/openai-provider';
-import { OllamaProvider } from '@providers/ollama/ollama-provider';
-import { OpenRouterProvider } from '@providers/openrouter/openrouter-provider';
+import { ProviderId, PROVIDER_BY_ID } from '@core/ports/provider-catalog';
 import type { AppConfig } from '@runtime/config/app-config';
 
 export class ProviderRegistry {
   public constructor(private readonly config: AppConfig) {}
 
   public create(providerId: ProviderId): ProviderClient {
-    switch (providerId) {
-      case ProviderId.Openai: {
-        const { apiKey } = this.config.openai;
-        if (!apiKey) {
-          throw new Error(
-            'OPENAI_API_KEY is required when using the OpenAI provider.'
-          );
-        }
-        return new OpenAiProvider(
-          apiKey,
-          this.config.openai.baseUrl,
-          this.config.openai.defaultModel
-        );
-      }
-      case ProviderId.Ollama:
-        return new OllamaProvider(
-          this.config.ollama.baseUrl,
-          this.config.ollama.apiKey
-        );
-      case ProviderId.LmStudio:
-        return new LmStudioProvider(
-          this.config.lmstudio.baseUrl,
-          this.config.lmstudio.apiKey
-        );
-      case ProviderId.OpenRouter: {
-        const { apiKey } = this.config.openrouter;
-        if (!apiKey) {
-          throw new Error(
-            'OPENROUTER_API_KEY is required when using the OpenRouter provider.'
-          );
-        }
-        return new OpenRouterProvider(apiKey, this.config.openrouter.baseUrl);
-      }
-      case ProviderId.Alibaba: {
-        const { apiKey } = this.config.alibaba;
-        if (!apiKey) {
-          throw new Error(
-            'ALIBABA_API_KEY is required when using the Alibaba provider.'
-          );
-        }
-        return new AlibabaProvider(apiKey, this.config.alibaba.baseUrl);
-      }
-      default:
-        return assertUnreachable(providerId);
+    const entry = PROVIDER_BY_ID[providerId];
+    if (!entry) {
+      throw new Error(`Unexpected provider '${String(providerId)}'.`);
     }
-  }
-}
 
-function assertUnreachable(value: never): never {
-  throw new Error(`Unexpected provider '${String(value)}'.`);
+    const credentials = entry.credentialsFromConfig(this.config);
+    if (entry.apiKeyRequired && !credentials.apiKey) {
+      throw new Error(
+        `${entry.apiKeyEnvVar ?? 'An API key'} is required when using the ${entry.name} provider.`
+      );
+    }
+
+    return entry.create(credentials);
+  }
 }
