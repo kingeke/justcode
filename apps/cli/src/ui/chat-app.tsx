@@ -20,8 +20,11 @@ import {
   useBlur,
   useFocus,
   useKeyboard,
+  useRenderer,
+  useSelectionHandler,
   useTerminalDimensions,
 } from '@opentui/react';
+import { copyToClipboard } from '@cli/ui/clipboard.js';
 import { Spinner } from '@cli/ui/spinner.js';
 import { ansiToStyledText } from '@cli/ui/ansi-to-styled-text.js';
 
@@ -588,6 +591,45 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const resolveProviderClient = (providerId: ProviderId): ProviderClient =>
     availableProviders.find((provider) => provider.providerId === providerId) ??
     props.createProvider(providerId);
+
+  const renderer = useRenderer();
+
+  // Transient "Copied" toast shown bottom-right after a selection is copied.
+  const [copiedNotice, setCopiedNotice] = useState(false);
+  const copiedNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+
+  // Copy text as soon as the user finishes highlighting it with the mouse
+  // (the "selection" event fires once on mouse-up). Prefers OSC52 (works over
+  // SSH) and falls back to the platform's native clipboard CLI. We keep the
+  // highlight visible — copying is a side effect, not a selection change.
+  useSelectionHandler((selection) => {
+    const selectedText = selection.getSelectedText();
+    if (!selectedText.trim()) return;
+
+    if (!renderer.copyToClipboardOSC52(selectedText)) {
+      copyToClipboard(selectedText);
+    }
+
+    setCopiedNotice(true);
+    if (copiedNoticeTimerRef.current) {
+      clearTimeout(copiedNoticeTimerRef.current);
+    }
+    copiedNoticeTimerRef.current = setTimeout(() => {
+      setCopiedNotice(false);
+      copiedNoticeTimerRef.current = null;
+    }, 1500);
+  });
+
+  useEffect(
+    () => () => {
+      if (copiedNoticeTimerRef.current) {
+        clearTimeout(copiedNoticeTimerRef.current);
+      }
+    },
+    []
+  );
 
   useKeyboard((key) => {
     if (showModelPicker || showConnectPicker || showSessionPicker) return;
@@ -1918,6 +1960,18 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           </box>
         ) : null}
       </box>
+
+      {copiedNotice ? (
+        <box
+          position="absolute"
+          bottom={1}
+          right={2}
+          paddingX={1}
+          backgroundColor="#1f6f43"
+        >
+          <text fg="white">✓ Copied</text>
+        </box>
+      ) : null}
     </box>
   );
 }
