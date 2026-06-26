@@ -1,0 +1,77 @@
+name: Release
+
+# Builds a self-contained JustCode binary for each platform on its own native
+# runner (no cross-compilation: @opentui's native library is platform-gated),
+# then publishes them as GitHub Release assets. Push a tag like `v0.1.0` to run.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            os: macos-14
+          - target: darwin-x64
+            os: macos-13
+          - target: linux-x64
+            os: ubuntu-latest
+          - target: linux-arm64
+            os: ubuntu-24.04-arm
+          - target: windows-x64
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      # Installs the platform-specific @opentui native library for this runner.
+      - run: bun install --frozen-lockfile
+      - run: bun run build:binary
+      - uses: actions/upload-artifact@v4
+        with:
+          name: justcode-${{ matrix.target }}
+          path: dist-bin/justcode-*
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/justcode-*
+          fail_on_unmatched_files: true
+
+  # Optional: publish the npm launcher package (users get the binary via the
+  # postinstall download). Requires an NPM_TOKEN secret and "private": false.
+  npm-publish:
+    name: npm publish
+    needs: release
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/') && false }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

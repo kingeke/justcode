@@ -2,22 +2,47 @@
   "name": "just-code",
   "version": "0.1.0",
   "private": true,
+  "description": "JustCode - an interactive terminal coding assistant CLI",
+  "license": "MIT",
   "type": "module",
   "bin": {
-    "justcode": "./dist/justcode.js"
+    "justcode": "./bin/justcode.mjs"
   },
+  "files": [
+    "bin/justcode.mjs",
+    "scripts/postinstall.mjs",
+    "scripts/lib/platform.mjs",
+    "scripts/lib/download-binary.mjs",
+    "README.md"
+  ],
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "homepage": "https://github.com/kingeke/just-code#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kingeke/just-code.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kingeke/just-code/issues"
   },
   "scripts": {
     "build": "tsup",
+    "build:binary": "node scripts/build-binary.mjs",
     "dev": "bun apps/cli/src/index.tsx",
     "dev:watch": "bun --watch apps/cli/src/index.tsx",
     "try:tools": "tsx scripts/try-tools.ts",
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "install:local": "node scripts/install-local.mjs",
+    "update:local": "npm run build:binary",
+    "uninstall:local": "node scripts/uninstall-local.mjs",
+    "postinstall": "node scripts/postinstall.mjs"
   },
   "dependencies": {
     "@opentui/core": "^0.4.2",
