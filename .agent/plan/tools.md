@@ -13,7 +13,7 @@ This document tracks the implementation status of CLI tools.
 | ☑      | **apply_patch** | Apply unified diff patches to files.                    |
 | ☑      | **todowrite**   | Create and update task or todo lists.                   |
 | ☑      | **webfetch**    | Fetch and extract content from a specific URL.          |
-| ☐      | **websearch**   | Search the web for information.                         |
+| ☑      | **websearch**   | Search the web for information.                         |
 | ☐      | **question**    | Prompt the user for additional input or clarification.  |
 
 ## Legend
