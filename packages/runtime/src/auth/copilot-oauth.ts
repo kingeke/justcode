@@ -1,5 +1,6 @@
 import type { OAuthCredentials } from '@core/ports/provider-catalog';
 import { appUserAgent } from '@core/version';
+import { logRequestResponse } from '@core/application/debug-log';
 
 import { GITHUB_COPILOT_OAUTH } from '@runtime/auth/constants';
 import { runDeviceFlow } from '@runtime/auth/device-flow';
@@ -20,9 +21,7 @@ interface CopilotTokenResponse {
  * {@link OAuthCredentials.extra} so it survives a restart.
  */
 export class CopilotOAuthFlow implements OAuthFlow {
-  public async login(
-    context: OAuthLoginContext
-  ): Promise<OAuthCredentials> {
+  public async login(context: OAuthLoginContext): Promise<OAuthCredentials> {
     const githubToken = await runDeviceFlow({
       clientId: GITHUB_COPILOT_OAUTH.clientId,
       scope: GITHUB_COPILOT_OAUTH.scope,
@@ -63,6 +62,24 @@ export class CopilotOAuthFlow implements OAuthFlow {
     });
     if (!response.ok) {
       const text = await response.text();
+      await logRequestResponse({
+        request: {
+          url: GITHUB_COPILOT_OAUTH.copilotTokenUrl,
+          method: 'GET',
+          headers: {
+            authorization: `token ${githubToken}`,
+            accept: 'application/json',
+            'editor-version': appUserAgent(),
+            'user-agent': appUserAgent(),
+          },
+        },
+        response: {
+          url: GITHUB_COPILOT_OAUTH.copilotTokenUrl,
+          status: response.status,
+          ok: response.ok,
+          body: text,
+        },
+      });
       throw new Error(
         `Copilot token exchange failed (${response.status}): ${text}. ` +
           'Make sure your GitHub account has an active Copilot subscription.'
@@ -70,6 +87,24 @@ export class CopilotOAuthFlow implements OAuthFlow {
     }
 
     const token = (await response.json()) as CopilotTokenResponse;
+    await logRequestResponse({
+      request: {
+        url: GITHUB_COPILOT_OAUTH.copilotTokenUrl,
+        method: 'GET',
+        headers: {
+          authorization: `token ${githubToken}`,
+          accept: 'application/json',
+          'editor-version': appUserAgent(),
+          'user-agent': appUserAgent(),
+        },
+      },
+      response: {
+        url: GITHUB_COPILOT_OAUTH.copilotTokenUrl,
+        status: response.status,
+        ok: response.ok,
+        body: token,
+      },
+    });
     const endpoint = token.endpoints?.api ?? 'https://api.githubcopilot.com';
     return {
       accessToken: token.token,

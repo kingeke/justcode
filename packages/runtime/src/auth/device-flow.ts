@@ -1,3 +1,5 @@
+import { logRequestResponse } from '@core/application/debug-log';
+
 /**
  * Generic OAuth 2.0 device-authorization-grant helper (RFC 8628), used by the
  * GitHub Copilot sign-in. Requests a device code, surfaces the user code +
@@ -76,7 +78,9 @@ export async function runDeviceFlow(
         break;
       default:
         throw new Error(
-          token.error_description ?? token.error ?? 'Device authorization failed.'
+          token.error_description ??
+            token.error ??
+            'Device authorization failed.'
         );
     }
   }
@@ -94,7 +98,43 @@ async function postForm<T>(
     body: JSON.stringify(fields),
   });
   if (!response.ok) {
+    const text = await response.text();
+    await logRequestResponse({
+      request: {
+        url,
+        method: 'POST',
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/json',
+        },
+        body: fields,
+      },
+      response: {
+        url,
+        status: response.status,
+        ok: response.ok,
+        body: text,
+      },
+    });
     throw new Error(`Request to ${url} failed with status ${response.status}.`);
   }
-  return response.json() as Promise<T>;
+  const parsed = (await response.json()) as T;
+  await logRequestResponse({
+    request: {
+      url,
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+      },
+      body: fields,
+    },
+    response: {
+      url,
+      status: response.status,
+      ok: response.ok,
+      body: parsed,
+    },
+  });
+  return parsed;
 }

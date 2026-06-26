@@ -12,7 +12,10 @@ export async function logModelsResponse(
     const file = join(dir, 'models.json');
     let existing: Record<string, unknown> = {};
     try {
-      existing = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+      existing = JSON.parse(await readFile(file, 'utf8')) as Record<
+        string,
+        unknown
+      >;
     } catch {
       // file doesn't exist yet
     }

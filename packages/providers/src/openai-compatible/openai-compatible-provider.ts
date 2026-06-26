@@ -57,7 +57,6 @@ interface OpenAiChatResponse {
   };
 }
 
-
 export class OpenAiCompatibleProvider implements ProviderClient {
   public readonly providerId: ProviderId;
 
@@ -222,7 +221,6 @@ export class OpenAiCompatibleProvider implements ProviderClient {
 
     return headers;
   }
-
 }
 
 /**

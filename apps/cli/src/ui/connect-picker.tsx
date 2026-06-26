@@ -181,7 +181,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
     return () => {
       controller.abort();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
   useKeyboard((key) => {
@@ -199,9 +199,18 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
 
     // Auth-method picker keyboard.
     if (step === 'auth-method') {
-      if (isBack) { setStep('provider'); return; }
-      if (key.name === 'up') { setAuthMethodIndex(0); return; }
-      if (key.name === 'down') { setAuthMethodIndex(1); return; }
+      if (isBack) {
+        setStep('provider');
+        return;
+      }
+      if (key.name === 'up') {
+        setAuthMethodIndex(0);
+        return;
+      }
+      if (key.name === 'down') {
+        setAuthMethodIndex(1);
+        return;
+      }
       if (key.name === 'return') {
         if (authMethodIndex === 0) {
           setOauthStatus('');
@@ -253,10 +262,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       if (authMethods.includes('oauth') && authMethods.includes('apiKey')) {
         setAuthMethodIndex(0);
         setStep('auth-method');
-      } else if (
-        authMethods.length === 1 &&
-        authMethods[0] === 'oauth'
-      ) {
+      } else if (authMethods.length === 1 && authMethods[0] === 'oauth') {
         setOauthStatus('');
         setStep('oauth-connect');
       } else {
@@ -406,7 +412,9 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
           </text>
           {AUTH_METHOD_OPTIONS.map((opt, i) => (
             <box key={opt.label}>
-              <text {...(authMethodIndex === i ? { bg: 'cyan', fg: 'black' } : {})}>
+              <text
+                {...(authMethodIndex === i ? { bg: 'cyan', fg: 'black' } : {})}
+              >
                 {authMethodIndex === i ? '› ' : '  '}
                 {opt.label}
                 {'  '}

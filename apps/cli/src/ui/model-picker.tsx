@@ -245,7 +245,11 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
                       <span fg={isFocused ? 'black' : MUTED}> ✓</span>
                     ) : null}
                   </text>
-                  <text {...(isFocused ? { bg: 'cyan', fg: 'black' } : { fg: MUTED })}>
+                  <text
+                    {...(isFocused
+                      ? { bg: 'cyan', fg: 'black' }
+                      : { fg: MUTED })}
+                  >
                     {formatModelMeta(entry.model)}
                   </text>
                 </box>
@@ -344,8 +348,7 @@ function formatModelMeta(model: ModelInfo): string {
     // pricing by design — "local" would be misleading there.
     const entry = PROVIDER_BY_ID[model.providerId];
     const isSubscription =
-      entry?.authMethods?.length === 1 &&
-      entry.authMethods[0] === 'oauth';
+      entry?.authMethods?.length === 1 && entry.authMethods[0] === 'oauth';
     if (!isSubscription) {
       parts.push('local');
     }

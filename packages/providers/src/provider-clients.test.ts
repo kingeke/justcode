@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFile } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
 import { OllamaProvider } from '@providers/ollama/ollama-provider';
@@ -109,5 +113,29 @@ describe('provider clients', () => {
         providerId: ProviderId.OpenRouter,
       },
     ]);
+  });
+
+  it('writes request and response logs to debug.log', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'justcode-debug-'));
+    const filePath = join(tempDir, 'debug.log');
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tempDir);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        createJsonResponse({ data: [{ id: 'codellama:13b' }] })
+      );
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      await new OllamaProvider('http://127.0.0.1:11434').listModels();
+
+      const contents = await readFile(filePath, 'utf8');
+      expect(contents).toContain('"kind": "request"');
+      expect(contents).toContain('"kind": "response"');
+      expect(contents).toContain('"/v1/models"');
+    } finally {
+      cwdSpy.mockRestore();
+    }
   });
 });

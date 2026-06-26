@@ -9,6 +9,7 @@ import {
 import { ProviderId } from '@core/ports/provider-catalog';
 import type { ToolCall } from '@core/domain/message';
 import { HttpError, joinUrl, requestJson } from '@providers/http/http-client';
+import { logRequestResponse } from '@core/application/debug-log';
 import {
   parseAnthropicToolCalls,
   toAnthropicToolDefinitions,
@@ -54,7 +55,6 @@ interface AnthropicMessageResponse {
   };
 }
 
-
 export class AnthropicProvider implements ProviderClient {
   public readonly providerId = ProviderId.Anthropic;
 
@@ -99,7 +99,7 @@ export class AnthropicProvider implements ProviderClient {
       : undefined;
 
     if (!content.trim() && toolCalls.length === 0) {
-      throw new Error('Provider \'anthropic\' returned an empty response.');
+      throw new Error("Provider 'anthropic' returned an empty response.");
     }
 
     return {
@@ -155,6 +155,20 @@ export class AnthropicProvider implements ProviderClient {
     const response = await fetch(url, requestOptions);
     if (!response.ok) {
       const responseText = await response.text();
+      await logRequestResponse({
+        request: {
+          url,
+          method: String(requestOptions.method),
+          headers: requestOptions.headers as Record<string, string>,
+          body,
+        },
+        response: {
+          url,
+          status: response.status,
+          ok: response.ok,
+          body: responseText,
+        },
+      });
       throw new HttpError(
         `Request to ${url} failed with status ${response.status}. ${responseText}`,
         response.status,
@@ -190,7 +204,17 @@ export class AnthropicProvider implements ProviderClient {
       }
     }
 
-    return accumulator.toResult();
+    const result = accumulator.toResult();
+    await logRequestResponse({
+      request: {
+        url,
+        method: String(requestOptions.method),
+        headers: requestOptions.headers as Record<string, string>,
+        body,
+      },
+      response: { url, status: response.status, ok: true, body: result },
+    });
+    return result;
   }
 
   /**
@@ -253,14 +277,15 @@ class AnthropicStreamAccumulator {
       partial_json?: string;
       thinking?: string;
     };
-    message?: { usage?: { input_tokens?: number; cache_read_input_tokens?: number } };
+    message?: {
+      usage?: { input_tokens?: number; cache_read_input_tokens?: number };
+    };
     usage?: { output_tokens?: number };
   }): void {
     switch (event.type) {
       case 'message_start':
         this.inputTokens = event.message?.usage?.input_tokens ?? 0;
-        this.cachedTokens =
-          event.message?.usage?.cache_read_input_tokens ?? 0;
+        this.cachedTokens = event.message?.usage?.cache_read_input_tokens ?? 0;
         break;
       case 'content_block_start':
         if (event.content_block?.type === 'tool_use') {
@@ -307,7 +332,7 @@ class AnthropicStreamAccumulator {
 
     const content = this.text.trim() ? this.text : this.thinking;
     if (!content.trim() && toolCalls.length === 0) {
-      throw new Error('Provider \'anthropic\' returned an empty response.');
+      throw new Error("Provider 'anthropic' returned an empty response.");
     }
 
     return {
@@ -325,4 +350,3 @@ class AnthropicStreamAccumulator {
     };
   }
 }
-

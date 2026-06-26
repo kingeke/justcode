@@ -1,4 +1,7 @@
-import { ProviderId, type OAuthCredentials } from '@core/ports/provider-catalog';
+import {
+  ProviderId,
+  type OAuthCredentials,
+} from '@core/ports/provider-catalog';
 
 import { TOKEN_REFRESH_SKEW_MS } from '@runtime/auth/constants';
 import { getOAuthFlow } from '@runtime/auth/oauth-flows';

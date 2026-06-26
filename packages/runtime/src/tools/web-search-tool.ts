@@ -5,6 +5,7 @@ import type {
   ToolInvocationView,
   ToolResult,
 } from '@core/ports/tool';
+import { logRequestResponse } from '@core/application/debug-log';
 
 interface WebSearchArguments {
   query: string;
@@ -143,6 +144,20 @@ export class WebSearchTool implements Tool {
       });
 
       if (!response.ok) {
+        await logRequestResponse({
+          request: {
+            url: endpoint,
+            method: 'GET',
+            headers: { accept: 'text/html', 'user-agent': BROWSER_USER_AGENT },
+            body: '',
+          },
+          response: {
+            url: endpoint,
+            status: response.status,
+            ok: response.ok,
+            body: `${response.status} ${response.statusText}`,
+          },
+        });
         return {
           content: `Search failed: ${response.status} ${response.statusText}`,
           isError: true,
@@ -162,7 +177,22 @@ export class WebSearchTool implements Tool {
         return { content: `No results found for "${query}".` };
       }
 
-      return { content: formatResults(query, results) };
+      const result = { content: formatResults(query, results) };
+      await logRequestResponse({
+        request: {
+          url: endpoint,
+          method: 'GET',
+          headers: { accept: 'text/html', 'user-agent': BROWSER_USER_AGENT },
+          body: '',
+        },
+        response: {
+          url: endpoint,
+          status: response.status,
+          ok: response.ok,
+          body: result,
+        },
+      });
+      return result;
     } catch (error: unknown) {
       if (context?.signal?.aborted) {
         return { content: `Search was cancelled: "${query}"`, isError: true };
@@ -174,10 +204,20 @@ export class WebSearchTool implements Tool {
           isError: true,
         };
       }
-      return {
+      const result = {
         content: `Failed to search for "${query}": ${message}`,
         isError: true,
       };
+      await logRequestResponse({
+        request: {
+          url: endpoint,
+          method: 'GET',
+          headers: { accept: 'text/html', 'user-agent': BROWSER_USER_AGENT },
+          body: '',
+        },
+        response: { url: endpoint, status: 0, ok: false, body: result },
+      });
+      return result;
     } finally {
       clearTimeout(timer);
       context?.signal?.removeEventListener('abort', onAbort);

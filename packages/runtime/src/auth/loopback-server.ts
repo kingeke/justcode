@@ -18,9 +18,9 @@ const SUCCESS_HTML =
 /**
  * Starts a one-shot loopback HTTP server that captures the OAuth redirect.
  * Validates the `state` parameter to defend against CSRF, serves a "you can
- * close this tab" page, and resolves {@link LoopbackServer.waitForCode} with the
- * authorization code. Binds {@link options.port} when given (some providers
- * require a fixed redirect port), otherwise an ephemeral port.
+ * close this tab" page, and resolves `waitForCode` with the authorization
+ * code. Binds `options.port` when given (some providers require a fixed
+ * redirect port), otherwise an ephemeral port.
  */
 export async function startLoopbackServer(options: {
   expectedState: string;
@@ -87,10 +87,14 @@ export async function startLoopbackServer(options: {
 
   // If the caller aborts before the redirect arrives, release the port.
   if (options.signal) {
-    options.signal.addEventListener('abort', () => {
-      rejectCode(new Error('OAuth sign-in was cancelled.'));
-      closeServer();
-    }, { once: true });
+    options.signal.addEventListener(
+      'abort',
+      () => {
+        rejectCode(new Error('OAuth sign-in was cancelled.'));
+        closeServer();
+      },
+      { once: true }
+    );
   }
 
   return {

@@ -7,3 +7,4 @@ coverage/
 .env
 test-files
 opencode
+debug.log

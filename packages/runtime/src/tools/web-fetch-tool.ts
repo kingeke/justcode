@@ -5,6 +5,7 @@ import type {
   ToolInvocationView,
   ToolResult,
 } from '@core/ports/tool';
+import { logRequestResponse } from '@core/application/debug-log';
 
 interface WebFetchArguments {
   url: string;
@@ -126,6 +127,20 @@ export class WebFetchTool implements Tool {
       });
 
       if (!response.ok) {
+        await logRequestResponse({
+          request: {
+            url: url.href,
+            method: 'GET',
+            headers: { accept: 'text/html,text/plain,*/*' },
+            body: '',
+          },
+          response: {
+            url: url.href,
+            status: response.status,
+            ok: response.ok,
+            body: `${response.status} ${response.statusText}`,
+          },
+        });
         return {
           content: `Request failed: ${response.status} ${response.statusText} for ${url.href}`,
           isError: true,
@@ -153,9 +168,24 @@ export class WebFetchTool implements Tool {
       const note = truncated
         ? `\n\n(content truncated at ${maxLength} characters)`
         : '';
-      return {
+      const result = {
         content: `Fetched ${url.href}:\n\n${text.slice(0, maxLength)}${note}`,
       };
+      await logRequestResponse({
+        request: {
+          url: url.href,
+          method: 'GET',
+          headers: { accept: 'text/html,text/plain,*/*' },
+          body: '',
+        },
+        response: {
+          url: url.href,
+          status: response.status,
+          ok: response.ok,
+          body: result,
+        },
+      });
+      return result;
     } catch (error: unknown) {
       if (context?.signal?.aborted) {
         return { content: `Fetch was cancelled: ${url.href}`, isError: true };
@@ -167,10 +197,20 @@ export class WebFetchTool implements Tool {
           isError: true,
         };
       }
-      return {
+      const result = {
         content: `Failed to fetch ${url.href}: ${message}`,
         isError: true,
       };
+      await logRequestResponse({
+        request: {
+          url: url.href,
+          method: 'GET',
+          headers: { accept: 'text/html,text/plain,*/*' },
+          body: '',
+        },
+        response: { url: url.href, status: 0, ok: false, body: result },
+      });
+      return result;
     } finally {
       clearTimeout(timer);
       context?.signal?.removeEventListener('abort', onAbort);

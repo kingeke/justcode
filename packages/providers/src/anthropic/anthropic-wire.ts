@@ -63,7 +63,10 @@ export function toAnthropicWireRequest(
   const systemParts: string[] = [];
   const wire: AnthropicWireMessage[] = [];
 
-  const push = (role: 'user' | 'assistant', blocks: AnthropicContentBlock[]) => {
+  const push = (
+    role: 'user' | 'assistant',
+    blocks: AnthropicContentBlock[]
+  ) => {
     if (blocks.length === 0) return;
     const last = wire[wire.length - 1];
     if (last && last.role === role) {

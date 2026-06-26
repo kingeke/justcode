@@ -1,4 +1,5 @@
 import type { OAuthCredentials } from '@core/ports/provider-catalog';
+import { logRequestResponse } from '@core/application/debug-log';
 
 import { OPENAI_OAUTH } from '@runtime/auth/constants';
 import { startLoopbackServer } from '@runtime/auth/loopback-server';
@@ -17,9 +18,7 @@ interface OpenAiTokenResponse {
  * same one and captures the authorization code automatically.
  */
 export class OpenAiOAuthFlow implements OAuthFlow {
-  public async login(
-    context: OAuthLoginContext
-  ): Promise<OAuthCredentials> {
+  public async login(context: OAuthLoginContext): Promise<OAuthCredentials> {
     const pkce = createPkcePair();
     const state = createState();
 
@@ -89,10 +88,40 @@ export class OpenAiOAuthFlow implements OAuthFlow {
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`OpenAI token exchange failed (${response.status}): ${text}`);
+      await logRequestResponse({
+        request: {
+          url: OPENAI_OAUTH.tokenUrl,
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: { client_id: OPENAI_OAUTH.clientId, ...body },
+        },
+        response: {
+          url: OPENAI_OAUTH.tokenUrl,
+          status: response.status,
+          ok: response.ok,
+          body: text,
+        },
+      });
+      throw new Error(
+        `OpenAI token exchange failed (${response.status}): ${text}`
+      );
     }
 
     const token = (await response.json()) as OpenAiTokenResponse;
+    await logRequestResponse({
+      request: {
+        url: OPENAI_OAUTH.tokenUrl,
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: { client_id: OPENAI_OAUTH.clientId, ...body },
+      },
+      response: {
+        url: OPENAI_OAUTH.tokenUrl,
+        status: response.status,
+        ok: response.ok,
+        body: token,
+      },
+    });
     return {
       accessToken: token.access_token,
       refreshToken: token.refresh_token,

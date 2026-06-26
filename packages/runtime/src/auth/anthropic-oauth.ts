@@ -1,4 +1,5 @@
 import type { OAuthCredentials } from '@core/ports/provider-catalog';
+import { logRequestResponse } from '@core/application/debug-log';
 
 import { ANTHROPIC_OAUTH } from '@runtime/auth/constants';
 import type { OAuthFlow, OAuthLoginContext } from '@runtime/auth/oauth-flow';
@@ -17,11 +18,11 @@ interface AnthropicTokenResponse {
  * rather than a loopback server. The pasted value is `code#state`.
  */
 export class AnthropicOAuthFlow implements OAuthFlow {
-  public async login(
-    context: OAuthLoginContext
-  ): Promise<OAuthCredentials> {
+  public async login(context: OAuthLoginContext): Promise<OAuthCredentials> {
     if (!context.promptInput) {
-      throw new Error('Anthropic sign-in requires pasting an authorization code.');
+      throw new Error(
+        'Anthropic sign-in requires pasting an authorization code.'
+      );
     }
 
     const pkce = createPkcePair();
@@ -76,10 +77,40 @@ export class AnthropicOAuthFlow implements OAuthFlow {
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`Anthropic token exchange failed (${response.status}): ${text}`);
+      await logRequestResponse({
+        request: {
+          url: ANTHROPIC_OAUTH.tokenUrl,
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: { client_id: ANTHROPIC_OAUTH.clientId, ...body },
+        },
+        response: {
+          url: ANTHROPIC_OAUTH.tokenUrl,
+          status: response.status,
+          ok: response.ok,
+          body: text,
+        },
+      });
+      throw new Error(
+        `Anthropic token exchange failed (${response.status}): ${text}`
+      );
     }
 
     const token = (await response.json()) as AnthropicTokenResponse;
+    await logRequestResponse({
+      request: {
+        url: ANTHROPIC_OAUTH.tokenUrl,
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: { client_id: ANTHROPIC_OAUTH.clientId, ...body },
+      },
+      response: {
+        url: ANTHROPIC_OAUTH.tokenUrl,
+        status: response.status,
+        ok: response.ok,
+        body: token,
+      },
+    });
     return {
       accessToken: token.access_token,
       refreshToken: token.refresh_token,

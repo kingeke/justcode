@@ -1,4 +1,5 @@
 import type { ToolCall } from '@core/domain/message';
+import { logRequestResponse } from '@core/application/debug-log';
 
 export class HttpError extends Error {
   public constructor(
@@ -76,10 +77,26 @@ export async function requestJson<T>(
     requestOptions.body = JSON.stringify(options.body);
   }
 
+  const request = {
+    url,
+    method: String(requestOptions.method),
+    headers: requestOptions.headers as Record<string, string>,
+    body: options.body,
+  };
+
   const response = await fetch(url, requestOptions);
 
   if (!response.ok) {
     const responseText = await response.text();
+    await logRequestResponse({
+      request,
+      response: {
+        url,
+        status: response.status,
+        ok: response.ok,
+        body: responseText,
+      },
+    });
     throw new HttpError(
       httpErrorMessage(url, response.status, responseText),
       response.status,
@@ -87,7 +104,17 @@ export async function requestJson<T>(
     );
   }
 
-  return response.json() as Promise<T>;
+  const parsed = (await response.json()) as T;
+  await logRequestResponse({
+    request,
+    response: {
+      url,
+      status: response.status,
+      ok: response.ok,
+      body: parsed,
+    },
+  });
+  return parsed;
 }
 
 export function joinUrl(baseUrl: string, path: string): string {
@@ -173,10 +200,26 @@ export async function requestSseStream(
     requestOptions.body = JSON.stringify(options.body);
   }
 
+  const request = {
+    url,
+    method: String(requestOptions.method),
+    headers: requestOptions.headers as Record<string, string>,
+    body: options.body,
+  };
+
   const response = await fetch(url, requestOptions);
 
   if (!response.ok) {
     const responseText = await response.text();
+    await logRequestResponse({
+      request,
+      response: {
+        url,
+        status: response.status,
+        ok: response.ok,
+        body: responseText,
+      },
+    });
     throw new HttpError(
       httpErrorMessage(url, response.status, responseText),
       response.status,
@@ -207,7 +250,12 @@ export async function requestSseStream(
       if (!trimmed.startsWith('data: ')) continue;
       const data = trimmed.slice(6);
       if (data === '[DONE]') {
-        return { usage, toolCalls: toolCalls.toToolCalls() };
+        const result = { usage, toolCalls: toolCalls.toToolCalls() };
+        await logRequestResponse({
+          request,
+          response: { url, status: response.status, ok: true, body: result },
+        });
+        return result;
       }
 
       try {
@@ -256,7 +304,12 @@ export async function requestSseStream(
     }
   }
 
-  return { usage, toolCalls: toolCalls.toToolCalls() };
+  const result = { usage, toolCalls: toolCalls.toToolCalls() };
+  await logRequestResponse({
+    request,
+    response: { url, status: response.status, ok: true, body: result },
+  });
+  return result;
 }
 
 export async function requestNdjsonStream(
@@ -280,10 +333,26 @@ export async function requestNdjsonStream(
     requestOptions.body = JSON.stringify(options.body);
   }
 
+  const request = {
+    url,
+    method: String(requestOptions.method),
+    headers: requestOptions.headers as Record<string, string>,
+    body: options.body,
+  };
+
   const response = await fetch(url, requestOptions);
 
   if (!response.ok) {
     const responseText = await response.text();
+    await logRequestResponse({
+      request,
+      response: {
+        url,
+        status: response.status,
+        ok: response.ok,
+        body: responseText,
+      },
+    });
     throw new HttpError(
       httpErrorMessage(url, response.status, responseText),
       response.status,
@@ -348,7 +417,15 @@ export async function requestNdjsonStream(
         if (parsed.done) {
           usage.inputTokens = parsed.prompt_eval_count ?? 0;
           usage.outputTokens = parsed.eval_count ?? 0;
-          return { usage, toolCalls: toolCalls.filter((call) => call.name) };
+          const result = {
+            usage,
+            toolCalls: toolCalls.filter((call) => call.name),
+          };
+          await logRequestResponse({
+            request,
+            response: { url, status: response.status, ok: true, body: result },
+          });
+          return result;
         }
       } catch {
         // skip malformed NDJSON lines
@@ -356,5 +433,10 @@ export async function requestNdjsonStream(
     }
   }
 
-  return { usage, toolCalls: toolCalls.filter((call) => call.name) };
+  const result = { usage, toolCalls: toolCalls.filter((call) => call.name) };
+  await logRequestResponse({
+    request,
+    response: { url, status: response.status, ok: true, body: result },
+  });
+  return result;
 }
