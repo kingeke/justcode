@@ -3,6 +3,7 @@ import { AlibabaProvider } from '@providers/alibaba/alibaba-provider';
 import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
 import { OllamaProvider } from '@providers/ollama/ollama-provider';
 import { OpenAiProvider } from '@providers/openai/openai-provider';
+import { OpenAiCompatibleProvider } from '@providers/openai-compatible/openai-compatible-provider';
 import { OpenRouterProvider } from '@providers/openrouter/openrouter-provider';
 import type { AppConfig } from '@runtime/config/app-config';
 
@@ -33,6 +34,8 @@ export interface ProviderConfig {
   apiKey?: string;
   baseUrl?: string;
   defaultModel?: string;
+  /** Display name — persisted only for custom (user-added) providers. */
+  name?: string;
 }
 
 export enum ProviderId {
@@ -139,3 +142,83 @@ export const PROVIDER_BY_ID: Record<ProviderId, ProviderCatalogEntry> =
 export const PROVIDER_IDS: ProviderId[] = PROVIDERS.map(
   (provider) => provider.id
 );
+
+/**
+ * Custom (user-added) providers are namespaced with this prefix so their ids
+ * never collide with the built-in {@link ProviderId} values and can be told
+ * apart from them anywhere a provider id is handled as a plain string.
+ */
+export const CUSTOM_PROVIDER_PREFIX = 'custom:';
+
+/** The resolved shape of a custom provider — name and base URL are required. */
+export interface CustomProviderConfig {
+  name: string;
+  apiKey?: string | undefined;
+  baseUrl: string;
+  defaultModel?: string | undefined;
+}
+
+export function isCustomProviderId(id: string): boolean {
+  return id.startsWith(CUSTOM_PROVIDER_PREFIX);
+}
+
+/** Derives a stable, namespaced id from a custom provider's display name. */
+export function customProviderId(name: string): ProviderId {
+  const slug = name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${CUSTOM_PROVIDER_PREFIX}${slug || 'provider'}` as ProviderId;
+}
+
+/**
+ * Builds a catalog entry for a custom, OpenAI-compatible provider. Custom
+ * providers behave like any built-in entry: they can be listed, connected, and
+ * reconstructed from the saved config — they just aren't known at compile time.
+ */
+export function createCustomProviderEntry(
+  id: ProviderId,
+  custom: CustomProviderConfig
+): ProviderCatalogEntry {
+  return {
+    id,
+    name: custom.name,
+    description: 'Custom OpenAI-compatible provider',
+    apiKeyRequired: false,
+    baseUrl: custom.baseUrl,
+    credentialsFromConfig: (config) => {
+      const saved = config.customProviders[id];
+      return {
+        apiKey: saved?.apiKey ?? custom.apiKey,
+        baseUrl: saved?.baseUrl ?? custom.baseUrl,
+        defaultModel: saved?.defaultModel ?? custom.defaultModel,
+      };
+    },
+    create: (credentials) =>
+      new OpenAiCompatibleProvider({
+        providerId: id,
+        baseUrl: credentials.baseUrl,
+        ...(credentials.apiKey ? { apiKey: credentials.apiKey } : {}),
+        ...(credentials.defaultModel
+          ? { defaultModel: credentials.defaultModel }
+          : {}),
+      }),
+  };
+}
+
+/**
+ * Resolves the catalog entry for any provider id — a built-in from the static
+ * catalog, or a custom one rebuilt from the saved config. Returns undefined when
+ * the id is unknown (e.g. a custom provider that is no longer configured).
+ */
+export function resolveProviderEntry(
+  config: AppConfig,
+  id: ProviderId
+): ProviderCatalogEntry | undefined {
+  if (isCustomProviderId(id)) {
+    const custom = config.customProviders[id];
+    return custom ? createCustomProviderEntry(id, custom) : undefined;
+  }
+  return PROVIDER_BY_ID[id];
+}

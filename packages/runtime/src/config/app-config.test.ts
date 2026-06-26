@@ -95,6 +95,32 @@ describe('loadAppConfig', () => {
     );
   });
 
+  it('surfaces user-added custom providers', async () => {
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({
+        lastProvider: 'custom:my-corp',
+        providers: {
+          'custom:my-corp': {
+            name: 'My Corp',
+            apiKey: 'sk-secret',
+            baseUrl: 'https://llm.my-corp.test/v1',
+          },
+        },
+      })
+    );
+
+    const config = await loadAppConfig(mockConfigDir);
+
+    expect(config.defaultProvider).toBe('custom:my-corp');
+    expect(config.configuredProviders).toContain('custom:my-corp');
+    expect(config.customProviders['custom:my-corp']).toEqual({
+      name: 'My Corp',
+      apiKey: 'sk-secret',
+      baseUrl: 'https://llm.my-corp.test/v1',
+      defaultModel: undefined,
+    });
+  });
+
   it('uses custom config directory', async () => {
     const customDir = '/custom/dir';
     vi.mocked(readFile).mockResolvedValue(JSON.stringify({}));
@@ -122,5 +148,9 @@ describe('parseProviderId', () => {
     expect(() => parseProviderId('anthropic')).toThrow(
       "Unsupported provider 'anthropic'."
     );
+  });
+
+  it('accepts namespaced custom provider ids', () => {
+    expect(parseProviderId('custom:my-corp')).toBe('custom:my-corp');
   });
 });

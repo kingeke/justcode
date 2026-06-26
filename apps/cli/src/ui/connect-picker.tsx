@@ -13,6 +13,9 @@ import { type ModelInfo, type ProviderClient } from '@core/ports/chat-model';
 import { ProviderId } from '@core/ports/provider-catalog';
 import {
   PROVIDERS,
+  createCustomProviderEntry,
+  customProviderId,
+  isCustomProviderId,
   type ProviderConfig,
   type ProviderConnectionInfo,
 } from '@core/ports/provider-catalog';
@@ -29,7 +32,16 @@ const MUTED = '#8a8a8a';
 const MUTED_RGBA = RGBA.fromHex(MUTED);
 const INVERSE = createTextAttributes({ inverse: true });
 
-type WizardStep = 'provider' | 'api-key' | 'base-url' | 'connecting';
+type WizardStep = 'provider' | 'name' | 'api-key' | 'base-url' | 'connecting';
+
+// Synthetic row that starts the "add a custom provider" flow. Its id is not a
+// real provider id; selecting it routes to the name step instead of connecting.
+const ADD_CUSTOM_ID = '__add_custom__';
+const ADD_CUSTOM_ENTRY = {
+  id: ADD_CUSTOM_ID,
+  name: '+ Add custom provider',
+  description: 'Connect any OpenAI-compatible endpoint',
+} as unknown as ProviderConnectionInfo;
 
 // Literal character to append to the search query, or undefined for control keys.
 function printableInput(key: KeyEvent): string | undefined {
@@ -87,21 +99,39 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
     useState<ProviderConnectionInfo | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
+  const [customName, setCustomName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const scrollOffsetRef = useRef(0);
   let field: InputRenderable | null | undefined;
 
-  // Display order comes straight from the catalog (PROVIDERS) — the single
-  // source of truth — so there's no separate ordering to keep in sync here.
+  // Already-connected custom providers, rebuilt from the saved config so they
+  // appear in the list alongside the built-ins.
+  const customEntries = useMemo(
+    () =>
+      Object.entries(props.configuredProviders)
+        .filter(([id]) => isCustomProviderId(id))
+        .map(([id, cfg]) =>
+          createCustomProviderEntry(id as ProviderConnectionInfo['id'], {
+            name: cfg?.name ?? id,
+            baseUrl: cfg?.baseUrl ?? '',
+            apiKey: cfg?.apiKey,
+            defaultModel: cfg?.defaultModel,
+          })
+        ),
+    [props.configuredProviders]
+  );
+
+  // Display order: built-in catalog (the single source of truth), then any
+  // configured custom providers, then the row that adds a new custom provider.
   const providers = useMemo(
     () =>
       fuzzyFilter(
-        [...PROVIDERS],
+        [...PROVIDERS, ...customEntries, ADD_CUSTOM_ENTRY],
         query,
         (provider) =>
           `${provider.name} ${provider.description} ${provider.apiKeyEnvVar ?? ''} ${provider.baseUrlEnvVar ?? ''}`
       ),
-    [query]
+    [query, customEntries]
   );
 
   const clampFocus = (next: number) =>
@@ -132,6 +162,15 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
     if (key.name === 'return') {
       const entry = providers[focusedIndex];
       if (!entry) return;
+      if ((entry.id as string) === ADD_CUSTOM_ID) {
+        setSelectedProvider(null);
+        setCustomName('');
+        setApiKey('');
+        setBaseUrl('');
+        setError(null);
+        setStep('name');
+        return;
+      }
       setSelectedProvider(entry);
       const existing = props.configuredProviders[entry.id] ?? {};
       setApiKey(existing.apiKey ?? '');
@@ -201,11 +240,13 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
         <text fg="cyan" attributes={BOLD}>
           {step === 'provider'
             ? 'Connect provider'
-            : step === 'api-key'
-              ? `API key - ${selectedProvider?.name ?? ''}`
-              : step === 'base-url'
-                ? `Base URL - ${selectedProvider?.name ?? ''}`
-                : `Fetching models - ${selectedProvider?.name ?? ''}`}
+            : step === 'name'
+              ? 'New custom provider'
+              : step === 'api-key'
+                ? `API key - ${selectedProvider?.name ?? ''}`
+                : step === 'base-url'
+                  ? `Base URL - ${selectedProvider?.name ?? ''}`
+                  : `Fetching models - ${selectedProvider?.name ?? ''}`}
         </text>
         <text fg={MUTED}>
           {step === 'provider'
@@ -260,21 +301,39 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       ) : (
         <box flexDirection="column">
           <text fg={MUTED}>
-            {step === 'api-key'
-              ? selectedProvider?.apiKeyRequired
-                ? 'Enter the API key for this provider.'
-                : 'Optional API key. Leave blank and press enter to skip.'
-              : `Confirm or edit the base URL for ${selectedProvider?.name ?? ''}.`}
+            {step === 'name'
+              ? 'Enter a name for the custom provider.'
+              : step === 'api-key'
+                ? selectedProvider?.apiKeyRequired
+                  ? 'Enter the API key for this provider.'
+                  : 'Optional API key. Leave blank and press enter to skip.'
+                : `Confirm or edit the base URL for ${selectedProvider?.name ?? ''}.`}
           </text>
 
           <box marginTop={1} flexDirection="row">
-            <text fg={MUTED}>{step === 'api-key' ? 'key> ' : 'url> '}</text>
+            <text fg={MUTED}>
+              {step === 'name'
+                ? 'name> '
+                : step === 'api-key'
+                  ? 'key> '
+                  : 'url> '}
+            </text>
             <input
               key={step}
               width="100%"
-              value={step === 'api-key' ? apiKey : baseUrl}
+              value={
+                step === 'name'
+                  ? customName
+                  : step === 'api-key'
+                    ? apiKey
+                    : baseUrl
+              }
               placeholder={
-                step === 'api-key' ? 'paste api key...' : 'base url...'
+                step === 'name'
+                  ? 'provider name...'
+                  : step === 'api-key'
+                    ? 'paste api key...'
+                    : 'base url...'
               }
               placeholderColor={MUTED}
               textColor="white"
@@ -284,16 +343,38 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
               cursorColor="white"
               focused
               onInput={(nextValue) => {
-                if (step === 'api-key') {
+                if (step === 'name') {
+                  setCustomName(nextValue);
+                } else if (step === 'api-key') {
                   setApiKey(nextValue);
                 } else {
                   setBaseUrl(nextValue);
                 }
               }}
               onSubmit={() => {
-                if (!selectedProvider || !field) return;
+                if (!field) return;
 
                 const submitted = field.value;
+
+                if (step === 'name') {
+                  const name = submitted.trim();
+                  if (!name) {
+                    setError('A name is required.');
+                    return;
+                  }
+                  // Build the custom catalog entry now so the remaining steps
+                  // (api-key, base-url) reuse the shared provider flow.
+                  const id = customProviderId(name);
+                  setCustomName(name);
+                  setSelectedProvider(
+                    createCustomProviderEntry(id, { name, baseUrl: '' })
+                  );
+                  setError(null);
+                  setStep('api-key');
+                  return;
+                }
+
+                if (!selectedProvider) return;
 
                 if (step === 'api-key') {
                   const nextApiKey = submitted.trim();
@@ -374,11 +455,21 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       }
 
       const config: ProviderConfig = {};
-      if (nextApiKey && provider.apiKeyEnvVar) {
-        config.apiKey = nextApiKey;
-      }
-      if (provider.baseUrlEnvVar) {
+      if (isCustomProviderId(provider.id)) {
+        // Custom providers have no env-var slots; persist everything we need to
+        // rebuild them on the next launch.
+        config.name = provider.name;
         config.baseUrl = nextBaseUrl;
+        if (nextApiKey) {
+          config.apiKey = nextApiKey;
+        }
+      } else {
+        if (nextApiKey && provider.apiKeyEnvVar) {
+          config.apiKey = nextApiKey;
+        }
+        if (provider.baseUrlEnvVar) {
+          config.baseUrl = nextBaseUrl;
+        }
       }
 
       props.onComplete({

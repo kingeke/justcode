@@ -126,7 +126,9 @@ describe('ApplyPatchTool', () => {
     expect(result.isError).toBe(true);
     expect(result.content).toContain('did not apply to b.txt');
     // The first section must not have been committed.
-    expect(await readFile(join(workspaceRoot, 'a.txt'), 'utf8')).toBe('a1\na2\n');
+    expect(await readFile(join(workspaceRoot, 'a.txt'), 'utf8')).toBe(
+      'a1\na2\n'
+    );
   });
 
   it('errors when a hunk context does not match', async () => {
@@ -163,7 +165,9 @@ describe('ApplyPatchTool', () => {
     expect(result.isError).toBe(true);
     expect(result.content).toContain('does not support file deletion');
     // File is untouched.
-    expect(await readFile(join(workspaceRoot, 'gone.txt'), 'utf8')).toBe('bye\n');
+    expect(await readFile(join(workspaceRoot, 'gone.txt'), 'utf8')).toBe(
+      'bye\n'
+    );
   });
 
   it('rejects unparseable arguments', async () => {

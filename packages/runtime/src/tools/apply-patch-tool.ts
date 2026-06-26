@@ -135,7 +135,9 @@ export class ApplyPatchTool implements Tool {
     }
 
     const summary = plan.changes
-      .map((change) => `${change.isCreate ? 'created' : 'updated'} ${change.path}`)
+      .map(
+        (change) => `${change.isCreate ? 'created' : 'updated'} ${change.path}`
+      )
       .join(', ');
     const noun = plan.changes.length === 1 ? 'file' : 'files';
     return {

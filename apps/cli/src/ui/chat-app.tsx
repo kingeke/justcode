@@ -1282,10 +1282,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         const now = Date.now();
         const sinceFlushMs = now - flushed.atMs;
         const newlineArrived = cBuf.indexOf('\n', flushed.length) !== -1;
-        if (
-          (newlineArrived && sinceFlushMs >= 100) ||
-          sinceFlushMs >= 500
-        ) {
+        if ((newlineArrived && sinceFlushMs >= 100) || sinceFlushMs >= 500) {
           contentFlushRef.current = { length: cBuf.length, atMs: now };
           setStreamingContent(cBuf);
         }

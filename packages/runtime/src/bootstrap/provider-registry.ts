@@ -1,12 +1,12 @@
 import { type ProviderClient } from '@core/ports/chat-model';
-import { ProviderId, PROVIDER_BY_ID } from '@core/ports/provider-catalog';
+import { ProviderId, resolveProviderEntry } from '@core/ports/provider-catalog';
 import type { AppConfig } from '@runtime/config/app-config';
 
 export class ProviderRegistry {
   public constructor(private readonly config: AppConfig) {}
 
   public create(providerId: ProviderId): ProviderClient {
-    const entry = PROVIDER_BY_ID[providerId];
+    const entry = resolveProviderEntry(this.config, providerId);
     if (!entry) {
       throw new Error(`Unexpected provider '${String(providerId)}'.`);
     }

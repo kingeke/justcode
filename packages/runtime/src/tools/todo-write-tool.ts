@@ -63,8 +63,7 @@ export class TodoWriteTool implements Tool {
               status: {
                 type: 'string',
                 enum: [...STATUS_VALUES],
-                description:
-                  'One of "pending", "in_progress", or "completed".',
+                description: 'One of "pending", "in_progress", or "completed".',
               },
             },
             required: ['content', 'status'],

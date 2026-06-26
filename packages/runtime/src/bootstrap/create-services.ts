@@ -3,7 +3,11 @@ import { ChatSessionService } from '@core/application/chat-session-service';
 import { ListModelsService } from '@core/application/list-models-service';
 import { ToolRegistry } from '@core/application/tool-registry';
 import { type ProviderClient } from '@core/ports/chat-model';
-import { ProviderId, PROVIDERS } from '@core/ports/provider-catalog';
+import {
+  ProviderId,
+  PROVIDERS,
+  createCustomProviderEntry,
+} from '@core/ports/provider-catalog';
 import { WriteFileTool } from '@runtime/tools/write-file-tool';
 import { EditFileTool } from '@runtime/tools/edit-file-tool';
 import { ApplyPatchTool } from '@runtime/tools/apply-patch-tool';
@@ -104,7 +108,7 @@ export async function createRuntimeServices(
 }
 
 function createAllProviders(config: AppConfig): ProviderClient[] {
-  return PROVIDERS.flatMap((provider) => {
+  const builtIns = PROVIDERS.flatMap((provider) => {
     // Only surface providers the user has actually connected. Nothing is
     // available until it has been set up via the connect screen.
     if (!config.configuredProviders.includes(provider.id)) {
@@ -118,4 +122,13 @@ function createAllProviders(config: AppConfig): ProviderClient[] {
 
     return [provider.create(credentials)];
   });
+
+  const customs = Object.entries(config.customProviders).flatMap(
+    ([id, custom]) => {
+      const entry = createCustomProviderEntry(id as ProviderId, custom);
+      return [entry.create(entry.credentialsFromConfig(config))];
+    }
+  );
+
+  return [...builtIns, ...customs];
 }

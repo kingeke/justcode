@@ -5,7 +5,9 @@ import { TodoWriteTool } from '@runtime/tools/todo-write-tool';
 describe('TodoWriteTool', () => {
   const tool = new TodoWriteTool();
 
-  function run(todos: unknown): Promise<{ content: string; isError?: boolean }> {
+  function run(
+    todos: unknown
+  ): Promise<{ content: string; isError?: boolean }> {
     return tool.execute(JSON.stringify({ todos }));
   }
 

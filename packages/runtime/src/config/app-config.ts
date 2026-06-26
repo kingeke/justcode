@@ -4,7 +4,12 @@ import {
   readGlobalConfig,
   writeGlobalConfig,
 } from '@runtime/persistence/global-config';
-import { ProviderId } from '@core/ports/provider-catalog';
+import {
+  ProviderId,
+  isCustomProviderId,
+  CUSTOM_PROVIDER_PREFIX,
+} from '@core/ports/provider-catalog';
+import type { CustomProviderConfig } from '@core/ports/provider-catalog';
 import type { GlobalConfig } from '@runtime/persistence/global-config';
 import { DEFAULT_SYSTEM_PROMPT } from '@core/application/system-prompt';
 
@@ -37,6 +42,8 @@ export interface AppConfig {
     apiKey: string | undefined;
     baseUrl: string;
   };
+  /** User-added OpenAI-compatible providers, keyed by their namespaced id. */
+  customProviders: Record<string, CustomProviderConfig>;
 }
 
 export async function loadAppConfig(
@@ -61,6 +68,19 @@ export async function loadAppConfig(
   const configuredProviders = Object.keys(configWithDefaults.providers ?? {})
     .map((id) => parseProviderId(id))
     .filter((id): id is ProviderId => id !== undefined);
+
+  const customProviders: Record<string, CustomProviderConfig> = {};
+  for (const [id, saved] of Object.entries(
+    configWithDefaults.providers ?? {}
+  )) {
+    if (!isCustomProviderId(id) || !saved) continue;
+    customProviders[id] = {
+      name: saved.name ?? id.slice(CUSTOM_PROVIDER_PREFIX.length),
+      apiKey: saved.apiKey,
+      baseUrl: saved.baseUrl ?? '',
+      defaultModel: saved.defaultModel,
+    };
+  }
 
   // Nothing is used by default: only a provider the user explicitly connected
   // (the last one they picked, or any configured one) is selected. When none
@@ -105,6 +125,7 @@ export async function loadAppConfig(
         configWithDefaults.providers?.alibaba?.baseUrl ??
         'https://dashscope.aliyuncs.com/compatible-mode/v1',
     },
+    customProviders,
   };
 }
 
@@ -112,6 +133,10 @@ export function parseProviderId(
   value: string | undefined
 ): ProviderId | undefined {
   if (!value) return undefined;
+
+  // Custom providers carry user-defined ids that aren't in the enum; they're
+  // validated by presence in the config, not against a fixed list.
+  if (isCustomProviderId(value)) return value as ProviderId;
 
   const match = Object.values(ProviderId).find((v) => v === value);
   if (match) return match;
