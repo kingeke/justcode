@@ -18,9 +18,23 @@ export interface ToolResult {
   isError?: boolean;
 }
 
+/** A question a tool wants to put to the user, surfaced by the UI. */
+export interface UserQuestionRequest {
+  /** The question to show the user. */
+  question: string;
+  /** Optional suggested answers the UI may present as a pick-list. */
+  options?: string[];
+}
+
 export interface ToolExecutionContext {
   workspaceRoot: string;
   signal?: AbortSignal;
+  /**
+   * Prompts the user and resolves with their typed answer. Provided by the host
+   * (the CLI) only for interactive turns; absent in non-interactive contexts, so
+   * tools that need it must handle its absence. Rejects if the user cancels.
+   */
+  askUser?: (request: UserQuestionRequest) => Promise<string>;
 }
 
 /**

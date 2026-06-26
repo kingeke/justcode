@@ -11,6 +11,7 @@ Always:
 - Run `npm run typecheck` after code changes so you can confirm any typescript errors.
 - Keep the existing app color palette as the default for new UI work unless a change explicitly calls for a new visual language.
 - All imports must use absolute path and not relative path
+- All new changes and new files must have a test case along with it to confirm it works properly
 
 Treat full repository reads as a last resort.
 

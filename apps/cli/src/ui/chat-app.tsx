@@ -41,6 +41,7 @@ import type {
   ToolActivityEvent,
   ToolApprovalRequest,
 } from '@core/application/chat-session-service';
+import type { UserQuestionRequest } from '@core/ports/tool';
 import type { Conversation } from '@core/domain/conversation';
 import { createMessage } from '@core/domain/message';
 import type { ModelInfo, ProviderClient } from '@core/ports/chat-model';
@@ -101,6 +102,11 @@ interface ChatAppProps {
 interface PendingApproval {
   request: ToolApprovalRequest;
   resolve: (approved: boolean) => void;
+}
+
+interface PendingQuestion {
+  request: UserQuestionRequest;
+  resolve: (answer: string) => void;
 }
 
 const MAX_PREVIEW_LINES = 16;
@@ -350,6 +356,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       current?.resolve(false);
       return null;
     });
+    setPendingQuestion((current) => {
+      current?.resolve('');
+      return null;
+    });
     setIsSending(false);
     setConversation(null);
     setError(null);
@@ -383,7 +393,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     if (!text.trim()) return;
     setConversation((prev) =>
       prev
-        ? { ...prev, messages: [...prev.messages, createMessage('assistant', text)] }
+        ? {
+            ...prev,
+            messages: [...prev.messages, createMessage('assistant', text)],
+          }
         : prev
     );
   }, []);
@@ -423,6 +436,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   );
   const [pendingApproval, setPendingApproval] =
     useState<PendingApproval | null>(null);
+  // A question the `question` tool put to the user; the answer is typed into the
+  // normal prompt and submitting resolves the tool's awaiting promise.
+  const [pendingQuestion, setPendingQuestion] =
+    useState<PendingQuestion | null>(null);
   // Rendered diffs for file-changing tool calls, keyed by tool-call id (which
   // the committed messages share), so a write/edit/patch keeps showing its diff
   // inline in the transcript. Captured on the tool's 'start'; cleared only when
@@ -584,7 +601,13 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   });
 
   useEffect(() => {
-    if (!terminalFocused || isSending || browseIndex !== null) {
+    // While a question is pending the prompt doubles as the answer box, so focus
+    // it then too even though the turn is still sending.
+    if (
+      !terminalFocused ||
+      browseIndex !== null ||
+      (isSending && pendingQuestion === null)
+    ) {
       return;
     }
 
@@ -594,7 +617,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     }
 
     area.focus();
-  }, [browseIndex, isSending, terminalFocused]);
+  }, [browseIndex, isSending, pendingQuestion, terminalFocused]);
 
   const configuredProviderIds = Object.keys(
     savedConfig.providers ?? {}
@@ -1035,6 +1058,32 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     });
   };
 
+  // Hand the typed answer back to the awaiting question tool, then clear the
+  // prompt. A bare option number (when options were offered) is expanded to that
+  // option's text so the user can answer with "2" instead of retyping it.
+  const resolveQuestion = (answer: string): void => {
+    setPendingQuestion((current) => {
+      if (!current) return null;
+      let finalAnswer = answer.trim();
+      const options = current.request.options;
+      if (options && /^\d+$/.test(finalAnswer)) {
+        const index = Number.parseInt(finalAnswer, 10) - 1;
+        if (index >= 0 && index < options.length) {
+          finalAnswer = options[index] ?? finalAnswer;
+        }
+      }
+      current.resolve(finalAnswer);
+      return null;
+    });
+    setInput('');
+    const area = promptAreaRef.current;
+    if (area && !area.isDestroyed) {
+      area.setText('');
+      area.cursorOffset = 0;
+    }
+    setStatus('Working...');
+  };
+
   const executeCommand = (name: string, arg?: string): void => {
     setInput('');
     setError(null);
@@ -1224,6 +1273,15 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       });
     };
 
+    const requestUserInput = (
+      request: UserQuestionRequest
+    ): Promise<string> => {
+      return new Promise<string>((resolve) => {
+        setStatus('Waiting for your answer...');
+        setPendingQuestion({ request, resolve });
+      });
+    };
+
     const onToolActivity = (event: ToolActivityEvent): void => {
       if (event.phase === 'start') {
         // Preserve transcript order: commit the prose that streamed before this
@@ -1304,6 +1362,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         attachments,
         signal: requestController.signal,
         requestApproval,
+        requestUserInput,
         onToolActivity,
         onToken: (token) => {
           if (responseTimingRef.current.firstTokenMs === null) {
@@ -1427,6 +1486,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     } catch (caughtError: unknown) {
       clearInterval(flushInterval);
       setPendingApproval(null);
+      // Drop any unanswered question; its promise was already rejected via the
+      // abort signal (or the request failed), so there's nothing to resolve.
+      setPendingQuestion(null);
 
       if (isAbortError(caughtError)) {
         const capturedThinking = thinkingRef.current.buffer;
@@ -1844,6 +1906,36 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           </box>
         ) : null}
 
+        {pendingQuestion ? (
+          <box
+            marginTop={1}
+            flexShrink={0}
+            flexDirection="column"
+            border
+            borderStyle="rounded"
+            borderColor="yellow"
+            paddingX={1}
+          >
+            <text fg="yellow" attributes={BOLD}>
+              {pendingQuestion.request.question}
+            </text>
+            {pendingQuestion.request.options?.length
+              ? pendingQuestion.request.options.map((option, index) => (
+                  <text key={index} fg={MUTED}>
+                    {`  ${index + 1}. ${option}`}
+                  </text>
+                ))
+              : null}
+            <text fg={MUTED}>
+              Type your answer below and press Enter
+              {pendingQuestion.request.options?.length
+                ? ' (or the option number)'
+                : ''}
+              .
+            </text>
+          </box>
+        ) : null}
+
         <box
           marginTop={1}
           width="100%"
@@ -1863,9 +1955,20 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             textColor="#111111"
             focusedTextColor="#111111"
             cursorColor="white"
-            focused={terminalFocused && !isSending && browseIndex === null}
+            // The prompt is also the answer box while a question is pending, so
+            // it stays focusable even though the turn is still "sending".
+            focused={
+              terminalFocused &&
+              browseIndex === null &&
+              (!isSending || pendingQuestion !== null)
+            }
             onSubmit={() => {
-              void submit(promptAreaRef.current?.plainText ?? input);
+              const text = promptAreaRef.current?.plainText ?? input;
+              if (pendingQuestion) {
+                resolveQuestion(text);
+                return;
+              }
+              void submit(text);
             }}
             onKeyDown={(event) => {
               const promptArea = promptAreaRef.current;
@@ -1891,6 +1994,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                   event.hyper
                 ) {
                   promptArea.insertText('\n');
+                  return;
+                }
+
+                if (pendingQuestion) {
+                  resolveQuestion(promptArea.plainText);
                   return;
                 }
 

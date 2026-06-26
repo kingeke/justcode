@@ -13,6 +13,7 @@ import { GrepTool } from '@runtime/tools/grep-tool';
 import { GlobTool } from '@runtime/tools/glob-tool';
 import { WebFetchTool } from '@runtime/tools/web-fetch-tool';
 import { WebSearchTool } from '@runtime/tools/web-search-tool';
+import { QuestionTool } from '@runtime/tools/question-tool';
 import {
   ReadFileTool,
   DEFAULT_MAX_READ_LINES,
@@ -77,6 +78,7 @@ export async function createRuntimeServices(
     new TodoWriteTool(),
     new WebFetchTool(),
     new WebSearchTool(),
+    new QuestionTool(),
   ]);
   const allProviders = createAllProviders(config);
 

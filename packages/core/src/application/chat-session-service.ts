@@ -21,6 +21,7 @@ import type {
   ToolExecutionContext,
   ToolInvocationView,
   ToolResult,
+  UserQuestionRequest,
 } from '@core/ports/tool';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 import type { ToolRegistry } from '@core/application/tool-registry';
@@ -74,6 +75,8 @@ export interface SubmitMessageInput {
   onThinkingToken?: (token: string) => void;
   /** Asked before a tool that `requiresApproval` runs. Absent → auto-approved. */
   requestApproval?: (request: ToolApprovalRequest) => Promise<boolean>;
+  /** Lets a tool prompt the user for input mid-turn (e.g. the question tool). */
+  requestUserInput?: (request: UserQuestionRequest) => Promise<string>;
   onToolActivity?: (event: ToolActivityEvent) => void;
 }
 
@@ -310,10 +313,18 @@ export class ChatSessionService {
       result = { content: 'The user rejected this tool call.', isError: true };
     } else {
       throwIfAborted(input.signal);
+      // Bridge a tool's `askUser` to the host's prompt, and make a cancellation
+      // (abort) reject the pending question so the loop can unwind.
+      const requestUserInput = input.requestUserInput;
+      const askUser = requestUserInput
+        ? (request: UserQuestionRequest): Promise<string> =>
+            awaitWithAbort(requestUserInput(request), input.signal)
+        : undefined;
       try {
         result = await tool.execute(call.arguments, {
           workspaceRoot: this.workspaceRoot,
           ...(input.signal ? { signal: input.signal } : {}),
+          ...(askUser ? { askUser } : {}),
         });
         throwIfAborted(input.signal);
       } catch (error: unknown) {

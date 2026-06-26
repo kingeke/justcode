@@ -14,7 +14,7 @@ This document tracks the implementation status of CLI tools.
 | ☑      | **todowrite**   | Create and update task or todo lists.                   |
 | ☑      | **webfetch**    | Fetch and extract content from a specific URL.          |
 | ☑      | **websearch**   | Search the web for information.                         |
-| ☐      | **question**    | Prompt the user for additional input or clarification.  |
+| ☑      | **question**    | Prompt the user for additional input or clarification.  |
 
 ## Legend
 
