@@ -5,6 +5,7 @@ import {
   type OAuthCredentials,
   type ProviderCredentials,
 } from '@core/ports/provider-catalog';
+import { withModelsCache } from '@providers/http/models-cache';
 import { createTokenProvider } from '@runtime/auth/token-provider';
 import type { AppConfig } from '@runtime/config/app-config';
 import {
@@ -38,7 +39,12 @@ export class ProviderRegistry {
       );
     }
 
-    return entry.create(credentials);
+    // Serve remote providers' model lists from the once-a-day on-disk cache so
+    // startup doesn't refetch every provider's catalog. Local providers
+    // (Ollama/LM Studio) opt out and always refetch.
+    return withModelsCache(entry.create(credentials), {
+      local: entry.local ?? false,
+    });
   }
 
   /** Persists refreshed OAuth credentials back into config.json. */

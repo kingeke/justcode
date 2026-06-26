@@ -8,7 +8,7 @@ This document tracks the issues so far.
 - model caching per provider not to call all providers at once, also add refresh on the connect screen for connected providers, and new command to refresh all providers
 - switch key.name from string to enum
 - add reset command to wipe app to defaults
-- ability to list a file with the necessary method
+- ability to list a file with the necessary method, like reports.repository.ts::findMultipleBoq
 
 # Instruction
 
