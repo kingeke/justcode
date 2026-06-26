@@ -37,7 +37,12 @@ export interface AnthropicProviderOptions {
 }
 
 interface AnthropicModelsResponse {
-  data?: Array<{ id: string; display_name?: string }>;
+  data?: Array<{
+    id: string;
+    display_name?: string;
+    /** Context window size; the model picker shows this as "ctx". */
+    max_input_tokens?: number;
+  }>;
 }
 
 interface AnthropicMessageResponse {
@@ -66,6 +71,10 @@ export class AnthropicProvider implements ProviderClient {
     const body = {
       model: request.model,
       max_tokens: DEFAULT_MAX_TOKENS,
+      // Anthropic-only prompt caching: the top-level breakpoint auto-caches the
+      // last cacheable block (the prefix shared across the agentic loop). Other
+      // providers don't accept this field — applied here only.
+      cache_control: { type: 'ephemeral' as const },
       ...(this.buildSystem(system) ? { system: this.buildSystem(system) } : {}),
       messages,
       ...(tools ? { tools } : {}),
@@ -123,6 +132,9 @@ export class AnthropicProvider implements ProviderClient {
           id: model.id,
           displayName: model.display_name ?? model.id,
           providerId: this.providerId,
+          ...(model.max_input_tokens != null
+            ? { contextWindow: model.max_input_tokens }
+            : {}),
         };
       })
       .sort((left, right) => right.id.localeCompare(left.id));

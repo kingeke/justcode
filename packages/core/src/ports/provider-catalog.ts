@@ -66,6 +66,12 @@ export interface ProviderCatalogEntry {
   baseUrlEnvVar?: string;
   /** Auth methods this provider accepts. Defaults to API key only. */
   authMethods?: AuthMethod[];
+  /**
+   * True for providers that run on the user's own machine (Ollama, LM Studio).
+   * Used to label models as "local" rather than inferring it from the absence
+   * of pricing/OAuth, which misclassifies hosted API-key providers.
+   */
+  local?: boolean;
   /** Extracts this provider's credentials from the saved app config. */
   credentialsFromConfig: (config: AppConfig) => ProviderCredentials;
   /** Constructs the concrete client from a set of credentials. */
@@ -133,12 +139,18 @@ export const PROVIDERS = [
   {
     id: ProviderId.Anthropic,
     name: 'Anthropic',
-    description: 'Claude models (API key or Claude Pro/Max sign-in)',
+    description: 'Claude models (API key)',
     apiKeyRequired: true,
     apiKeyEnvVar: 'ANTHROPIC_API_KEY',
     baseUrl: 'https://api.anthropic.com',
     baseUrlEnvVar: 'ANTHROPIC_BASE_URL',
-    authMethods: ['oauth', 'apiKey'],
+    // Subscription (Pro/Max) OAuth is intentionally disabled: as of Jan 2026
+    // Anthropic rejects Claude subscription OAuth tokens used outside the
+    // official Claude Code client ("This credential is only authorized for use
+    // with Claude Code") and may restrict the account. The OAuth flow code is
+    // kept in @runtime/auth/anthropic-oauth in case the policy changes; to
+    // re-enable, restore 'oauth' here.
+    authMethods: ['apiKey'],
     credentialsFromConfig: (config) => ({
       apiKey: config.anthropic.apiKey,
       baseUrl: config.anthropic.baseUrl,
@@ -208,6 +220,7 @@ export const PROVIDERS = [
     id: ProviderId.Ollama,
     name: 'Ollama',
     description: 'Local OpenAI-compatible server',
+    local: true,
     apiKeyRequired: false,
     apiKeyEnvVar: 'OLLAMA_API_KEY',
     baseUrl: 'http://127.0.0.1:11434',
@@ -223,6 +236,7 @@ export const PROVIDERS = [
     id: ProviderId.LmStudio,
     name: 'LM Studio',
     description: 'Local OpenAI-compatible server',
+    local: true,
     apiKeyRequired: false,
     apiKeyEnvVar: 'LMSTUDIO_API_KEY',
     baseUrl: 'http://127.0.0.1:1234/v1',

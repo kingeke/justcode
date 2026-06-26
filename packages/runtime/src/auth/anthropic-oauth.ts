@@ -27,17 +27,25 @@ export class AnthropicOAuthFlow implements OAuthFlow {
 
     const pkce = createPkcePair();
     const state = createState();
-    const authorizeUrl = new URL(ANTHROPIC_OAUTH.authorizeUrl);
-    authorizeUrl.searchParams.set('code', 'true');
-    authorizeUrl.searchParams.set('client_id', ANTHROPIC_OAUTH.clientId);
-    authorizeUrl.searchParams.set('response_type', 'code');
-    authorizeUrl.searchParams.set('redirect_uri', ANTHROPIC_OAUTH.redirectUri);
-    authorizeUrl.searchParams.set('scope', ANTHROPIC_OAUTH.scope);
-    authorizeUrl.searchParams.set('state', state);
-    authorizeUrl.searchParams.set('code_challenge', pkce.challenge);
-    authorizeUrl.searchParams.set('code_challenge_method', 'S256');
+    // Build the query with encodeURIComponent (which encodes spaces as %20)
+    // rather than URLSearchParams (which uses `+`). Anthropic's authorize
+    // endpoint parses `+` in the multi-value `scope` as a literal plus, not a
+    // space separator, and rejects the request as "Invalid request format".
+    const query = Object.entries({
+      code: 'true',
+      client_id: ANTHROPIC_OAUTH.clientId,
+      response_type: 'code',
+      redirect_uri: ANTHROPIC_OAUTH.redirectUri,
+      scope: ANTHROPIC_OAUTH.scope,
+      state,
+      code_challenge: pkce.challenge,
+      code_challenge_method: 'S256',
+    })
+      .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+      .join('&');
+    const authorizeUrl = `${ANTHROPIC_OAUTH.authorizeUrl}?${query}`;
 
-    await context.openUrl(authorizeUrl.toString());
+    await context.openUrl(authorizeUrl);
     context.notify(
       'Opened claude.ai to sign in. Approve access, then paste the code shown.'
     );

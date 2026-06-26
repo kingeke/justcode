@@ -127,6 +127,12 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
   const [error, setError] = useState<string | null>(null);
   const [authMethodIndex, setAuthMethodIndex] = useState(0);
   const [oauthStatus, setOauthStatus] = useState('');
+  // When an OAuth flow asks the user to paste a value (e.g. Anthropic's
+  // authorization code), we render an input during the oauth-connect step and
+  // resolve the flow's promptInput promise once the user submits.
+  const [codePrompt, setCodePrompt] = useState<{ label: string } | null>(null);
+  const [codeInput, setCodeInput] = useState('');
+  const codeResolverRef = useRef<((value: string) => void) | null>(null);
   const scrollOffsetRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   let field: InputRenderable | null | undefined;
@@ -191,6 +197,9 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
     if (step === 'oauth-connect') {
       if (isBack) {
         abortRef.current?.abort();
+        codeResolverRef.current = null;
+        setCodePrompt(null);
+        setCodeInput('');
         setError(null);
         setStep('provider');
       }
@@ -349,7 +358,9 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
             : step === 'auth-method'
               ? 'enter to select · esc to go back'
               : step === 'oauth-connect'
-                ? 'esc to cancel'
+                ? codePrompt
+                  ? 'enter to submit · esc to cancel'
+                  : 'esc to cancel'
                 : step === 'connecting'
                   ? 'fetching models...'
                   : 'enter to continue · esc to go back'}
@@ -427,10 +438,48 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
         </box>
       ) : step === 'oauth-connect' ? (
         <box flexDirection="column">
-          <box flexDirection="row">
-            <Spinner fg="cyan" />
-            <text fg={MUTED}> {oauthStatus || 'Opening browser...'}</text>
-          </box>
+          {codePrompt ? (
+            <box flexDirection="column">
+              <text fg={MUTED}>
+                {oauthStatus ||
+                  'Approve access in the browser, then paste the code shown.'}
+              </text>
+              <box marginTop={1} flexDirection="row">
+                <text fg={MUTED}>{codePrompt.label}&gt; </text>
+                <input
+                  width="100%"
+                  value={codeInput}
+                  placeholder="paste code..."
+                  placeholderColor={MUTED}
+                  textColor="white"
+                  focusedTextColor="white"
+                  backgroundColor="transparent"
+                  focusedBackgroundColor="transparent"
+                  cursorColor="white"
+                  focused
+                  onInput={(nextValue) => setCodeInput(nextValue)}
+                  onSubmit={() => {
+                    const resolve = codeResolverRef.current;
+                    const value = codeInput.trim();
+                    if (!value) {
+                      setError('A code is required.');
+                      return;
+                    }
+                    codeResolverRef.current = null;
+                    setError(null);
+                    setCodePrompt(null);
+                    setOauthStatus('Completing sign-in...');
+                    resolve?.(value);
+                  }}
+                />
+              </box>
+            </box>
+          ) : (
+            <box flexDirection="row">
+              <Spinner fg="cyan" />
+              <text fg={MUTED}> {oauthStatus || 'Opening browser...'}</text>
+            </box>
+          )}
           {error ? (
             <box marginTop={1}>
               <text fg="yellow">{error}</text>
@@ -647,6 +696,12 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       const oauthCreds = await flow.login({
         openUrl: openBrowser,
         notify: (msg) => setOauthStatus(msg),
+        promptInput: (label) =>
+          new Promise<string>((resolve) => {
+            codeResolverRef.current = resolve;
+            setCodeInput('');
+            setCodePrompt({ label });
+          }),
         signal,
       });
 
