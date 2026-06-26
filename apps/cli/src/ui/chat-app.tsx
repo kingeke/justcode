@@ -103,15 +103,6 @@ interface PendingApproval {
   resolve: (approved: boolean) => void;
 }
 
-interface ToolEvent {
-  key: number;
-  toolName: string;
-  title: string;
-  status: 'running' | 'done' | 'error';
-  /** Pre-rendered, colored diff for file-changing tools (if any). */
-  diff?: string;
-}
-
 const MAX_PREVIEW_LINES = 16;
 const EXIT_HINT = 'Press Ctrl+C again to exit';
 const EXIT_WINDOW_MS = 2000;
@@ -363,7 +354,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setStreamingContent('');
     setStreamingThinking('');
     setThinkingDuration(null);
-    setToolEvents([]);
+    setLiveToolDiffs({});
     setMessageThinking({});
     streamingBufferRef.current = '';
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
@@ -375,6 +366,23 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const [activityTick, setActivityTick] = useState(0);
   const [streamingContent, setStreamingContent] = useState<string>('');
   const streamingBufferRef = useRef('');
+
+  // Commit whatever assistant prose has streamed so far as an inline message,
+  // then clear the live buffer. Called before each tool starts so the text that
+  // preceded the tool keeps its place in the transcript (text → tool → text …)
+  // instead of being dropped or rendered after the tool. The real messages
+  // replace these optimistic ones when the turn commits.
+  const flushStreamedText = useCallback((): void => {
+    const text = streamingBufferRef.current;
+    streamingBufferRef.current = '';
+    setStreamingContent('');
+    if (!text.trim()) return;
+    setConversation((prev) =>
+      prev
+        ? { ...prev, messages: [...prev.messages, createMessage('assistant', text)] }
+        : prev
+    );
+  }, []);
   const [streamingThinking, setStreamingThinking] = useState<string>('');
   const [thinkingDuration, setThinkingDuration] = useState<number | null>(null);
   const thinkingRef = useRef<{
@@ -411,11 +419,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   );
   const [pendingApproval, setPendingApproval] =
     useState<PendingApproval | null>(null);
-  const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
-  const toolEventKeyRef = useRef(0);
-  // The synthetic tool-call id of the bash command currently running, so its
-  // optimistic placeholder message can be filled in when the call finishes.
-  const liveBashCallRef = useRef<string | null>(null);
+  // Rendered diffs for live file-changing tool calls, keyed by tool-call id, so
+  // the diff shows inline in place while the call runs.
+  const [liveToolDiffs, setLiveToolDiffs] = useState<Record<string, string>>(
+    {}
+  );
   // Index into the finished bash rows while browsing them with the keyboard;
   // null means we're not browsing (the prompt has focus as usual).
   const [browseIndex, setBrowseIndex] = useState<number | null>(null);
@@ -1184,7 +1192,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setStreamingContent('');
     setStreamingThinking('');
     setThinkingDuration(null);
-    setToolEvents([]);
+    setLiveToolDiffs({});
     setBrowseIndex(null);
     streamingBufferRef.current = '';
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
@@ -1214,133 +1222,69 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
     const onToolActivity = (event: ToolActivityEvent): void => {
       if (event.phase === 'start') {
-        // A tool is running; drop the streamed preamble (text + thinking) so it
-        // doesn't render out of order below the tool. Thinking is preserved in
-        // thinkingRef and re-anchored to the turn's first message at the end.
-        streamingBufferRef.current = '';
-        setStreamingContent('');
+        // Preserve transcript order: commit the prose that streamed before this
+        // tool as an inline message, and stop the live thinking indicator.
+        flushStreamedText();
         setStreamingThinking('');
 
-        if (event.toolName === 'bash') {
-          // Splice an optimistic assistant(tool call) + tool(running) pair into
-          // the displayed transcript so the box renders in place immediately,
-          // not in a trailing block. The real messages replace these when the
-          // turn commits (see the success path's setConversation).
-          const callId = `live-${(toolEventKeyRef.current += 1)}`;
-          liveBashCallRef.current = callId;
-          const command = event.view.preview ?? '';
-          setConversation((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  messages: [
-                    ...prev.messages,
-                    createMessage('assistant', '', new Date(), undefined, {
-                      toolCalls: [
-                        {
-                          id: callId,
-                          name: 'bash',
-                          arguments: JSON.stringify({ command }),
-                        },
-                      ],
-                    }),
-                    // Empty content marks it as still running (a finished call
-                    // always has non-empty content, e.g. "(no output)").
-                    createMessage('tool', '', new Date(), undefined, {
-                      toolCallId: callId,
-                      name: 'bash',
-                    }),
-                  ],
-                }
-              : prev
-          );
-          return;
+        const callId = event.toolCallId;
+        // Stash the rendered diff (file tools) so it shows inline in place.
+        if (event.view.diff) {
+          const rendered = renderDiff(event.view.diff);
+          setLiveToolDiffs((prev) => ({ ...prev, [callId]: rendered }));
         }
 
-        if (event.toolName === 'todowrite') {
-          // Splice an optimistic todowrite call/result pair into the transcript
-          // so the checklist renders inline at this point in the turn (and the
-          // progression stays visible as later calls add more). The list text
-          // is known now (describe() rendered it into the view preview), so —
-          // unlike bash — there's nothing to fill in on 'end'. The real
-          // messages replace these when the turn commits.
-          const callId = `live-${(toolEventKeyRef.current += 1)}`;
-          const list = event.view.preview ?? '';
-          setConversation((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  messages: [
-                    ...prev.messages,
-                    createMessage('assistant', '', new Date(), undefined, {
-                      toolCalls: [
-                        { id: callId, name: 'todowrite', arguments: '' },
-                      ],
-                    }),
-                    createMessage('tool', list, new Date(), undefined, {
-                      toolCallId: callId,
-                      name: 'todowrite',
-                    }),
-                  ],
-                }
-              : prev
-          );
-          return;
-        }
-
-        // Non-bash tools (file writes/edits) keep the live bottom indicator:
-        // their diff preview isn't stored on the conversation message.
-        const key = (toolEventKeyRef.current += 1);
-        setToolEvents((prev) => [
-          ...prev,
-          {
-            key,
-            toolName: event.toolName,
-            title: event.view.title,
-            status: 'running',
-            ...(event.view.diff ? { diff: renderDiff(event.view.diff) } : {}),
-          },
-        ]);
-        return;
-      }
-
-      if (event.toolName === 'bash') {
-        const callId = liveBashCallRef.current;
-        liveBashCallRef.current = null;
-        if (!callId) return;
-        const content = event.result?.content || '(no output)';
+        // Splice an optimistic assistant(tool call) + tool(running) pair so the
+        // tool renders in place immediately rather than in a trailing block.
+        // todowrite already knows its full text (describe rendered it into the
+        // preview), so show it now; every other tool shows empty (= running)
+        // until its 'end' fills the result. The real messages replace these
+        // optimistic ones when the turn commits.
+        const initialContent =
+          event.toolName === 'todowrite' ? (event.view.preview ?? '') : '';
         setConversation((prev) =>
           prev
             ? {
                 ...prev,
-                messages: prev.messages.map((message) =>
-                  message.role === 'tool' && message.toolCallId === callId
-                    ? { ...message, content }
-                    : message
-                ),
+                messages: [
+                  ...prev.messages,
+                  createMessage('assistant', '', new Date(), undefined, {
+                    toolCalls: [
+                      {
+                        id: callId,
+                        name: event.toolName,
+                        arguments: event.arguments,
+                      },
+                    ],
+                  }),
+                  createMessage('tool', initialContent, new Date(), undefined, {
+                    toolCallId: callId,
+                    name: event.toolName,
+                  }),
+                ],
               }
             : prev
         );
         return;
       }
 
-      // todowrite has no transient indicator; its panel updated on 'start'.
-      if (event.toolName === 'todowrite') return;
-
-      setToolEvents((prev) => {
-        const next = [...prev];
-        for (let index = next.length - 1; index >= 0; index -= 1) {
-          const entry = next[index];
-          if (entry?.status === 'running') {
-            next[index] = {
-              ...entry,
-              status: event.result?.isError ? 'error' : 'done',
-            };
-            break;
-          }
-        }
-        return next;
-      });
+      // phase === 'end': fill the optimistic result in place with the output.
+      // An empty result reads as "running", so bash-style "(no output)" keeps a
+      // finished call visibly done.
+      const callId = event.toolCallId;
+      const content = event.result?.content || '(no output)';
+      setConversation((prev) =>
+        prev
+          ? {
+              ...prev,
+              messages: prev.messages.map((message) =>
+                message.role === 'tool' && message.toolCallId === callId
+                  ? { ...message, content }
+                  : message
+              ),
+            }
+          : prev
+      );
     };
 
     try {
@@ -1554,10 +1498,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         setStatus('Request failed');
       }
     } finally {
-      // The live tool boxes are only an in-flight indicator; once the turn is
-      // done the finished conversation renders every tool call inline, in order.
-      setToolEvents([]);
-      liveBashCallRef.current = null;
+      // Live diffs are only an in-flight overlay; once the turn commits the
+      // finished conversation renders every tool call inline, in order.
+      setLiveToolDiffs({});
       setIsSending(false);
       activeRequestControllerRef.current = null;
     }
@@ -1726,10 +1669,22 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                   ) : message.name === 'todowrite' ? (
                     <TodoBlock content={message.content} />
                   ) : (
-                    <ToolResultBlock
-                      content={message.content}
-                      expanded={expandTools}
-                    />
+                    <box flexDirection="column">
+                      {message.toolCallId &&
+                      liveToolDiffs[message.toolCallId] ? (
+                        <box marginLeft={2}>
+                          <text
+                            content={ansiToStyledText(
+                              liveToolDiffs[message.toolCallId] ?? ''
+                            )}
+                          />
+                        </box>
+                      ) : null}
+                      <ToolResultBlock
+                        content={message.content}
+                        expanded={expandTools}
+                      />
+                    </box>
                   )
                 ) : (
                   <text
@@ -1769,35 +1724,6 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             {streamingContent ? (
               <MarkdownView content={streamingContent} streaming />
             ) : null}
-          </box>
-        ) : null}
-        {toolEvents.length ? (
-          <box flexDirection="column" marginTop={1}>
-            {toolEvents.map((event) => (
-              <box key={event.key} flexDirection="column">
-                <text
-                  fg={
-                    event.status === 'error'
-                      ? 'red'
-                      : event.status === 'done'
-                        ? 'green'
-                        : 'yellow'
-                  }
-                >
-                  {event.status === 'running'
-                    ? '⚙ '
-                    : event.status === 'done'
-                      ? '✓ '
-                      : '✗ '}
-                  {event.title}
-                </text>
-                {event.diff ? (
-                  <box marginLeft={2}>
-                    <text content={ansiToStyledText(event.diff)} />
-                  </box>
-                ) : null}
-              </box>
-            ))}
           </box>
         ) : null}
         {pendingApproval ? (
@@ -2152,6 +2078,11 @@ function ToolResultBlock({
   content: string;
   expanded: boolean;
 }): React.ReactNode {
+  // Empty content means the call hasn't finished (a finished call always has
+  // non-empty content, e.g. "(no output)").
+  if (content === '') {
+    return <text fg={MUTED}>{'  ↳ running…'}</text>;
+  }
   if (!expanded) {
     return (
       <text fg={MUTED}>

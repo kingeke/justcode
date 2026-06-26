@@ -56,6 +56,10 @@ export interface ToolApprovalRequest extends ToolInvocationView {
 export interface ToolActivityEvent {
   phase: 'start' | 'end';
   toolName: string;
+  /** The tool call's id, so the UI can match a `start` event to its `end`. */
+  toolCallId: string;
+  /** Raw JSON arguments of the call, so the UI can render it faithfully. */
+  arguments: string;
   view: ToolInvocationView;
   result?: ToolResult;
 }
@@ -292,7 +296,13 @@ export class ChatSessionService {
       workspaceRoot: this.workspaceRoot,
       ...(input.signal ? { signal: input.signal } : {}),
     });
-    input.onToolActivity?.({ phase: 'start', toolName: call.name, view });
+    input.onToolActivity?.({
+      phase: 'start',
+      toolName: call.name,
+      toolCallId: call.id,
+      arguments: call.arguments,
+      view,
+    });
 
     let result: ToolResult;
     const approved = await this.resolveApproval(tool, view, call, input);
@@ -317,7 +327,14 @@ export class ChatSessionService {
       }
     }
 
-    input.onToolActivity?.({ phase: 'end', toolName: call.name, view, result });
+    input.onToolActivity?.({
+      phase: 'end',
+      toolName: call.name,
+      toolCallId: call.id,
+      arguments: call.arguments,
+      view,
+      result,
+    });
     return result;
   }
 
