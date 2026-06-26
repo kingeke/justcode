@@ -11,7 +11,7 @@ This document tracks the implementation status of CLI tools.
 | ☑      | **grep**        | Search file contents using text or regular expressions. |
 | ☑      | **glob**        | Find files using glob patterns.                         |
 | ☑      | **apply_patch** | Apply unified diff patches to files.                    |
-| ☐      | **todowrite**   | Create and update task or todo lists.                   |
+| ☑      | **todowrite**   | Create and update task or todo lists.                   |
 | ☐      | **webfetch**    | Fetch and extract content from a specific URL.          |
 | ☐      | **websearch**   | Search the web for information.                         |
 | ☐      | **question**    | Prompt the user for additional input or clarification.  |

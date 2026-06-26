@@ -1,5 +1,6 @@
 import { Command, type OptionValues } from 'commander';
 import React from 'react';
+import { version as appVersion } from '../../../../package.json';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { ProviderId } from '@core/ports/provider-catalog';
@@ -160,6 +161,7 @@ async function runChat(options: SharedOptions): Promise<void> {
   createRoot(renderer).render(
     React.createElement(ChatApp, {
       onExit: exit,
+      version: appVersion,
       providerId: runtime.providerId,
       savedConfig,
       configFilePath: join(appConfig.configDirectory, 'config.json'),

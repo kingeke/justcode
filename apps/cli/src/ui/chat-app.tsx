@@ -74,6 +74,8 @@ const MUTED = '#8a8a8a';
 interface ChatAppProps {
   /** Exits the app (tears down the OpenTUI renderer). */
   onExit: () => void;
+  /** App version, shown next to the title (e.g. "0.1.0"). */
+  version: string;
   /** Active provider, or undefined when nothing is connected yet. */
   providerId: ProviderId | undefined;
   savedConfig: GlobalConfig;
@@ -1255,6 +1257,37 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           return;
         }
 
+        if (event.toolName === 'todowrite') {
+          // Splice an optimistic todowrite call/result pair into the transcript
+          // so the checklist renders inline at this point in the turn (and the
+          // progression stays visible as later calls add more). The list text
+          // is known now (describe() rendered it into the view preview), so —
+          // unlike bash — there's nothing to fill in on 'end'. The real
+          // messages replace these when the turn commits.
+          const callId = `live-${(toolEventKeyRef.current += 1)}`;
+          const list = event.view.preview ?? '';
+          setConversation((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  messages: [
+                    ...prev.messages,
+                    createMessage('assistant', '', new Date(), undefined, {
+                      toolCalls: [
+                        { id: callId, name: 'todowrite', arguments: '' },
+                      ],
+                    }),
+                    createMessage('tool', list, new Date(), undefined, {
+                      toolCallId: callId,
+                      name: 'todowrite',
+                    }),
+                  ],
+                }
+              : prev
+          );
+          return;
+        }
+
         // Non-bash tools (file writes/edits) keep the live bottom indicator:
         // their diff preview isn't stored on the conversation message.
         const key = (toolEventKeyRef.current += 1);
@@ -1290,6 +1323,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         );
         return;
       }
+
+      // todowrite has no transient indicator; its panel updated on 'start'.
+      if (event.toolName === 'todowrite') return;
 
       setToolEvents((prev) => {
         const next = [...prev];
@@ -1592,9 +1628,15 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       padding={1}
     >
       <box flexDirection="column" flexShrink={0}>
-        <text fg="cyan" flexShrink={0}>
-          JustCode
-        </text>
+        <text
+          flexShrink={0}
+          content={
+            new StyledText([
+              tc('JustCode ', { fg: 'cyan' }),
+              tc(`v${props.version}`, { fg: MUTED }),
+            ])
+          }
+        />
         <text fg={MUTED} flexShrink={0}>
           Provider: {activeProviderId} | Session: {currentSessionLabel}
         </text>
@@ -1653,10 +1695,13 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     !(thinking && message.toolCalls?.length) ? (
                       <MarkdownView content={message.content} />
                     ) : null}
-                    {/* bash calls are shown by their result box below, so skip
+                    {/* bash and todowrite render their own boxes below, so skip
                         them here to avoid a redundant ⚙ line. */}
                     {message.toolCalls
-                      ?.filter((call) => call.name !== 'bash')
+                      ?.filter(
+                        (call) =>
+                          call.name !== 'bash' && call.name !== 'todowrite'
+                      )
                       .map((call) => (
                         <text key={call.id} fg="magenta">
                           ⚙ {call.name}({summarizeToolArgs(call.arguments)})
@@ -1678,11 +1723,13 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                       expanded={expandTools}
                       selected={message.id === selectedBashId}
                     />
+                  ) : message.name === 'todowrite' ? (
+                    <TodoBlock content={message.content} />
                   ) : (
-                    <text fg={MUTED}>
-                      {'  ↳ '}
-                      {firstLine(message.content)}
-                    </text>
+                    <ToolResultBlock
+                      content={message.content}
+                      expanded={expandTools}
+                    />
                   )
                 ) : (
                   <text
@@ -2092,6 +2139,41 @@ function BashResult({
   );
 }
 
+/**
+ * Inline transcript rendering of a non-bash tool result. Mirrors bash: when
+ * /expand-tools is on, the full result is shown in a box (capped like bash);
+ * otherwise it collapses to a one-line `↳` summary. The tool name + arguments
+ * are already shown by the assistant message's `⚙` line above this.
+ */
+function ToolResultBlock({
+  content,
+  expanded,
+}: {
+  content: string;
+  expanded: boolean;
+}): React.ReactNode {
+  if (!expanded) {
+    return (
+      <text fg={MUTED}>
+        {'  ↳ '}
+        {firstLine(content)}
+      </text>
+    );
+  }
+  return (
+    <box
+      flexDirection="column"
+      marginLeft={2}
+      border
+      borderStyle="rounded"
+      borderColor="gray"
+      paddingX={1}
+    >
+      <text content={ansiToStyledText(truncatePreview(content))} />
+    </box>
+  );
+}
+
 function bashCommandFromArgs(rawArguments: string | undefined): string {
   if (!rawArguments) return '';
   try {
@@ -2192,6 +2274,55 @@ function firstLine(content: string): string {
 
 function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+/** Color a rendered todo line by its status marker ([x] done, [~] active). */
+function todoLineColor(line: string): string {
+  const trimmed = line.trimStart();
+  if (trimmed.startsWith('[x]')) return 'green';
+  if (trimmed.startsWith('[~]')) return 'yellow';
+  return MUTED;
+}
+
+/**
+ * Inline transcript rendering of a todowrite call: the checklist, one line per
+ * item, colored by status. Tolerates both the optimistic content (bare marker
+ * lines) and the committed tool result (which prefixes an "Updated todo list:"
+ * header) by rendering only the lines that carry a status marker.
+ */
+function TodoBlock({ content }: { content: string }): React.ReactNode {
+  const lines = content
+    .split('\n')
+    .filter((line) => /^\s*\[[ x~]\]/.test(line));
+
+  if (lines.length === 0) {
+    return (
+      <text fg={MUTED}>
+        {'  ↳ '}
+        {firstLine(content)}
+      </text>
+    );
+  }
+
+  return (
+    <box
+      flexDirection="column"
+      marginY={1}
+      border={['left']}
+      borderStyle="rounded"
+      borderColor={MUTED}
+      paddingLeft={1}
+    >
+      <text fg={MUTED} attributes={BOLD}>
+        Todos
+      </text>
+      {lines.map((line, index) => (
+        <text key={index} fg={todoLineColor(line)}>
+          {line}
+        </text>
+      ))}
+    </box>
+  );
 }
 
 function truncatePreview(preview: string): string {
