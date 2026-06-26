@@ -10,6 +10,32 @@ interface OpenAiTokenResponse {
   access_token: string;
   refresh_token?: string;
   expires_in?: number;
+  /** JWT carrying the ChatGPT account id under the OpenAI auth claim. */
+  id_token?: string;
+}
+
+/**
+ * Pulls the ChatGPT account id out of the OAuth `id_token`. The Codex backend
+ * requires it as a `chatgpt-account-id` header on every request; without it the
+ * Responses API returns 401. Returns undefined if the token can't be decoded
+ * (e.g. a refresh response that omits the id_token) so callers can fall back to
+ * the previously-stored value.
+ */
+function extractChatGptAccountId(
+  idToken: string | undefined
+): string | undefined {
+  if (!idToken) return undefined;
+  const payload = idToken.split('.')[1];
+  if (!payload) return undefined;
+  try {
+    const json = Buffer.from(payload, 'base64url').toString('utf8');
+    const claims = JSON.parse(json) as {
+      'https://api.openai.com/auth'?: { chatgpt_account_id?: string };
+    };
+    return claims['https://api.openai.com/auth']?.chatgpt_account_id;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -71,15 +97,21 @@ export class OpenAiOAuthFlow implements OAuthFlow {
     if (!credentials.refreshToken) {
       throw new Error('Cannot refresh OpenAI token: no refresh token.');
     }
-    return this.exchange({
-      grant_type: 'refresh_token',
-      refresh_token: credentials.refreshToken,
-      scope: OPENAI_OAUTH.scope,
-    });
+    // Carry the existing `extra` (endpoint + account id) forward in case the
+    // refresh response omits a fresh id_token.
+    return this.exchange(
+      {
+        grant_type: 'refresh_token',
+        refresh_token: credentials.refreshToken,
+        scope: OPENAI_OAUTH.scope,
+      },
+      credentials.extra
+    );
   }
 
   private async exchange(
-    body: Record<string, string>
+    body: Record<string, string>,
+    previousExtra?: Record<string, string>
   ): Promise<OAuthCredentials> {
     const response = await fetch(OPENAI_OAUTH.tokenUrl, {
       method: 'POST',
@@ -122,12 +154,22 @@ export class OpenAiOAuthFlow implements OAuthFlow {
         body: token,
       },
     });
+    const chatgptAccountId =
+      extractChatGptAccountId(token.id_token) ??
+      previousExtra?.chatgptAccountId;
+
     return {
       accessToken: token.access_token,
       refreshToken: token.refresh_token,
       expiresAt: token.expires_in
         ? Date.now() + token.expires_in * 1000
         : undefined,
+      // Persisted so the registry/connect flow can route to the Codex backend
+      // and attach the account-id header on every request and across restarts.
+      extra: {
+        endpoint: OPENAI_OAUTH.codexBaseUrl,
+        ...(chatgptAccountId ? { chatgptAccountId } : {}),
+      },
     };
   }
 }

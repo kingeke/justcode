@@ -236,6 +236,10 @@ export async function requestSseStream(
   let buffer = '';
   const usage: SseUsage = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
   const toolCalls = new ToolCallAccumulator();
+  // Accumulated only so the debug log captures the full streamed reply; the
+  // tokens themselves are delivered live via onToken/onThinkingToken.
+  let content = '';
+  let reasoning = '';
 
   while (true) {
     const { done, value } = await reader.read();
@@ -253,7 +257,12 @@ export async function requestSseStream(
         const result = { usage, toolCalls: toolCalls.toToolCalls() };
         await logRequestResponse({
           request,
-          response: { url, status: response.status, ok: true, body: result },
+          response: {
+            url,
+            status: response.status,
+            ok: true,
+            body: { ...result, content, ...(reasoning ? { reasoning } : {}) },
+          },
         });
         return result;
       }
@@ -280,13 +289,15 @@ export async function requestSseStream(
           };
         };
         const delta = parsed.choices?.[0]?.delta;
-        const content = delta?.content;
+        const deltaContent = delta?.content;
         const thinking = delta?.reasoning ?? delta?.reasoning_content;
-        if (content) {
-          onToken(content);
+        if (deltaContent) {
+          content += deltaContent;
+          onToken(deltaContent);
         }
-        if (thinking && onThinkingToken) {
-          onThinkingToken(thinking);
+        if (thinking) {
+          reasoning += thinking;
+          if (onThinkingToken) onThinkingToken(thinking);
         }
         toolCalls.addDelta(delta?.tool_calls);
         if (parsed.usage) {
@@ -307,7 +318,12 @@ export async function requestSseStream(
   const result = { usage, toolCalls: toolCalls.toToolCalls() };
   await logRequestResponse({
     request,
-    response: { url, status: response.status, ok: true, body: result },
+    response: {
+      url,
+      status: response.status,
+      ok: true,
+      body: { ...result, content, ...(reasoning ? { reasoning } : {}) },
+    },
   });
   return result;
 }

@@ -29,7 +29,20 @@ export const OPENAI_OAUTH = {
   redirectPath: '/auth/callback',
   /** Redirect URI must use localhost (not 127.0.0.1) — OpenAI does exact string matching. */
   redirectHost: 'localhost',
+  /**
+   * The ChatGPT login only grants ChatGPT-account scopes — it deliberately does
+   * NOT request `api.*` scopes. The resulting token cannot call the platform API
+   * (`api.openai.com/v1/*`); it only works against the Codex backend
+   * ({@link codexBaseUrl}) via the Responses API. Adding `api.model.read` etc.
+   * here does nothing — OpenAI ignores unauthorized scopes for this client.
+   */
   scope: 'openid profile email offline_access',
+  /**
+   * Codex backend that accepts ChatGPT-subscription tokens. Chat goes to
+   * `${codexBaseUrl}/responses` (Responses API) with a `chatgpt-account-id`
+   * header — not the public `api.openai.com` Chat Completions API.
+   */
+  codexBaseUrl: 'https://chatgpt.com/backend-api/codex',
 } as const;
 
 export const GITHUB_COPILOT_OAUTH = {

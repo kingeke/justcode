@@ -344,11 +344,11 @@ function formatModelMeta(model: ModelInfo): string {
   if (!model.pricing) {
     // Only label as "local" for providers that are actually running locally
     // (no authMethods = api-key-only local servers like Ollama/LM Studio).
-    // OAuth-only subscription providers (e.g. Copilot) have no per-request
-    // pricing by design — "local" would be misleading there.
+    // Any provider that can sign in via OAuth is a hosted subscription provider
+    // (Copilot, or OpenAI/Anthropic connected via subscription) and has no
+    // per-request pricing by design — "local" would be misleading there.
     const entry = PROVIDER_BY_ID[model.providerId];
-    const isSubscription =
-      entry?.authMethods?.length === 1 && entry.authMethods[0] === 'oauth';
+    const isSubscription = entry?.authMethods?.includes('oauth') ?? false;
     if (!isSubscription) {
       parts.push('local');
     }

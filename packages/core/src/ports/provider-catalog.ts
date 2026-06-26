@@ -5,6 +5,7 @@ import { AnthropicProvider } from '@providers/anthropic/anthropic-provider';
 import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
 import { OllamaProvider } from '@providers/ollama/ollama-provider';
 import { OpenAiProvider } from '@providers/openai/openai-provider';
+import { OpenAiResponsesProvider } from '@providers/openai/openai-responses-provider';
 import { OpenAiCompatibleProvider } from '@providers/openai-compatible/openai-compatible-provider';
 import { OpenRouterProvider } from '@providers/openrouter/openrouter-provider';
 import type { AppConfig } from '@runtime/config/app-config';
@@ -105,17 +106,29 @@ export const PROVIDERS = [
     authMethods: ['apiKey', 'oauth'],
     credentialsFromConfig: (config) => ({
       apiKey: config.openai.apiKey,
-      baseUrl: config.openai.baseUrl,
+      // ChatGPT sign-in routes to the Codex backend (stored in oauth.extra);
+      // API-key auth uses the standard platform base URL.
+      baseUrl: config.openai.oauth?.extra?.endpoint ?? config.openai.baseUrl,
       defaultModel: config.openai.defaultModel,
       oauth: config.openai.oauth,
     }),
-    create: (credentials) =>
-      new OpenAiProvider(
+    create: (credentials) => {
+      // ChatGPT-subscription tokens can't use the platform API — they only work
+      // against the Codex Responses API. Pick the provider by auth method.
+      if (credentials.oauth && credentials.getAccessToken) {
+        return new OpenAiResponsesProvider({
+          baseUrl: credentials.baseUrl,
+          chatgptAccountId: credentials.oauth.extra?.chatgptAccountId,
+          getAccessToken: credentials.getAccessToken,
+          defaultModel: credentials.defaultModel,
+        });
+      }
+      return new OpenAiProvider(
         credentials.apiKey ?? '',
         credentials.baseUrl,
-        credentials.defaultModel ?? 'gpt-4.1-mini',
-        credentials.getAccessToken
-      ),
+        credentials.defaultModel ?? 'gpt-4.1-mini'
+      );
+    },
   },
   {
     id: ProviderId.Anthropic,
