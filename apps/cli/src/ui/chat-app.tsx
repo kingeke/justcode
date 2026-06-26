@@ -1827,7 +1827,19 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                 event.name === 'linefeed'
               ) {
                 event.preventDefault();
-                if (event.shift) {
+                // Any *modified* Enter inserts a newline; only a bare,
+                // unmodified Enter submits. Terminals disagree on which
+                // modifier they attach to Ctrl/Shift/Cmd+Enter (e.g. some
+                // report Ctrl+Enter as the Kitty `super` modifier, Shift+Enter
+                // as `meta`), so we treat "Enter + any modifier" as a newline.
+                if (
+                  event.shift ||
+                  event.ctrl ||
+                  event.meta ||
+                  event.option ||
+                  event.super ||
+                  event.hyper
+                ) {
                   promptArea.insertText('\n');
                   return;
                 }
