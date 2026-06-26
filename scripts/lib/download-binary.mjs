@@ -21,7 +21,10 @@ async function readPackageJson() {
 function repoSlug(pkg) {
   const url = pkg?.repository?.url ?? '';
   const match = url.match(/github\.com[/:]([^/]+\/[^/.]+)/);
-  if (!match) throw new Error('Could not determine GitHub repo from package.json "repository.url"');
+  if (!match)
+    throw new Error(
+      'Could not determine GitHub repo from package.json "repository.url"'
+    );
   return match[1];
 }
 

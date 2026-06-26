@@ -11,7 +11,9 @@ export function osArch() {
   const os = OS_MAP[process.platform];
   const arch = ARCH_MAP[process.arch];
   if (!os || !arch) {
-    throw new Error(`Unsupported platform: ${process.platform}/${process.arch}`);
+    throw new Error(
+      `Unsupported platform: ${process.platform}/${process.arch}`
+    );
   }
   return { os, arch };
 }

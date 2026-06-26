@@ -23,5 +23,7 @@ try {
   await ensureBinary(defaultBinaryPath());
 } catch (err) {
   // Don't fail the install; the launcher will retry on first run.
-  console.warn(`[just-code] postinstall could not download the binary now (${err.message}); it will be fetched on first run.`);
+  console.warn(
+    `[just-code] postinstall could not download the binary now (${err.message}); it will be fetched on first run.`
+  );
 }

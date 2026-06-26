@@ -8,7 +8,11 @@ vi.mock('@runtime/bootstrap/create-services', () => ({
   createRuntimeServices: createRuntimeServicesMock,
 }));
 
-import { createCli, normalizeArgv } from '@cli/bootstrap/create-cli';
+import {
+  createCli,
+  normalizeArgv,
+  resolveStartupProviderSelection,
+} from '@cli/bootstrap/create-cli';
 
 describe('createCli', () => {
   beforeEach(() => {
@@ -40,5 +44,23 @@ describe('createCli', () => {
     expect(
       normalizeArgv(['node', 'justcode', 'models', '-p=lmstudio'])
     ).toEqual(['node', 'justcode', 'models', '-p', 'lmstudio']);
+  });
+
+  it('forces connect flow when the provider flag is not configured', () => {
+    expect(
+      resolveStartupProviderSelection(
+        { provider: 'lmstudio' },
+        { providers: { openai: {} } }
+      )
+    ).toEqual({ providerId: undefined, allowDefaultProvider: false });
+  });
+
+  it('uses the requested provider when it is configured', () => {
+    expect(
+      resolveStartupProviderSelection(
+        { provider: 'lmstudio' },
+        { providers: { lmstudio: {} } }
+      )
+    ).toEqual({ providerId: 'lmstudio', allowDefaultProvider: false });
   });
 });

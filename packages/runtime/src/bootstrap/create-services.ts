@@ -35,6 +35,8 @@ export interface RuntimeServices {
 export interface CreateRuntimeOptions {
   providerId?: ProviderId;
   configDirectory?: string;
+  /** If false, do not fall back to config.defaultProvider when no provider is set. */
+  allowDefaultProvider?: boolean;
   /** Initial per-read line cap; falls back to the default when unset. */
   maxReadLines?: number;
 }
@@ -43,7 +45,11 @@ export async function createRuntimeServices(
   options: CreateRuntimeOptions = {}
 ): Promise<RuntimeServices> {
   const config = await loadAppConfig(options.configDirectory);
-  const providerId = options.providerId ?? config.defaultProvider;
+  const providerId =
+    options.providerId ??
+    (options.allowDefaultProvider === false
+      ? undefined
+      : config.defaultProvider);
   const registry = new ProviderRegistry(config);
   // Without a configured provider the session is backed by a placeholder; the
   // CLI shows the connect screen and swaps in a real provider once chosen.

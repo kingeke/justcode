@@ -17,6 +17,11 @@ interface SharedOptions {
   session?: string;
 }
 
+interface StartupProviderSelection {
+  providerId: ProviderId | undefined;
+  allowDefaultProvider: boolean;
+}
+
 export function createCli(): Command {
   const program = new Command();
 
@@ -113,13 +118,15 @@ async function runChat(options: SharedOptions): Promise<void> {
   const appConfig = await loadAppConfig();
   const savedConfig = await readGlobalConfig(appConfig.configDirectory);
 
-  // CLI flag > saved config (last connected provider)
-  const explicitProviderId =
-    resolveProviderId(options.provider) ??
-    parseProviderId(savedConfig.lastProvider);
+  const startupProvider = resolveStartupProviderSelection(options, savedConfig);
 
   const runtime = await createRuntimeServices({
-    ...(explicitProviderId ? { providerId: explicitProviderId } : {}),
+    ...(startupProvider.providerId
+      ? { providerId: startupProvider.providerId }
+      : {}),
+    ...(startupProvider.allowDefaultProvider
+      ? {}
+      : { allowDefaultProvider: false }),
     configDirectory: appConfig.configDirectory,
     ...(savedConfig.cache?.maxReadLines
       ? { maxReadLines: savedConfig.cache.maxReadLines }
@@ -196,6 +203,38 @@ function resolveProviderId(
   provider: string | undefined
 ): ProviderId | undefined {
   return parseProviderId(provider);
+}
+
+export function resolveStartupProviderSelection(
+  options: SharedOptions,
+  savedConfig: {
+    lastProvider?: string;
+    providers?: Partial<Record<ProviderId, unknown>>;
+  }
+): StartupProviderSelection {
+  const requestedProviderId = resolveProviderId(options.provider);
+
+  if (options.provider) {
+    if (
+      requestedProviderId &&
+      savedConfig.providers?.[requestedProviderId] !== undefined
+    ) {
+      return {
+        providerId: requestedProviderId,
+        allowDefaultProvider: false,
+      };
+    }
+
+    return {
+      providerId: undefined,
+      allowDefaultProvider: false,
+    };
+  }
+
+  return {
+    providerId: parseProviderId(savedConfig.lastProvider),
+    allowDefaultProvider: true,
+  };
 }
 
 function getActionOptions<TOptions extends OptionValues>(

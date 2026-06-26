@@ -8,13 +8,18 @@
 // setups disable install scripts), it is downloaded lazily on first run.
 import { spawn } from 'node:child_process';
 
-import { defaultBinaryPath, ensureBinary } from '../scripts/lib/download-binary.mjs';
+import {
+  defaultBinaryPath,
+  ensureBinary,
+} from '../scripts/lib/download-binary.mjs';
 
 let binary = defaultBinaryPath();
 try {
   binary = await ensureBinary(binary);
 } catch (err) {
-  console.error(`[just-code] Could not obtain the platform binary: ${err.message}`);
+  console.error(
+    `[just-code] Could not obtain the platform binary: ${err.message}`
+  );
   process.exit(1);
 }
 

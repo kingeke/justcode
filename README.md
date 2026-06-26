@@ -45,7 +45,7 @@ npm run uninstall:local # remove the symlink
 ```
 
 > **Building requires [Bun](https://bun.sh)** (`curl -fsSL https://bun.sh/install | bash`).
-> Bun is only needed to *build* — the produced binary runs on its own. The
+> Bun is only needed to _build_ — the produced binary runs on its own. The
 > terminal UI's native library (`@opentui/core`) is platform-specific, so
 > binaries can't be cross-compiled; each platform is built on its own runner
 > (see `.github/workflows/release.yml`).
@@ -53,7 +53,7 @@ npm run uninstall:local # remove the symlink
 ## How distribution works
 
 - `npm run build:binary` compiles `apps/cli/src/index.tsx` with `bun build
-  --compile` into `dist-bin/justcode-<os>-<arch>`. The Bun runtime and the
+--compile` into `dist-bin/justcode-<os>-<arch>`. The Bun runtime and the
   `@opentui` native library are embedded.
 - On a tag push (`v*`), `.github/workflows/release.yml` builds one binary per
   platform on a native CI runner and uploads them as GitHub Release assets.

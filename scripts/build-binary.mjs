@@ -21,8 +21,15 @@ console.log(`Building ${out} (${bunTarget()})...`);
 
 const result = spawnSync(
   'bun',
-  ['build', 'apps/cli/src/index.tsx', '--compile', `--target=${bunTarget()}`, '--outfile', out],
-  { stdio: 'inherit' },
+  [
+    'build',
+    'apps/cli/src/index.tsx',
+    '--compile',
+    `--target=${bunTarget()}`,
+    '--outfile',
+    out,
+  ],
+  { stdio: 'inherit' }
 );
 
 if (result.error) {

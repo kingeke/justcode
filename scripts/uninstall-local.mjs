@@ -6,7 +6,10 @@ import { join } from 'node:path';
 
 let binDir;
 try {
-  binDir = join(execFileSync('npm', ['prefix', '-g'], { encoding: 'utf8' }).trim(), 'bin');
+  binDir = join(
+    execFileSync('npm', ['prefix', '-g'], { encoding: 'utf8' }).trim(),
+    'bin'
+  );
 } catch {
   binDir = join(process.env.HOME ?? '.', '.justcode', 'bin');
 }
