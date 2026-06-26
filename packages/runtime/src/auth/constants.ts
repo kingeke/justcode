@@ -27,6 +27,8 @@ export const OPENAI_OAUTH = {
   /** Codex binds the loopback redirect to this fixed port. */
   redirectPort: 1455,
   redirectPath: '/auth/callback',
+  /** Redirect URI must use localhost (not 127.0.0.1) — OpenAI does exact string matching. */
+  redirectHost: 'localhost',
   scope: 'openid profile email offline_access',
 } as const;
 

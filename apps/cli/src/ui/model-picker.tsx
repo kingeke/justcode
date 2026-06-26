@@ -121,7 +121,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
   }, [query, sortState]);
 
   useKeyboard((key) => {
-    if (key.name === 'escape') {
+    if (key.name === 'escape' || (key.ctrl && key.name === 'c')) {
       props.onCancel();
       return;
     }

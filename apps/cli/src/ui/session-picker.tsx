@@ -125,7 +125,7 @@ export function SessionPicker({
   }, [query, sessions]);
 
   useKeyboard((key) => {
-    if (key.name === 'escape') {
+    if (key.name === 'escape' || (key.ctrl && key.name === 'c')) {
       onCancel();
       return;
     }

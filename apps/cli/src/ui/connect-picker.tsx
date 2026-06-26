@@ -185,9 +185,11 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
   }, [step]);
 
   useKeyboard((key) => {
-    // OAuth-connect: only allow esc to abort.
+    const isBack = key.name === 'escape' || (key.ctrl && key.name === 'c');
+
+    // OAuth-connect: only allow esc/ctrl+c to abort.
     if (step === 'oauth-connect') {
-      if (key.name === 'escape') {
+      if (isBack) {
         abortRef.current?.abort();
         setError(null);
         setStep('provider');
@@ -197,18 +199,9 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
 
     // Auth-method picker keyboard.
     if (step === 'auth-method') {
-      if (key.name === 'escape') {
-        setStep('provider');
-        return;
-      }
-      if (key.name === 'up') {
-        setAuthMethodIndex(0);
-        return;
-      }
-      if (key.name === 'down') {
-        setAuthMethodIndex(1);
-        return;
-      }
+      if (isBack) { setStep('provider'); return; }
+      if (key.name === 'up') { setAuthMethodIndex(0); return; }
+      if (key.name === 'down') { setAuthMethodIndex(1); return; }
       if (key.name === 'return') {
         if (authMethodIndex === 0) {
           setOauthStatus('');
@@ -224,14 +217,14 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
     if (step !== 'provider') {
       // The api-key / base-url steps own keyboard input via TextArea; here we
       // only intercept Escape to step back. Enter is handled by onSubmit.
-      if (key.name === 'escape') {
+      if (isBack) {
         setError(null);
         setStep('provider');
       }
       return;
     }
 
-    if (key.name === 'escape') {
+    if (isBack) {
       props.onCancel();
       return;
     }
@@ -363,6 +356,12 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
             <text content={queryLineContent(query, 'search providers...')} />
           </box>
 
+          {error ? (
+            <box marginBottom={1}>
+              <text fg="yellow">{error}</text>
+            </box>
+          ) : null}
+
           {providers.length === 0 ? (
             <text fg={MUTED}>No providers match.</text>
           ) : (
@@ -411,9 +410,9 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
                 {authMethodIndex === i ? '› ' : '  '}
                 {opt.label}
                 {'  '}
-                <text fg={authMethodIndex === i ? 'black' : MUTED}>
+                <span fg={authMethodIndex === i ? 'black' : MUTED}>
                   {opt.description}
-                </text>
+                </span>
               </text>
             </box>
           ))}

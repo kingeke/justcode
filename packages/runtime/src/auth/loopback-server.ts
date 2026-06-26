@@ -26,8 +26,11 @@ export async function startLoopbackServer(options: {
   expectedState: string;
   port?: number;
   path?: string;
+  host?: string;
+  signal?: AbortSignal;
 }): Promise<LoopbackServer> {
   const path = options.path ?? '/callback';
+  const host = options.host ?? '127.0.0.1';
   let resolveCode!: (code: string) => void;
   let rejectCode!: (error: Error) => void;
   const codePromise = new Promise<string>((resolve, reject) => {
@@ -36,7 +39,7 @@ export async function startLoopbackServer(options: {
   });
 
   const server: Server = createServer((req, res) => {
-    const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
+    const requestUrl = new URL(req.url ?? '/', `http://${host}`);
     if (requestUrl.pathname !== path) {
       res.writeHead(404).end();
       return;
@@ -68,15 +71,31 @@ export async function startLoopbackServer(options: {
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
-    server.listen(options.port ?? 0, '127.0.0.1', resolve);
+    server.listen(options.port ?? 0, host, resolve);
   });
 
   const address = server.address() as AddressInfo;
-  const redirectUri = `http://127.0.0.1:${address.port}${path}`;
+  const redirectUri = `http://${host}:${address.port}${path}`;
+
+  let closed = false;
+  const closeServer = () => {
+    if (!closed) {
+      closed = true;
+      server.close();
+    }
+  };
+
+  // If the caller aborts before the redirect arrives, release the port.
+  if (options.signal) {
+    options.signal.addEventListener('abort', () => {
+      rejectCode(new Error('OAuth sign-in was cancelled.'));
+      closeServer();
+    }, { once: true });
+  }
 
   return {
     redirectUri,
     waitForCode: () => codePromise,
-    close: () => server.close(),
+    close: closeServer,
   };
 }
