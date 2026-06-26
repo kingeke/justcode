@@ -6,6 +6,7 @@ import { type ProviderClient } from '@core/ports/chat-model';
 import { ProviderId, PROVIDERS } from '@core/ports/provider-catalog';
 import { WriteFileTool } from '@runtime/tools/write-file-tool';
 import { EditFileTool } from '@runtime/tools/edit-file-tool';
+import { ApplyPatchTool } from '@runtime/tools/apply-patch-tool';
 import { BashTool } from '@runtime/tools/bash-tool';
 import { GrepTool } from '@runtime/tools/grep-tool';
 import { GlobTool } from '@runtime/tools/glob-tool';
@@ -65,6 +66,7 @@ export async function createRuntimeServices(
   const toolRegistry = new ToolRegistry([
     new WriteFileTool(workspaceFiles),
     new EditFileTool(workspaceFiles),
+    new ApplyPatchTool(workspaceFiles),
     new ReadFileTool(workspaceFiles, () => readSettings.maxReadLines),
     new GrepTool(workspaceFiles),
     new GlobTool(workspaceFiles),
