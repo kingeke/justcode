@@ -1,0 +1,91 @@
+import type { OAuthCredentials } from '@core/ports/provider-catalog';
+
+import { ANTHROPIC_OAUTH } from '@runtime/auth/constants';
+import type { OAuthFlow, OAuthLoginContext } from '@runtime/auth/oauth-flow';
+import { createPkcePair, createState } from '@runtime/auth/pkce';
+
+interface AnthropicTokenResponse {
+  access_token: string;
+  refresh_token?: string;
+  expires_in?: number;
+}
+
+/**
+ * Claude Pro/Max sign-in via OAuth + PKCE. Anthropic's public client only
+ * permits its hosted redirect, which displays the authorization code for the
+ * user to paste back — so this flow uses {@link OAuthLoginContext.promptInput}
+ * rather than a loopback server. The pasted value is `code#state`.
+ */
+export class AnthropicOAuthFlow implements OAuthFlow {
+  public async login(
+    context: OAuthLoginContext
+  ): Promise<OAuthCredentials> {
+    if (!context.promptInput) {
+      throw new Error('Anthropic sign-in requires pasting an authorization code.');
+    }
+
+    const pkce = createPkcePair();
+    const state = createState();
+    const authorizeUrl = new URL(ANTHROPIC_OAUTH.authorizeUrl);
+    authorizeUrl.searchParams.set('code', 'true');
+    authorizeUrl.searchParams.set('client_id', ANTHROPIC_OAUTH.clientId);
+    authorizeUrl.searchParams.set('response_type', 'code');
+    authorizeUrl.searchParams.set('redirect_uri', ANTHROPIC_OAUTH.redirectUri);
+    authorizeUrl.searchParams.set('scope', ANTHROPIC_OAUTH.scope);
+    authorizeUrl.searchParams.set('state', state);
+    authorizeUrl.searchParams.set('code_challenge', pkce.challenge);
+    authorizeUrl.searchParams.set('code_challenge_method', 'S256');
+
+    await context.openUrl(authorizeUrl.toString());
+    context.notify(
+      'Opened claude.ai to sign in. Approve access, then paste the code shown.'
+    );
+
+    const pasted = (await context.promptInput('authorization code')).trim();
+    const [code, returnedState] = pasted.split('#');
+    if (!code) throw new Error('No authorization code was entered.');
+
+    return this.exchange({
+      grant_type: 'authorization_code',
+      code,
+      state: returnedState ?? state,
+      redirect_uri: ANTHROPIC_OAUTH.redirectUri,
+      code_verifier: pkce.verifier,
+    });
+  }
+
+  public async refresh(
+    credentials: OAuthCredentials
+  ): Promise<OAuthCredentials> {
+    if (!credentials.refreshToken) {
+      throw new Error('Cannot refresh Anthropic token: no refresh token.');
+    }
+    return this.exchange({
+      grant_type: 'refresh_token',
+      refresh_token: credentials.refreshToken,
+    });
+  }
+
+  private async exchange(
+    body: Record<string, string>
+  ): Promise<OAuthCredentials> {
+    const response = await fetch(ANTHROPIC_OAUTH.tokenUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ client_id: ANTHROPIC_OAUTH.clientId, ...body }),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Anthropic token exchange failed (${response.status}): ${text}`);
+    }
+
+    const token = (await response.json()) as AnthropicTokenResponse;
+    return {
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token,
+      expiresAt: token.expires_in
+        ? Date.now() + token.expires_in * 1000
+        : undefined,
+    };
+  }
+}

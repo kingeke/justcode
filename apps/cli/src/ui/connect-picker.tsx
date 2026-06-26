@@ -19,6 +19,8 @@ import {
   type ProviderConfig,
   type ProviderConnectionInfo,
 } from '@core/ports/provider-catalog';
+import { getOAuthFlow } from '@runtime/auth/oauth-flows';
+import { openBrowser } from '@runtime/auth/open-browser';
 import {
   normalizeSingleLinePaste,
   pasteFromClipboard,
@@ -32,7 +34,29 @@ const MUTED = '#8a8a8a';
 const MUTED_RGBA = RGBA.fromHex(MUTED);
 const INVERSE = createTextAttributes({ inverse: true });
 
-type WizardStep = 'provider' | 'name' | 'api-key' | 'base-url' | 'connecting';
+type WizardStep =
+  | 'provider'
+  | 'name'
+  | 'auth-method'
+  | 'api-key'
+  | 'base-url'
+  | 'oauth-connect'
+  | 'connecting';
+
+const AUTH_METHOD_OPTIONS = [
+  { label: 'Sign in', description: 'Use your subscription (browser sign-in)' },
+  { label: 'Use API key', description: 'Paste a developer API key' },
+] as const;
+
+function authMethodLabel(entry: ProviderConnectionInfo): string {
+  const methods = (entry as ProviderConnectionInfo).authMethods;
+  if (!methods) return 'api key';
+  const hasApiKey = methods.includes('apiKey');
+  const hasOAuth = methods.includes('oauth');
+  if (hasApiKey && hasOAuth) return 'api key · subscription';
+  if (hasOAuth) return 'subscription';
+  return 'api key';
+}
 
 // Synthetic row that starts the "add a custom provider" flow. Its id is not a
 // real provider id; selecting it routes to the name step instead of connecting.
@@ -101,7 +125,10 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
   const [baseUrl, setBaseUrl] = useState('');
   const [customName, setCustomName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [authMethodIndex, setAuthMethodIndex] = useState(0);
+  const [oauthStatus, setOauthStatus] = useState('');
   const scrollOffsetRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
   let field: InputRenderable | null | undefined;
 
   // Already-connected custom providers, rebuilt from the saved config so they
@@ -128,8 +155,10 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       fuzzyFilter(
         [...PROVIDERS, ...customEntries, ADD_CUSTOM_ENTRY],
         query,
-        (provider) =>
-          `${provider.name} ${provider.description} ${provider.apiKeyEnvVar ?? ''} ${provider.baseUrlEnvVar ?? ''}`
+        (provider) => {
+          const p = provider as ProviderConnectionInfo;
+          return `${p.name} ${p.description} ${p.apiKeyEnvVar ?? ''} ${p.baseUrlEnvVar ?? ''}`;
+        }
       ),
     [query, customEntries]
   );
@@ -143,7 +172,55 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
     scrollOffsetRef.current = 0;
   }, [query, step]);
 
+  // Kick off the OAuth flow when we enter the oauth-connect step.
+  useEffect(() => {
+    if (step !== 'oauth-connect' || !selectedProvider) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    void connectProviderOAuth(selectedProvider, controller.signal);
+    return () => {
+      controller.abort();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
   useKeyboard((key) => {
+    // OAuth-connect: only allow esc to abort.
+    if (step === 'oauth-connect') {
+      if (key.name === 'escape') {
+        abortRef.current?.abort();
+        setError(null);
+        setStep('provider');
+      }
+      return;
+    }
+
+    // Auth-method picker keyboard.
+    if (step === 'auth-method') {
+      if (key.name === 'escape') {
+        setStep('provider');
+        return;
+      }
+      if (key.name === 'up') {
+        setAuthMethodIndex(0);
+        return;
+      }
+      if (key.name === 'down') {
+        setAuthMethodIndex(1);
+        return;
+      }
+      if (key.name === 'return') {
+        if (authMethodIndex === 0) {
+          setOauthStatus('');
+          setStep('oauth-connect');
+        } else {
+          setStep('api-key');
+        }
+        return;
+      }
+      return;
+    }
+
     if (step !== 'provider') {
       // The api-key / base-url steps own keyboard input via TextArea; here we
       // only intercept Escape to step back. Enter is handled by onSubmit.
@@ -176,7 +253,22 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       setApiKey(existing.apiKey ?? '');
       setBaseUrl(existing.baseUrl ?? entry.baseUrl ?? '');
       setError(null);
-      setStep('api-key');
+
+      const authMethods = (entry as ProviderConnectionInfo).authMethods ?? [
+        'apiKey',
+      ];
+      if (authMethods.includes('oauth') && authMethods.includes('apiKey')) {
+        setAuthMethodIndex(0);
+        setStep('auth-method');
+      } else if (
+        authMethods.length === 1 &&
+        authMethods[0] === 'oauth'
+      ) {
+        setOauthStatus('');
+        setStep('oauth-connect');
+      } else {
+        setStep('api-key');
+      }
       return;
     }
 
@@ -242,18 +334,26 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
             ? 'Connect provider'
             : step === 'name'
               ? 'New custom provider'
-              : step === 'api-key'
-                ? `API key - ${selectedProvider?.name ?? ''}`
-                : step === 'base-url'
-                  ? `Base URL - ${selectedProvider?.name ?? ''}`
-                  : `Fetching models - ${selectedProvider?.name ?? ''}`}
+              : step === 'auth-method'
+                ? `Authentication - ${selectedProvider?.name ?? ''}`
+                : step === 'oauth-connect'
+                  ? `Signing in - ${selectedProvider?.name ?? ''}`
+                  : step === 'api-key'
+                    ? `API key - ${selectedProvider?.name ?? ''}`
+                    : step === 'base-url'
+                      ? `Base URL - ${selectedProvider?.name ?? ''}`
+                      : `Fetching models - ${selectedProvider?.name ?? ''}`}
         </text>
         <text fg={MUTED}>
           {step === 'provider'
             ? 'enter to configure · esc to cancel'
-            : step === 'connecting'
-              ? 'fetching models...'
-              : 'enter to continue · esc to go back'}
+            : step === 'auth-method'
+              ? 'enter to select · esc to go back'
+              : step === 'oauth-connect'
+                ? 'esc to cancel'
+                : step === 'connecting'
+                  ? 'fetching models...'
+                  : 'enter to continue · esc to go back'}
         </text>
       </box>
 
@@ -272,13 +372,20 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
                 const isFocused = absoluteIndex === focusedIndex;
                 const isConnected = configuredProviderSet.has(entry.id);
 
+                const isReal = (entry.id as string) !== ADD_CUSTOM_ID;
                 return (
-                  <box key={entry.id}>
+                  <box key={entry.id} flexDirection="row">
                     <text {...(isFocused ? { bg: 'cyan', fg: 'black' } : {})}>
                       {isFocused ? '› ' : '  '}
                       {entry.name}
                       {isConnected ? ' ✓' : ''}
                     </text>
+                    {isReal ? (
+                      <text fg={MUTED}>
+                        {'  '}
+                        {authMethodLabel(entry as ProviderConnectionInfo)}
+                      </text>
+                    ) : null}
                   </box>
                 );
               })}
@@ -293,6 +400,36 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
             </box>
           )}
         </>
+      ) : step === 'auth-method' ? (
+        <box flexDirection="column">
+          <text fg={MUTED} marginBottom={1}>
+            How do you want to connect {selectedProvider?.name ?? ''}?
+          </text>
+          {AUTH_METHOD_OPTIONS.map((opt, i) => (
+            <box key={opt.label}>
+              <text {...(authMethodIndex === i ? { bg: 'cyan', fg: 'black' } : {})}>
+                {authMethodIndex === i ? '› ' : '  '}
+                {opt.label}
+                {'  '}
+                <text fg={authMethodIndex === i ? 'black' : MUTED}>
+                  {opt.description}
+                </text>
+              </text>
+            </box>
+          ))}
+        </box>
+      ) : step === 'oauth-connect' ? (
+        <box flexDirection="column">
+          <box flexDirection="row">
+            <Spinner fg="cyan" />
+            <text fg={MUTED}> {oauthStatus || 'Opening browser...'}</text>
+          </box>
+          {error ? (
+            <box marginTop={1}>
+              <text fg="yellow">{error}</text>
+            </box>
+          ) : null}
+        </box>
       ) : step === 'connecting' ? (
         <box flexDirection="row">
           <Spinner fg="cyan" />
@@ -485,6 +622,69 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
         caughtError instanceof Error ? caughtError.message : String(caughtError)
       );
       setStep('base-url');
+    }
+  }
+
+  async function connectProviderOAuth(
+    provider: ProviderConnectionInfo,
+    signal: AbortSignal
+  ): Promise<void> {
+    const flow = getOAuthFlow(provider.id as ProviderId);
+    if (!flow) {
+      setError(`OAuth sign-in is not supported for ${provider.name}.`);
+      setStep('provider');
+      return;
+    }
+
+    try {
+      const oauthCreds = await flow.login({
+        openUrl: openBrowser,
+        notify: (msg) => setOauthStatus(msg),
+        signal,
+      });
+
+      if (signal.aborted) return;
+
+      setOauthStatus('Fetching available models...');
+
+      const client = provider.create({
+        baseUrl: oauthCreds.extra?.['endpoint'] ?? provider.baseUrl ?? '',
+        oauth: oauthCreds,
+        // At connect time return the freshly-minted token directly; the
+        // ProviderRegistry wires up the full refresh logic on subsequent starts.
+        getAccessToken: async () => oauthCreds.accessToken,
+      });
+
+      const models = await client.listModels();
+      if (signal.aborted) return;
+
+      const firstModel = models[0];
+      if (!firstModel) {
+        throw new Error(`No models are available for ${provider.name}.`);
+      }
+
+      const modelId = client.getDefaultModel() ?? firstModel.id;
+      const selectedModel = models.find((m) => m.id === modelId) ?? firstModel;
+
+      const config: ProviderConfig = {
+        authType: 'oauth',
+        oauth: oauthCreds,
+      };
+
+      props.onComplete({
+        providerId: provider.id,
+        provider,
+        client,
+        selectedModel,
+        models,
+        config,
+      });
+    } catch (caughtError) {
+      if (signal.aborted) return;
+      setError(
+        caughtError instanceof Error ? caughtError.message : String(caughtError)
+      );
+      setStep('provider');
     }
   }
 

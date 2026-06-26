@@ -1,9 +1,10 @@
+import { logModelsResponse } from '@providers/http/log-models';
+
 import {
   ToolsUnsupportedError,
   type ChatRequest,
   type ChatResult,
   type ModelInfo,
-  type ModelPricing,
   type ProviderClient,
 } from '@core/ports/chat-model';
 import { type ProviderId } from '@core/ports/provider-catalog';
@@ -25,6 +26,13 @@ interface OpenAiCompatibleProviderOptions {
   baseUrl: string;
   apiKey?: string;
   defaultModel?: string;
+  /**
+   * Resolves a fresh OAuth access token per request (refreshing on expiry).
+   * When set it takes precedence over {@link apiKey} for the bearer header.
+   */
+  getAccessToken?: () => Promise<string>;
+  /** Extra headers sent on every request (e.g. Copilot integration headers). */
+  extraHeaders?: Record<string, string>;
 }
 
 interface OpenAiModelsResponse {
@@ -49,56 +57,6 @@ interface OpenAiChatResponse {
   };
 }
 
-// Prices in USD per token. Source: https://openai.com/api/pricing/
-const OPENAI_PRICING: Record<string, ModelPricing> = {
-  'gpt-4o': {
-    inputPerToken: 0.0000025,
-    outputPerToken: 0.00001,
-    cacheReadPerToken: 0.00000125,
-  },
-  'gpt-4o-mini': {
-    inputPerToken: 0.00000015,
-    outputPerToken: 0.0000006,
-    cacheReadPerToken: 0.000000075,
-  },
-  'gpt-4-turbo': { inputPerToken: 0.00001, outputPerToken: 0.00003 },
-  'gpt-4': { inputPerToken: 0.00003, outputPerToken: 0.00006 },
-  'gpt-3.5-turbo': { inputPerToken: 0.0000005, outputPerToken: 0.0000015 },
-  o1: {
-    inputPerToken: 0.000015,
-    outputPerToken: 0.00006,
-    cacheReadPerToken: 0.0000075,
-  },
-  'o1-mini': {
-    inputPerToken: 0.000003,
-    outputPerToken: 0.000012,
-    cacheReadPerToken: 0.0000015,
-  },
-  'o1-preview': { inputPerToken: 0.000015, outputPerToken: 0.00006 },
-  'o3-mini': {
-    inputPerToken: 0.0000011,
-    outputPerToken: 0.0000044,
-    cacheReadPerToken: 0.00000055,
-  },
-  o3: {
-    inputPerToken: 0.00001,
-    outputPerToken: 0.00004,
-    cacheReadPerToken: 0.0000025,
-  },
-};
-
-const OPENAI_CONTEXT_WINDOWS: Record<string, number> = {
-  'gpt-4o': 128_000,
-  'gpt-4o-mini': 128_000,
-  'gpt-4-turbo': 128_000,
-  'gpt-4': 8_192,
-  'gpt-3.5-turbo': 16_385,
-  o1: 200_000,
-  'o1-mini': 128_000,
-  'o1-preview': 128_000,
-  'o3-mini': 200_000,
-  o3: 200_000,
-};
 
 export class OpenAiCompatibleProvider implements ProviderClient {
   public readonly providerId: ProviderId;
@@ -135,7 +93,7 @@ export class OpenAiCompatibleProvider implements ProviderClient {
         joinUrl(this.options.baseUrl, '/chat/completions'),
         {
           method: 'POST',
-          headers: this.createHeaders(),
+          headers: await this.createHeaders(),
           ...(request.signal ? { signal: request.signal } : {}),
           body: {
             model: request.model,
@@ -176,7 +134,7 @@ export class OpenAiCompatibleProvider implements ProviderClient {
       joinUrl(this.options.baseUrl, '/chat/completions'),
       {
         method: 'POST',
-        headers: this.createHeaders(),
+        headers: await this.createHeaders(),
         ...(request.signal ? { signal: request.signal } : {}),
         body: {
           model: request.model,
@@ -234,22 +192,18 @@ export class OpenAiCompatibleProvider implements ProviderClient {
     const response = await requestJson<OpenAiModelsResponse>(
       joinUrl(this.options.baseUrl, '/models'),
       {
-        headers: this.createHeaders(),
+        headers: await this.createHeaders(),
       }
     );
 
+    void logModelsResponse(String(this.providerId), response);
+
     return (response.data ?? [])
-      .map((model) => {
-        const contextWindow = this.resolveContextWindow(model.id);
-        const pricing = this.resolvePricing(model.id);
-        return {
-          id: model.id,
-          displayName: model.id,
-          providerId: this.providerId,
-          ...(contextWindow != null ? { contextWindow } : {}),
-          ...(pricing ? { pricing } : {}),
-        };
-      })
+      .map((model) => ({
+        id: model.id,
+        displayName: model.id,
+        providerId: this.providerId,
+      }))
       .sort((left, right) => left.id.localeCompare(right.id));
   }
 
@@ -257,23 +211,18 @@ export class OpenAiCompatibleProvider implements ProviderClient {
     return this.options.defaultModel;
   }
 
-  protected createHeaders(): Record<string, string> {
-    if (!this.options.apiKey) {
-      return {};
+  protected async createHeaders(): Promise<Record<string, string>> {
+    const headers: Record<string, string> = { ...this.options.extraHeaders };
+
+    if (this.options.getAccessToken) {
+      headers.authorization = `Bearer ${await this.options.getAccessToken()}`;
+    } else if (this.options.apiKey) {
+      headers.authorization = `Bearer ${this.options.apiKey}`;
     }
 
-    return {
-      authorization: `Bearer ${this.options.apiKey}`,
-    };
+    return headers;
   }
 
-  protected resolveContextWindow(modelId: string): number | undefined {
-    return OPENAI_CONTEXT_WINDOWS[modelId];
-  }
-
-  protected resolvePricing(modelId: string): ModelPricing | undefined {
-    return OPENAI_PRICING[modelId];
-  }
 }
 
 /**

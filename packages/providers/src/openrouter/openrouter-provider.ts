@@ -1,3 +1,5 @@
+import { logModelsResponse } from '@providers/http/log-models';
+
 import {
   type ChatRequest,
   type ChatResult,
@@ -156,6 +158,8 @@ export class OpenRouterProvider implements ProviderClient {
         },
       }
     );
+
+    void logModelsResponse(ProviderId.OpenRouter, response);
 
     return (response.data ?? [])
       .filter((m) => m.context_length != null)

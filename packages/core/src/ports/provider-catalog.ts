@@ -1,5 +1,7 @@
 import { type ProviderClient } from '@core/ports/chat-model';
+import { appUserAgent } from '@core/version';
 import { AlibabaProvider } from '@providers/alibaba/alibaba-provider';
+import { AnthropicProvider } from '@providers/anthropic/anthropic-provider';
 import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
 import { OllamaProvider } from '@providers/ollama/ollama-provider';
 import { OpenAiProvider } from '@providers/openai/openai-provider';
@@ -9,11 +11,48 @@ import type { AppConfig } from '@runtime/config/app-config';
 
 export type ProviderCredentialRequirement = 'required' | 'optional' | 'none';
 
+/**
+ * Headers the GitHub Copilot API expects on every request to identify the
+ * calling editor/integration. Required — Copilot rejects requests without them.
+ */
+const COPILOT_HEADERS: Record<string, string> = {
+  'Copilot-Integration-Id': 'vscode-chat',
+  'Editor-Version': appUserAgent(),
+  'Editor-Plugin-Version': appUserAgent(),
+};
+
+/** How a provider can be authenticated: a pasted API key, or an OAuth sign-in. */
+export type AuthMethod = 'apiKey' | 'oauth';
+
+/**
+ * Tokens obtained from an OAuth sign-in (subscription login). Persisted next to
+ * the API key in config.json and refreshed in place when {@link expiresAt}
+ * passes. {@link extra} carries any provider-specific values that must survive a
+ * restart (e.g. the Copilot chat endpoint, or a GitHub token used to re-mint a
+ * short-lived Copilot token).
+ */
+export interface OAuthCredentials {
+  accessToken: string;
+  refreshToken?: string | undefined;
+  /** Epoch milliseconds at which {@link accessToken} expires, if known. */
+  expiresAt?: number | undefined;
+  extra?: Record<string, string> | undefined;
+}
+
 /** The minimal credentials needed to construct any provider client. */
 export interface ProviderCredentials {
   apiKey?: string | undefined;
   baseUrl: string;
   defaultModel?: string | undefined;
+  /** Present when the provider was connected via OAuth instead of an API key. */
+  oauth?: OAuthCredentials | undefined;
+  /**
+   * Resolves a currently-valid OAuth access token, refreshing and persisting it
+   * if it has expired. Supplied by the runtime when building an OAuth-connected
+   * client; absent for API-key clients and during the initial connect (where
+   * {@link oauth} carries the freshly-obtained token).
+   */
+  getAccessToken?: (() => Promise<string>) | undefined;
 }
 
 export interface ProviderCatalogEntry {
@@ -24,6 +63,8 @@ export interface ProviderCatalogEntry {
   apiKeyEnvVar?: string;
   baseUrl?: string;
   baseUrlEnvVar?: string;
+  /** Auth methods this provider accepts. Defaults to API key only. */
+  authMethods?: AuthMethod[];
   /** Extracts this provider's credentials from the saved app config. */
   credentialsFromConfig: (config: AppConfig) => ProviderCredentials;
   /** Constructs the concrete client from a set of credentials. */
@@ -36,10 +77,16 @@ export interface ProviderConfig {
   defaultModel?: string;
   /** Display name — persisted only for custom (user-added) providers. */
   name?: string;
+  /** How this provider was connected. Defaults to 'apiKey' when absent. */
+  authType?: AuthMethod;
+  /** OAuth tokens, present when {@link authType} is 'oauth'. */
+  oauth?: OAuthCredentials;
 }
 
 export enum ProviderId {
   Openai = 'openai',
+  Anthropic = 'anthropic',
+  Copilot = 'copilot',
   Ollama = 'ollama',
   LmStudio = 'lmstudio',
   OpenRouter = 'openrouter',
@@ -50,22 +97,69 @@ export const PROVIDERS = [
   {
     id: ProviderId.Openai,
     name: 'OpenAI',
-    description: 'Hosted OpenAI models',
+    description: 'Hosted OpenAI models (API key or ChatGPT sign-in)',
     apiKeyRequired: true,
     apiKeyEnvVar: 'OPENAI_API_KEY',
     baseUrl: 'https://api.openai.com/v1',
     baseUrlEnvVar: 'OPENAI_BASE_URL',
+    authMethods: ['apiKey', 'oauth'],
     credentialsFromConfig: (config) => ({
       apiKey: config.openai.apiKey,
       baseUrl: config.openai.baseUrl,
       defaultModel: config.openai.defaultModel,
+      oauth: config.openai.oauth,
     }),
     create: (credentials) =>
       new OpenAiProvider(
         credentials.apiKey ?? '',
         credentials.baseUrl,
-        credentials.defaultModel ?? 'gpt-4.1-mini'
+        credentials.defaultModel ?? 'gpt-4.1-mini',
+        credentials.getAccessToken
       ),
+  },
+  {
+    id: ProviderId.Anthropic,
+    name: 'Anthropic',
+    description: 'Claude models (API key or Claude Pro/Max sign-in)',
+    apiKeyRequired: true,
+    apiKeyEnvVar: 'ANTHROPIC_API_KEY',
+    baseUrl: 'https://api.anthropic.com',
+    baseUrlEnvVar: 'ANTHROPIC_BASE_URL',
+    authMethods: ['oauth', 'apiKey'],
+    credentialsFromConfig: (config) => ({
+      apiKey: config.anthropic.apiKey,
+      baseUrl: config.anthropic.baseUrl,
+      oauth: config.anthropic.oauth,
+    }),
+    create: (credentials) =>
+      new AnthropicProvider({
+        baseUrl: credentials.baseUrl,
+        ...(credentials.apiKey ? { apiKey: credentials.apiKey } : {}),
+        ...(credentials.getAccessToken
+          ? { getAccessToken: credentials.getAccessToken }
+          : {}),
+      }),
+  },
+  {
+    id: ProviderId.Copilot,
+    name: 'GitHub Copilot',
+    description: 'Models via a GitHub Copilot subscription (sign-in)',
+    apiKeyRequired: false,
+    baseUrl: 'https://api.githubcopilot.com',
+    authMethods: ['oauth'],
+    credentialsFromConfig: (config) => ({
+      baseUrl: config.copilot.oauth?.extra?.endpoint ?? config.copilot.baseUrl,
+      oauth: config.copilot.oauth,
+    }),
+    create: (credentials) =>
+      new OpenAiCompatibleProvider({
+        providerId: ProviderId.Copilot,
+        baseUrl: credentials.baseUrl,
+        ...(credentials.getAccessToken
+          ? { getAccessToken: credentials.getAccessToken }
+          : {}),
+        extraHeaders: COPILOT_HEADERS,
+      }),
   },
   {
     id: ProviderId.OpenRouter,

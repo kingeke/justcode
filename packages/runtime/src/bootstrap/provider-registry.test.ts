@@ -15,6 +15,16 @@ function baseConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       apiKey: undefined,
       baseUrl: 'https://api.openai.com/v1',
       defaultModel: 'gpt-4.1-mini',
+      oauth: undefined,
+    },
+    anthropic: {
+      apiKey: undefined,
+      baseUrl: 'https://api.anthropic.com',
+      oauth: undefined,
+    },
+    copilot: {
+      baseUrl: 'https://api.githubcopilot.com',
+      oauth: undefined,
     },
     ollama: { baseUrl: 'http://127.0.0.1:11434' },
     lmstudio: { baseUrl: 'http://127.0.0.1:1234/v1' },

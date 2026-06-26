@@ -145,8 +145,8 @@ describe('loadAppConfig', () => {
 
 describe('parseProviderId', () => {
   it('throws for unknown providers', () => {
-    expect(() => parseProviderId('anthropic')).toThrow(
-      "Unsupported provider 'anthropic'."
+    expect(() => parseProviderId('notaprovider')).toThrow(
+      "Unsupported provider 'notaprovider'."
     );
   });
 

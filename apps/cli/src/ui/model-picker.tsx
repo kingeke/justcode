@@ -226,21 +226,28 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
                     {entry.groupName}
                   </text>
                 ) : null}
-                <box flexDirection="row" justifyContent="space-between">
-                  <text {...(isFocused ? { bg: 'cyan', fg: 'black' } : {})}>
+                <box flexDirection="row">
+                  <text
+                    flexGrow={1}
+                    {...(isFocused ? { bg: 'cyan', fg: 'black' } : {})}
+                  >
                     {isFocused ? '› ' : '  '}
                     {entry.model.displayName}
                     {sortState.mode === 'provider' ? null : (
-                      <span fg={MUTED}>
+                      <span fg={isFocused ? 'black' : MUTED}>
                         {' '}
                         ·{' '}
                         {PROVIDER_BY_ID[entry.model.providerId]?.name ??
                           entry.model.providerId}
                       </span>
                     )}
-                    {isCurrent ? <span fg={MUTED}> ✓</span> : null}
+                    {isCurrent ? (
+                      <span fg={isFocused ? 'black' : MUTED}> ✓</span>
+                    ) : null}
                   </text>
-                  <text fg={MUTED}>{formatModelMeta(entry.model)}</text>
+                  <text {...(isFocused ? { bg: 'cyan', fg: 'black' } : { fg: MUTED })}>
+                    {formatModelMeta(entry.model)}
+                  </text>
                 </box>
               </box>
             );
@@ -331,7 +338,17 @@ function formatModelMeta(model: ModelInfo): string {
   const parts: string[] = [];
 
   if (!model.pricing) {
-    parts.push('local');
+    // Only label as "local" for providers that are actually running locally
+    // (no authMethods = api-key-only local servers like Ollama/LM Studio).
+    // OAuth-only subscription providers (e.g. Copilot) have no per-request
+    // pricing by design — "local" would be misleading there.
+    const entry = PROVIDER_BY_ID[model.providerId];
+    const isSubscription =
+      entry?.authMethods?.length === 1 &&
+      entry.authMethods[0] === 'oauth';
+    if (!isSubscription) {
+      parts.push('local');
+    }
   } else {
     const { inputPerToken, outputPerToken } = model.pricing;
     if (inputPerToken === 0 && outputPerToken === 0) {

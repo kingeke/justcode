@@ -9,7 +9,10 @@ import {
   isCustomProviderId,
   CUSTOM_PROVIDER_PREFIX,
 } from '@core/ports/provider-catalog';
-import type { CustomProviderConfig } from '@core/ports/provider-catalog';
+import type {
+  CustomProviderConfig,
+  OAuthCredentials,
+} from '@core/ports/provider-catalog';
 import type { GlobalConfig } from '@runtime/persistence/global-config';
 import { DEFAULT_SYSTEM_PROMPT } from '@core/application/system-prompt';
 
@@ -25,6 +28,16 @@ export interface AppConfig {
     apiKey: string | undefined;
     baseUrl: string;
     defaultModel: string;
+    oauth: OAuthCredentials | undefined;
+  };
+  anthropic: {
+    apiKey: string | undefined;
+    baseUrl: string;
+    oauth: OAuthCredentials | undefined;
+  };
+  copilot: {
+    baseUrl: string;
+    oauth: OAuthCredentials | undefined;
   };
   ollama: {
     baseUrl: string;
@@ -100,6 +113,20 @@ export async function loadAppConfig(
         'https://api.openai.com/v1',
       defaultModel:
         configWithDefaults.providers?.openai?.defaultModel ?? 'gpt-4.1-mini',
+      oauth: configWithDefaults.providers?.openai?.oauth,
+    },
+    anthropic: {
+      apiKey: configWithDefaults.providers?.anthropic?.apiKey,
+      baseUrl:
+        configWithDefaults.providers?.anthropic?.baseUrl ??
+        'https://api.anthropic.com',
+      oauth: configWithDefaults.providers?.anthropic?.oauth,
+    },
+    copilot: {
+      baseUrl:
+        configWithDefaults.providers?.copilot?.baseUrl ??
+        'https://api.githubcopilot.com',
+      oauth: configWithDefaults.providers?.copilot?.oauth,
     },
     ollama: {
       baseUrl:
