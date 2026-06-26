@@ -323,7 +323,17 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
   const setInputWithCursorAtEnd = useCallback((next: string): void => {
     setInput(next);
-    setInputKey((key) => key + 1);
+    // Position the cursor at the end on the live textarea. Remounting (bumping
+    // inputKey) re-seeds the value but leaves a fresh OpenTUI textarea's cursor
+    // at offset 0, so update it imperatively when the area is mounted and only
+    // fall back to a remount when it isn't.
+    const area = promptAreaRef.current;
+    if (area && !area.isDestroyed) {
+      area.setText(next);
+      area.cursorOffset = next.length;
+    } else {
+      setInputKey((key) => key + 1);
+    }
   }, []);
   const currentSessionLabel = conversation?.title ?? currentSessionId;
   const activeRequestControllerRef = useRef<AbortController | null>(null);
@@ -782,8 +792,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     }
     if (key.name === 'tab') {
       if (selectedSuggestion) {
-        setInput((cur) => applyMentionSuggestion(cur, selectedSuggestion));
-        setInputKey((key) => key + 1);
+        setInputWithCursorAtEnd(
+          applyMentionSuggestion(input, selectedSuggestion)
+        );
       }
     }
   });
