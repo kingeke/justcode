@@ -54,26 +54,33 @@ function queryLineContent(query: string): StyledText {
 
 function sessionLineContent(
   session: ConversationSummary,
-  isSelected: boolean,
+  isSelected: boolean
+): StyledText {
+  return new StyledText([
+    tc(isSelected ? '› ' : '  ', isSelected ? { fg: 'cyan' } : {}),
+    tc(
+      truncate(session.title ?? session.sessionId, 48),
+      isSelected ? { fg: 'cyan', bold: true } : {}
+    ),
+  ]);
+}
+
+function sessionMetaContent(
+  session: ConversationSummary,
   isCurrent: boolean
 ): StyledText {
-  const chunks: TextChunk[] = [];
-  const lead = isSelected ? { fg: 'cyan' } : {};
-  chunks.push(tc(isSelected ? '› ' : '  ', lead));
-  chunks.push(
-    tc(session.title ?? session.sessionId, { ...lead, bold: isSelected })
-  );
-  chunks.push(tc('  ', lead));
-  chunks.push(tc(formatTimestamp(session.updatedAt), { fg: MUTED }));
-  chunks.push(tc('  ', lead));
-  chunks.push(
+  const chunks: TextChunk[] = [
+    tc(formatTimestamp(session.updatedAt), { fg: MUTED }),
+    tc('  '),
     tc(`${session.messageCount} msg${session.messageCount === 1 ? '' : 's'}`, {
       fg: MUTED,
-    })
-  );
+    }),
+  ];
+
   if (isCurrent) {
     chunks.push(tc('  ✓', { fg: 'green' }));
   }
+
   return new StyledText(chunks);
 }
 
@@ -207,10 +214,11 @@ export function SessionPicker({
             const isCurrent = session.sessionId === currentSessionId;
 
             return (
-              <box key={session.sessionId}>
-                <text
-                  content={sessionLineContent(session, isSelected, isCurrent)}
-                />
+              <box key={session.sessionId} flexDirection="row" flexShrink={0}>
+                <box flexGrow={1}>
+                  <text content={sessionLineContent(session, isSelected)} />
+                </box>
+                <text content={sessionMetaContent(session, isCurrent)} />
               </box>
             );
           })}
@@ -238,4 +246,9 @@ function formatTimestamp(isoDate: string): string {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+function truncate(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return `${value.slice(0, Math.max(0, max - 1))}…`;
 }

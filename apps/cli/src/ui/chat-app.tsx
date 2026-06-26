@@ -631,6 +631,30 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     []
   );
 
+  // Show a "Jump to bottom" affordance whenever the transcript is scrolled up
+  // away from the latest output. The scrollbox has no public scroll event, so
+  // we poll it on a short interval; setState bails out when the value is
+  // unchanged, so this stays cheap.
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const scrollBox = scrollRef.current;
+      if (!scrollBox) {
+        setShowJumpToBottom(false);
+        return;
+      }
+      const maxScroll = Math.max(
+        0,
+        scrollBox.scrollHeight - scrollBox.viewport.height
+      );
+      // Treat "within one row of the end" as the bottom to avoid flicker.
+      const atBottom = scrollBox.scrollTop >= maxScroll - 1;
+      setShowJumpToBottom(maxScroll > 0 && !atBottom);
+    }, 150);
+    return () => clearInterval(interval);
+  }, []);
+
   useKeyboard((key) => {
     if (showModelPicker || showConnectPicker || showSessionPicker) return;
 
@@ -1833,6 +1857,18 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             <text fg={MUTED}>
               ↑ to browse {bashToolMessages.length} command output(s)
             </text>
+          </box>
+        ) : null}
+
+        {showJumpToBottom ? (
+          <box marginTop={1} flexDirection="row" justifyContent="center">
+            <box
+              paddingX={1}
+              backgroundColor={INPUT_BG}
+              onMouseDown={scrollToBottom}
+            >
+              <text fg="cyan">↓ Jump to bottom</text>
+            </box>
           </box>
         ) : null}
 
