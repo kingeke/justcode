@@ -371,6 +371,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setLiveToolDiffs({});
     setMessageThinking({});
     streamingBufferRef.current = '';
+    contentFlushRef.current = { length: 0, atMs: 0 };
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
     responseTimingRef.current = { startMs: 0, firstTokenMs: null };
     tokensPerSecondSamplesRef.current = [];
@@ -380,6 +381,15 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const [activityTick, setActivityTick] = useState(0);
   const [streamingContent, setStreamingContent] = useState<string>('');
   const streamingBufferRef = useRef('');
+  // Throttle state for the live markdown block: how much of the buffer we've
+  // already pushed to <MarkdownView>, and when. We only re-render the streaming
+  // tail on a completed line (a newline arrived) so each update appends whole
+  // lines instead of re-laying-out a half-written line ~20×/sec — that mid-line
+  // reflow was the remaining transcript flicker while a response streamed.
+  const contentFlushRef = useRef<{ length: number; atMs: number }>({
+    length: 0,
+    atMs: 0,
+  });
 
   // Commit whatever assistant prose has streamed so far as an inline message,
   // then clear the live buffer. Called before each tool starts so the text that
@@ -389,6 +399,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const flushStreamedText = useCallback((): void => {
     const text = streamingBufferRef.current;
     streamingBufferRef.current = '';
+    contentFlushRef.current = { length: 0, atMs: 0 };
     setStreamingContent('');
     if (!text.trim()) return;
     setConversation((prev) =>
@@ -1248,6 +1259,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setThinkingDuration(null);
     setBrowseIndex(null);
     streamingBufferRef.current = '';
+    contentFlushRef.current = { length: 0, atMs: 0 };
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
     responseTimingRef.current = { startMs: Date.now(), firstTokenMs: null };
     setLastStats(null);
@@ -1259,8 +1271,25 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       const t = thinkingRef.current;
       if (t.buffer) setStreamingThinking(t.buffer);
       if (t.durationMs !== null) setThinkingDuration(t.durationMs);
+
+      // Push the live markdown tail only on a completed line, and at most
+      // ~10×/sec. A long line with no newline still advances via the staleness
+      // fallback so the block never looks frozen. Whatever hasn't flushed yet is
+      // captured and committed verbatim when the turn ends, so nothing is lost.
       const cBuf = streamingBufferRef.current;
-      if (cBuf) setStreamingContent(cBuf);
+      const flushed = contentFlushRef.current;
+      if (cBuf && cBuf.length !== flushed.length) {
+        const now = Date.now();
+        const sinceFlushMs = now - flushed.atMs;
+        const newlineArrived = cBuf.indexOf('\n', flushed.length) !== -1;
+        if (
+          (newlineArrived && sinceFlushMs >= 100) ||
+          sinceFlushMs >= 500
+        ) {
+          contentFlushRef.current = { length: cBuf.length, atMs: now };
+          setStreamingContent(cBuf);
+        }
+      }
     }, 50);
 
     const requestApproval = (
