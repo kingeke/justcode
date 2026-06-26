@@ -122,7 +122,12 @@ function getSyntaxStyle(): SyntaxStyle {
 // Renders raw markdown with OpenTUI's native <markdown> renderable, which lays out
 // tables, headings, lists and code blocks correctly inside the TUI (the previous
 // marked-terminal → ANSI pipeline mangled tables). Mirrors opencode's approach.
-function MarkdownView({
+// Memoized so a committed message's markdown isn't re-parsed (marked + shiki) on
+// every streaming tick or keystroke — only when its own `content` changes. This
+// is the main lever against the transcript flicker: without it, every message in
+// the conversation re-lays-out ~20×/sec while a response streams, which the
+// renderer overdraws.
+const MarkdownView = React.memo(function MarkdownView({
   content,
   streaming = false,
 }: {
@@ -139,7 +144,7 @@ function MarkdownView({
       flexShrink={0}
     />
   );
-}
+});
 
 // OpenTUI's <text> mis-lays-out a mix of bare-string and <span> inline children,
 // so any styled-inline line is built as a single StyledText (`content`) of chunks.
@@ -298,10 +303,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     tokensPerSecond: number;
     avgTokensPerSecond: number;
   } | null>(null);
-  const sessionStatsRef = useRef({
-    outputTokens: 0,
-    generationMs: 0,
-  });
+  // Every completed turn's tok/s, in order. The session average is just the mean
+  // of these samples (sum / count) — each turn weighted equally.
+  const tokensPerSecondSamplesRef = useRef<number[]>([]);
   const responseTimingRef = useRef<{
     startMs: number;
     firstTokenMs: number | null;
@@ -359,7 +363,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     streamingBufferRef.current = '';
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
     responseTimingRef.current = { startMs: 0, firstTokenMs: null };
-    sessionStatsRef.current = { outputTokens: 0, generationMs: 0 };
+    tokensPerSecondSamplesRef.current = [];
   };
   const [status, setStatus] = useState<string>('Loading session...');
   const [isSending, setIsSending] = useState(false);
@@ -524,7 +528,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         responseTimingRef.current,
         streamingThinking + streamingContent,
         activityTick,
-        sessionStatsRef.current
+        tokensPerSecondSamplesRef.current
       )
     : lastStats;
   const mentionSuggestions = useMemo(
@@ -554,6 +558,13 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     refreshWorkspaceFiles,
   ]);
 
+  // Push `input` into the uncontrolled textarea only when it diverges — i.e. when
+  // we changed it programmatically (clearing on submit, tab-completion, restoring
+  // an interrupted prompt). During normal typing `area.plainText === input`, so
+  // this is a no-op and the textarea keeps its own cursor. Focus is handled
+  // declaratively by the textarea's `focused` prop and the effect below; we must
+  // NOT re-focus here, since this runs on every keystroke and the repeated focus
+  // call caused the input to flicker / show a ghost cursor.
   useEffect(() => {
     const area = promptAreaRef.current;
     if (!area || area.isDestroyed) return;
@@ -562,22 +573,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       area.setText(input);
       area.cursorOffset = input.length;
     }
-
-    if (!isSending && browseIndex === null) {
-      queueMicrotask(() => {
-        if (
-          !promptAreaRef.current ||
-          promptAreaRef.current.isDestroyed ||
-          isSending ||
-          browseIndex !== null
-        ) {
-          return;
-        }
-
-        promptAreaRef.current.focus();
-      });
-    }
-  }, [browseIndex, input, isSending]);
+  }, [input]);
 
   useFocus(() => {
     setTerminalFocused(true);
@@ -658,6 +654,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   // we poll it on a short interval; setState bails out when the value is
   // unchanged, so this stays cheap.
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  // Whether the transcript is currently parked at the bottom. Read by the
+  // auto-scroll effect so a finished turn only snaps down when the user was
+  // already at the bottom — if they've scrolled up to read, we leave them be.
+  const isAtBottomRef = useRef(true);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -672,6 +672,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       );
       // Treat "within one row of the end" as the bottom to avoid flicker.
       const atBottom = scrollBox.scrollTop >= maxScroll - 1;
+      isAtBottomRef.current = atBottom;
       setShowJumpToBottom(maxScroll > 0 && !atBottom);
     }, 150);
     return () => clearInterval(interval);
@@ -835,12 +836,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     }
   }, [isSending]);
 
-  // Snap the transcript to the bottom when a message is committed. Per-token
-  // streaming growth is handled by the scrollbox's stickyScroll, so this only
-  // fires on discrete message changes and never yanks the user back while they
-  // scroll up through history mid-response.
+  // Snap the transcript to the bottom when a message is committed, but only if
+  // the user was already parked at the bottom. If they've scrolled up to read
+  // (e.g. while the model finishes), leave them there instead of yanking them
+  // down. Per-token streaming growth is handled by the scrollbox's stickyScroll.
   useEffect(() => {
-    scrollToBottom();
+    if (isAtBottomRef.current) {
+      scrollToBottom();
+    }
   }, [conversation?.messages.length, scrollToBottom]);
 
   // Leave browse mode if there are no rows to point at, and clamp the cursor if
@@ -1348,7 +1351,6 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         endMs - (timing.firstTokenMs ?? endMs),
         0
       );
-      const sessionTotals = sessionStatsRef.current;
       const estimatedTurnOutputTokens = estimateTokenCount(
         capturedThinking + capturedContent
       );
@@ -1358,14 +1360,6 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         turnUsage?.outputTokens ?? estimatedTurnOutputTokens;
       const turnCachedTokens = turnUsage?.cachedTokens;
       const turnCost = turnUsage?.cost;
-      const nextTotalOutputTokens =
-        sessionTotals.outputTokens + turnOutputTokens;
-      const nextGenerationMs =
-        sessionTotals.generationMs + capturedGenerationMs;
-      const nextAverageTokensPerSecond = getAverageTokensPerSecond(
-        nextTotalOutputTokens,
-        nextGenerationMs
-      );
       clearInterval(flushInterval);
       streamingBufferRef.current = '';
       thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
@@ -1388,15 +1382,15 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         if (timing.firstTokenMs !== null) {
           const ttftMs = timing.firstTokenMs - timing.startMs;
           const genSeconds = Math.max(capturedGenerationMs, 1) / 1000;
+          const turnTokensPerSecond = turnOutputTokens / genSeconds;
+          // Record this turn's rate and average over all turns so far.
+          const samples = tokensPerSecondSamplesRef.current;
+          samples.push(turnTokensPerSecond);
           setLastStats({
             ttftMs,
-            tokensPerSecond: turnOutputTokens / genSeconds,
-            avgTokensPerSecond: nextAverageTokensPerSecond,
+            tokensPerSecond: turnTokensPerSecond,
+            avgTokensPerSecond: average(samples),
           });
-          sessionStatsRef.current = {
-            outputTokens: nextTotalOutputTokens,
-            generationMs: nextGenerationMs,
-          };
         }
         if (turnUsage || turnInputTokens !== undefined) {
           const u = turnUsage ?? {
@@ -1995,7 +1989,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
  * summary that, when expanded, opens a box with the command and its output
  * split by a horizontal rule. Selection (while browsing) tints it cyan.
  */
-function BashResult({
+const BashResult = React.memo(function BashResult({
   command,
   output,
   expanded,
@@ -2057,7 +2051,7 @@ function BashResult({
       ) : null}
     </box>
   );
-}
+});
 
 /**
  * Inline transcript rendering of a non-bash tool result. Mirrors bash: when
@@ -2065,7 +2059,7 @@ function BashResult({
  * otherwise it collapses to a one-line `↳` summary. The tool name + arguments
  * are already shown by the assistant message's `⚙` line above this.
  */
-function ToolResultBlock({
+const ToolResultBlock = React.memo(function ToolResultBlock({
   content,
   expanded,
 }: {
@@ -2097,7 +2091,7 @@ function ToolResultBlock({
       <text content={ansiToStyledText(truncatePreview(content))} />
     </box>
   );
-}
+});
 
 /**
  * Inline tool result, with the change diff when the tool produced one (writes,
@@ -2105,7 +2099,7 @@ function ToolResultBlock({
  * wrote") above a one-line result summary; otherwise it collapses like any
  * other tool to the one-line `↳` summary.
  */
-function ToolResultInline({
+const ToolResultInline = React.memo(function ToolResultInline({
   content,
   expanded,
   diff,
@@ -2125,7 +2119,7 @@ function ToolResultInline({
     );
   }
   return <ToolResultBlock content={content} expanded={expanded} />;
-}
+});
 
 function bashCommandFromArgs(rawArguments: string | undefined): string {
   if (!rawArguments) return '';
@@ -2158,7 +2152,7 @@ function getLiveStats(
   timing: { startMs: number; firstTokenMs: number | null },
   outputText: string,
   tick: number,
-  sessionTotals: { outputTokens: number; generationMs: number }
+  tokensPerSecondSamples: number[]
 ): {
   ttftMs: number;
   tokensPerSecond: number;
@@ -2174,10 +2168,9 @@ function getLiveStats(
   const genElapsedMs = Math.max(now - firstTokenMs, 1);
   const estimatedTokens = estimateTokenCount(outputText);
   const currentTokensPerSecond = estimatedTokens / (genElapsedMs / 1000);
-  const avgTokensPerSecond = getAverageTokensPerSecond(
-    sessionTotals.outputTokens + estimatedTokens,
-    sessionTotals.generationMs + genElapsedMs
-  );
+  // Average only the finalized turns — the in-progress rate is too jittery, so
+  // it isn't folded in until this turn lands its final tok/s.
+  const avgTokensPerSecond = average(tokensPerSecondSamples);
 
   // `tick` is included so the caller can force a rerender on a timer.
   void tick;
@@ -2189,15 +2182,10 @@ function getLiveStats(
   };
 }
 
-function getAverageTokensPerSecond(
-  outputTokens: number,
-  generationMs: number
-): number {
-  if (outputTokens <= 0 || generationMs <= 0) {
-    return 0;
-  }
-
-  return outputTokens / (generationMs / 1000);
+/** Arithmetic mean of the samples, or 0 when there are none. */
+function average(samples: number[]): number {
+  if (samples.length === 0) return 0;
+  return samples.reduce((sum, value) => sum + value, 0) / samples.length;
 }
 
 function estimateTokenCount(text: string): number {
@@ -2243,7 +2231,11 @@ function todoLineColor(line: string): string {
  * lines) and the committed tool result (which prefixes an "Updated todo list:"
  * header) by rendering only the lines that carry a status marker.
  */
-function TodoBlock({ content }: { content: string }): React.ReactNode {
+const TodoBlock = React.memo(function TodoBlock({
+  content,
+}: {
+  content: string;
+}): React.ReactNode {
   const lines = content
     .split('\n')
     .filter((line) => /^\s*\[[ x~]\]/.test(line));
@@ -2276,7 +2268,7 @@ function TodoBlock({ content }: { content: string }): React.ReactNode {
       ))}
     </box>
   );
-}
+});
 
 function truncatePreview(preview: string): string {
   const lines = preview.split('\n');
