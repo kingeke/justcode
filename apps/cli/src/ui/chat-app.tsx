@@ -206,30 +206,24 @@ function metricsLineContent(
   metrics: ReturnType<typeof getInitialMetrics>,
   activeModelInfo: ModelInfo | null
 ): StyledText {
+  const cachedTokens = metrics.cachedTokens;
+  const newTokens = Math.max(metrics.inputTokens - cachedTokens, 0);
+  const pct = activeModelInfo?.contextWindow
+    ? contextPct(metrics.lastInputTokens, activeModelInfo.contextWindow)
+    : 0;
+
   const chunks: TextChunk[] = [
-    tc('in ', { fg: MUTED }),
+    tc('ctx ', { fg: MUTED }),
     tc(metrics.inputTokens.toLocaleString(), { fg: 'white' }),
+    tc(' cached ', { fg: MUTED }),
+    tc(cachedTokens.toLocaleString(), { fg: 'white' }),
+    tc(' new ', { fg: MUTED }),
+    tc(newTokens.toLocaleString(), { fg: 'white' }),
     tc(' out ', { fg: MUTED }),
     tc(metrics.outputTokens.toLocaleString(), { fg: 'white' }),
+    tc(' ctx(%) ', { fg: MUTED }),
+    tc(`${pct}%`, { fg: pct > 80 ? 'yellow' : 'white' }),
   ];
-
-  if (metrics.cachedTokens > 0) {
-    chunks.push(
-      tc(' cached ', { fg: MUTED }),
-      tc(metrics.cachedTokens.toLocaleString(), { fg: 'white' })
-    );
-  }
-
-  if (activeModelInfo?.contextWindow) {
-    const pct = contextPct(
-      metrics.lastInputTokens,
-      activeModelInfo.contextWindow
-    );
-    chunks.push(
-      tc(' ctx ', { fg: MUTED }),
-      tc(`${pct}%`, { fg: pct > 80 ? 'yellow' : 'white' })
-    );
-  }
 
   if (metrics.cost > 0) {
     chunks.push(

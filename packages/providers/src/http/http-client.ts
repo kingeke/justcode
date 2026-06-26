@@ -98,6 +98,7 @@ export interface SseUsage {
   inputTokens: number;
   outputTokens: number;
   cachedTokens: number;
+  cost?: number;
 }
 
 export interface StreamResult {
@@ -227,6 +228,7 @@ export async function requestSseStream(
             prompt_tokens?: number;
             completion_tokens?: number;
             prompt_tokens_details?: { cached_tokens?: number };
+            cost?: number;
           };
         };
         const delta = parsed.choices?.[0]?.delta;
@@ -244,6 +246,9 @@ export async function requestSseStream(
           usage.outputTokens = parsed.usage.completion_tokens ?? 0;
           usage.cachedTokens =
             parsed.usage.prompt_tokens_details?.cached_tokens ?? 0;
+          if (parsed.usage.cost != null) {
+            usage.cost = parsed.usage.cost;
+          }
         }
       } catch {
         // skip malformed SSE lines

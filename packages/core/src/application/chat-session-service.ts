@@ -186,6 +186,7 @@ export class ChatSessionService {
         'system',
         buildSystemPrompt(
           this.systemPrompt,
+          this.workspaceRoot,
           toolsEnabled && this.describeToolsInSystemPrompt
             ? toolDefinitions
             : [],

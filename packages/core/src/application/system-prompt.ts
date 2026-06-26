@@ -13,12 +13,13 @@ export const DEFAULT_SYSTEM_PROMPT = [
 
 export function buildSystemPrompt(
   systemPrompt: string = DEFAULT_SYSTEM_PROMPT,
+  workspaceRoot: string,
   tools: ToolDefinition[] = [],
   projectInstructions?: string
 ): string {
   const base = systemPrompt;
 
-  const sections = [base];
+  const sections = [`Workspace root: ${workspaceRoot}`, '', base];
 
   if (projectInstructions) {
     sections.push(
