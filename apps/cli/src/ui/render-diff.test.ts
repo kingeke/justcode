@@ -33,4 +33,30 @@ describe('renderDiff', () => {
     const out = plain(renderDiff({ path: 'a.txt', oldText: '', newText }));
     expect(out).toContain('more lines)');
   });
+
+  it('collapses unchanged lines far from the change into a hunk', () => {
+    const before = Array.from({ length: 50 }, (_, i) => `line ${i}`);
+    const after = [...before];
+    after[25] = 'CHANGED';
+    const out = plain(
+      renderDiff({
+        path: 'a.txt',
+        oldText: before.join('\n'),
+        newText: after.join('\n'),
+      })
+    );
+    const lines = out.split('\n');
+
+    // The change and a little context are shown...
+    expect(lines).toContain('- line 25');
+    expect(lines).toContain('+ CHANGED');
+    expect(lines).toContain('  line 24');
+    expect(lines).toContain('  line 22'); // 3 lines of context
+    // ...but distant unchanged lines are collapsed, not dumped.
+    expect(lines).not.toContain('  line 0');
+    expect(lines).not.toContain('  line 49');
+    expect(out).toMatch(/⋯ \d+ unchanged lines/);
+    // The whole hunk stays compact.
+    expect(lines.length).toBeLessThan(15);
+  });
 });

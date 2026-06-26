@@ -419,8 +419,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   );
   const [pendingApproval, setPendingApproval] =
     useState<PendingApproval | null>(null);
-  // Rendered diffs for live file-changing tool calls, keyed by tool-call id, so
-  // the diff shows inline in place while the call runs.
+  // Rendered diffs for file-changing tool calls, keyed by tool-call id (which
+  // the committed messages share), so a write/edit/patch keeps showing its diff
+  // inline in the transcript. Captured on the tool's 'start'; cleared only when
+  // the session resets.
   const [liveToolDiffs, setLiveToolDiffs] = useState<Record<string, string>>(
     {}
   );
@@ -1192,7 +1194,6 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setStreamingContent('');
     setStreamingThinking('');
     setThinkingDuration(null);
-    setLiveToolDiffs({});
     setBrowseIndex(null);
     streamingBufferRef.current = '';
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
@@ -1498,9 +1499,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         setStatus('Request failed');
       }
     } finally {
-      // Live diffs are only an in-flight overlay; once the turn commits the
-      // finished conversation renders every tool call inline, in order.
-      setLiveToolDiffs({});
+      // Keep liveToolDiffs: they're keyed by tool-call id, which the committed
+      // messages share, so a write/edit keeps showing its diff in the
+      // transcript after the turn (cleared only when the session resets).
       setIsSending(false);
       activeRequestControllerRef.current = null;
     }
@@ -1669,22 +1670,15 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                   ) : message.name === 'todowrite' ? (
                     <TodoBlock content={message.content} />
                   ) : (
-                    <box flexDirection="column">
-                      {message.toolCallId &&
-                      liveToolDiffs[message.toolCallId] ? (
-                        <box marginLeft={2}>
-                          <text
-                            content={ansiToStyledText(
-                              liveToolDiffs[message.toolCallId] ?? ''
-                            )}
-                          />
-                        </box>
-                      ) : null}
-                      <ToolResultBlock
-                        content={message.content}
-                        expanded={expandTools}
-                      />
-                    </box>
+                    <ToolResultInline
+                      content={message.content}
+                      expanded={expandTools}
+                      diff={
+                        message.toolCallId
+                          ? liveToolDiffs[message.toolCallId]
+                          : undefined
+                      }
+                    />
                   )
                 ) : (
                   <text
@@ -2103,6 +2097,34 @@ function ToolResultBlock({
       <text content={ansiToStyledText(truncatePreview(content))} />
     </box>
   );
+}
+
+/**
+ * Inline tool result, with the change diff when the tool produced one (writes,
+ * edits, patches). With /expand-tools on, the diff is shown (that's "what it
+ * wrote") above a one-line result summary; otherwise it collapses like any
+ * other tool to the one-line `↳` summary.
+ */
+function ToolResultInline({
+  content,
+  expanded,
+  diff,
+}: {
+  content: string;
+  expanded: boolean;
+  diff?: string | undefined;
+}): React.ReactNode {
+  if (expanded && diff) {
+    return (
+      <box flexDirection="column">
+        <box marginLeft={2}>
+          <text content={ansiToStyledText(diff)} />
+        </box>
+        <ToolResultBlock content={content} expanded={false} />
+      </box>
+    );
+  }
+  return <ToolResultBlock content={content} expanded={expanded} />;
 }
 
 function bashCommandFromArgs(rawArguments: string | undefined): string {
