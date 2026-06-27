@@ -7,7 +7,7 @@ import {
   type InputRenderable,
   type TextChunk,
 } from '@opentui/core';
-import { isKeyName, KeyName } from '@cli/ui/key-name.js';
+import { isNonPrintableKey, KeyName } from '@cli/ui/key-name.js';
 import { useKeyboard } from '@opentui/react';
 
 import { type ModelInfo, type ProviderClient } from '@core/ports/chat-model';
@@ -71,7 +71,7 @@ const ADD_CUSTOM_ENTRY = {
 // Literal character to append to the search query, or undefined for control keys.
 function printableInput(key: KeyEvent): string | undefined {
   if (key.ctrl || key.meta) return undefined;
-  if (isKeyName(key.name)) return undefined;
+  if (isNonPrintableKey(key.name)) return undefined;
   const sequence = key.sequence;
   if (!sequence) return undefined;
   for (const char of sequence) {
