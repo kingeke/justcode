@@ -30,8 +30,6 @@ import {
   buildSystemPrompt,
 } from '@core/application/system-prompt';
 
-/** Hard cap on tool round-trips per user message, to bound runaway loops. */
-const MAX_TOOL_STEPS = 12;
 const SESSION_TITLE_SYSTEM_PROMPT = [
   'You are a session name generator.',
   'You output ONLY a short session title. Nothing else.',
@@ -187,7 +185,10 @@ export class ChatSessionService {
     let usage: TokenUsage | undefined;
     let reply = '';
 
-    for (let step = 0; step < MAX_TOOL_STEPS; step += 1) {
+    // The agent keeps taking tool-call turns until the model stops asking for
+    // tools (or the request is aborted). There's no round-trip cap: the work is
+    // done when the model says it's done, not after an arbitrary N steps.
+    for (;;) {
       throwIfAborted(input.signal);
       const systemMessage = createMessage(
         'system',
@@ -219,7 +220,6 @@ export class ChatSessionService {
         if (toolsEnabled && error instanceof ToolsUnsupportedError) {
           this.toolUnsupportedModels.add(input.model);
           toolsEnabled = false;
-          step -= 1;
           continue;
         }
         throw error;
