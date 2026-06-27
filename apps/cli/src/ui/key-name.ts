@@ -28,32 +28,21 @@ const KEY_NAME_SET = new Set<string>([
   ...Object.values(KeyName),
 ]);
 
-// These KeyName entries are ordinary printable letters that double as
-// identifiers for modifier combos (e.g. ctrl+c, meta+v, ctrl+a). When typed on
-// their own they must remain insertable as text, so they don't count as
-// non-printable keys. The combos still work: they're matched against the enum
-// constants directly and are already gated on key.ctrl/key.meta.
-const PRINTABLE_KEY_NAMES = new Set<string>([
-  KeyName.A,
-  KeyName.C,
-  KeyName.N,
-  KeyName.V,
-  KeyName.Y,
-]);
-
 export function isKeyName(value: string | undefined): value is KeyName {
   return value !== undefined && KEY_NAME_SET.has(value);
 }
 
 /**
  * True for named control/navigation keys that must never be inserted as text
- * (arrows, return, escape, …). Unlike {@link isKeyName}, this excludes the
- * printable letter aliases so a search box can still accept a/c/n/v/y.
+ * (arrows, return, escape, f1, backspace, space, …).
+ *
+ * Such keys always have multi-character names. Printable keystrokes report
+ * their single character as the name — including letters (whose names double as
+ * combo identifiers like ctrl+c) and digits/symbols (whose names collide with
+ * numpad entries such as "1" or "-" in OpenTUI's key map). So a single-character
+ * name is always printable here; modifier combos are already filtered upstream
+ * by the key.ctrl / key.meta check before this is consulted.
  */
 export function isNonPrintableKey(value: string | undefined): boolean {
-  return (
-    value !== undefined &&
-    KEY_NAME_SET.has(value) &&
-    !PRINTABLE_KEY_NAMES.has(value)
-  );
+  return value !== undefined && value.length > 1 && KEY_NAME_SET.has(value);
 }

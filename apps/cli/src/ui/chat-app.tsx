@@ -1423,6 +1423,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         requestApproval,
         requestUserInput,
         onToolActivity,
+        onTitle: (sessionId, title) => {
+          setConversation((prev) =>
+            prev && prev.sessionId === sessionId ? { ...prev, title } : prev
+          );
+        },
         onToken: (token) => {
           if (responseTimingRef.current.firstTokenMs === null) {
             responseTimingRef.current.firstTokenMs = Date.now();
@@ -1486,7 +1491,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         setStreamingContent('');
         setStreamingThinking('');
         setThinkingDuration(null);
-        setConversation(result.conversation);
+        // The title is async metadata delivered via onTitle, so a turn result
+        // may not carry it yet. Keep any title we already have instead of
+        // reverting the label back to the session uuid.
+        setConversation((prev) =>
+          result.conversation.title || !prev?.title
+            ? result.conversation
+            : { ...result.conversation, title: prev.title }
+        );
         setStatus('Ready');
         if (thinkingAnchor && capturedThinking) {
           setMessageThinking((prev) => ({

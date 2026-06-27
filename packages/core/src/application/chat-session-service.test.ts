@@ -243,7 +243,7 @@ describe('ChatSessionService', () => {
     expect(repository.conversation.messages).toHaveLength(2);
   });
 
-  it('generates and saves a session title after the first turn', async () => {
+  it('generates and saves a session title in the background after the first turn', async () => {
     const repository = new InMemoryConversationRepository();
     const service = new ChatSessionService(
       repository,
@@ -253,14 +253,26 @@ describe('ChatSessionService', () => {
     const startedSession = await service.startSession({
       sessionId: 'session-1',
     });
+
+    let resolveTitle: (title: string) => void;
+    const titlePromise = new Promise<string>((resolve) => {
+      resolveTitle = resolve;
+    });
+
     const result = await service.submitMessage({
       conversation: startedSession.conversation,
       model: startedSession.activeModel,
       content: 'Hello there',
+      onTitle: (_sessionId, title) => resolveTitle(title),
     });
 
-    expect(result.conversation.title).toMatch(/^Project Planning$/);
-    expect(repository.conversation.title).toBe(result.conversation.title);
+    // The turn returns immediately; the title arrives later via onTitle so it
+    // never blocks the user's next message.
+    expect(result.conversation.title).toBeUndefined();
+
+    const title = await titlePromise;
+    expect(title).toMatch(/^Project Planning$/);
+    expect(repository.conversation.title).toBe(title);
   });
 
   it('lists saved sessions', async () => {

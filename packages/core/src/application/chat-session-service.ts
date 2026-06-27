@@ -76,6 +76,12 @@ export interface SubmitMessageInput {
   /** Lets a tool prompt the user for input mid-turn (e.g. the question tool). */
   requestUserInput?: (request: UserQuestionRequest) => Promise<string>;
   onToolActivity?: (event: ToolActivityEvent) => void;
+  /**
+   * Fired when a session title is generated in the background, after the turn
+   * has already returned. The title call runs independently so it never blocks
+   * the chat turn (and thus the user's next message).
+   */
+  onTitle?: (sessionId: string, title: string) => void;
 }
 
 export interface SubmitMessageResult {
@@ -107,6 +113,12 @@ export class ChatSessionService {
   private readonly describeToolsInSystemPrompt: boolean;
   /** Models that rejected tools once; we send their requests chat-only after. */
   private readonly toolUnsupportedModels = new Set<string>();
+  /**
+   * Sessions whose background title generation has already been started, so we
+   * don't refire it every turn while the freshly-returned conversation (which
+   * intentionally omits the still-pending title) keeps coming back to us.
+   */
+  private readonly titledSessions = new Set<string>();
 
   public constructor(
     private readonly repository: ConversationRepository,
@@ -266,16 +278,20 @@ export class ChatSessionService {
 
     await this.repository.save(updatedConversation);
 
-    if (!updatedConversation.title) {
-      const generatedTitle = await this.generateSessionTitle({
+    // Title generation is a separate model call. Run it in the background so it
+    // never holds up the turn result — the user can keep typing while it
+    // resolves, and the title is delivered via onTitle once ready.
+    if (
+      !updatedConversation.title &&
+      !this.titledSessions.has(updatedConversation.sessionId)
+    ) {
+      this.titledSessions.add(updatedConversation.sessionId);
+      void this.generateSessionTitleInBackground({
+        sessionId: updatedConversation.sessionId,
         model: input.model,
         userMessage: trimmedContent,
+        ...(input.onTitle ? { onTitle: input.onTitle } : {}),
       });
-
-      if (generatedTitle) {
-        updatedConversation.title = generatedTitle;
-        await this.repository.save(updatedConversation);
-      }
     }
 
     return {
@@ -361,6 +377,40 @@ export class ChatSessionService {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Generates a title off the critical path, then persists it without
+   * clobbering any newer messages: it re-loads the latest conversation and
+   * only sets the title if one still hasn't been assigned.
+   */
+  private async generateSessionTitleInBackground(input: {
+    sessionId: string;
+    model: string;
+    userMessage: string;
+    onTitle?: (sessionId: string, title: string) => void;
+  }): Promise<void> {
+    const title = await this.generateSessionTitle({
+      model: input.model,
+      userMessage: input.userMessage,
+    });
+    if (!title) {
+      // Let a later turn retry, matching the original retry-on-failure behavior.
+      this.titledSessions.delete(input.sessionId);
+      return;
+    }
+
+    try {
+      const latest = await this.repository.load(input.sessionId);
+      if (latest.title) return;
+      await this.repository.save({ ...latest, title });
+    } catch {
+      // The session may have been cleared/reset before the title resolved.
+      this.titledSessions.delete(input.sessionId);
+      return;
+    }
+
+    input.onTitle?.(input.sessionId, title);
   }
 
   private async generateSessionTitle(input: {
