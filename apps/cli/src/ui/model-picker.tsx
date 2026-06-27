@@ -6,6 +6,7 @@ import {
   type KeyEvent,
   type TextChunk,
 } from '@opentui/core';
+import { isKeyName, KeyName } from '@cli/ui/key-name.js';
 import { useKeyboard } from '@opentui/react';
 
 import { type ModelInfo } from '@core/ports/chat-model';
@@ -51,6 +52,7 @@ const SORT_STATES: SortState[] = SORT_MODES.flatMap((mode) => [
 // Literal character to append to the search query, or undefined for control keys.
 function printableInput(key: KeyEvent): string | undefined {
   if (key.ctrl || key.meta) return undefined;
+  if (isKeyName(key.name)) return undefined;
   const sequence = key.sequence;
   if (!sequence) return undefined;
   for (const char of sequence) {
@@ -121,23 +123,23 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
   }, [query, sortState]);
 
   useKeyboard((key) => {
-    if (key.name === 'escape' || (key.ctrl && key.name === 'c')) {
+    if (key.name === KeyName.Escape || (key.ctrl && key.name === KeyName.C)) {
       props.onCancel();
       return;
     }
 
-    if (key.name === 'return') {
+    if (key.name === KeyName.Return) {
       const entry = grouped[focusedIndex];
       if (entry) props.onSelect(entry.model);
       return;
     }
 
-    if (key.name === 'tab') {
+    if (key.name === KeyName.Tab) {
       setSortState((prev) => cycleSortState(prev, key.shift ? -1 : 1));
       return;
     }
 
-    if (key.name === 'down') {
+    if (key.name === KeyName.Down) {
       const next = clampFocus(focusedIndex + 1);
       setFocusedIndex(next);
       if (next >= scrollOffsetRef.current + VISIBLE_ROWS) {
@@ -146,7 +148,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
       return;
     }
 
-    if (key.name === 'up') {
+    if (key.name === KeyName.Up) {
       const next = clampFocus(focusedIndex - 1);
       setFocusedIndex(next);
       if (next < scrollOffsetRef.current) {
@@ -155,14 +157,14 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
       return;
     }
 
-    if (key.name === 'backspace' || key.name === 'delete') {
+    if (key.name === KeyName.Backspace || key.name === KeyName.Delete) {
       setQuery((prev) => prev.slice(0, -1));
       return;
     }
 
     if (
-      (key.meta && key.name === 'v') ||
-      (key.shift && key.name === 'insert')
+      (key.meta && key.name === KeyName.V) ||
+      (key.shift && key.name === KeyName.Insert)
     ) {
       const paste = pasteFromClipboard();
       if (paste) {

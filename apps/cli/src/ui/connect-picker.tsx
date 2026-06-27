@@ -7,6 +7,7 @@ import {
   type InputRenderable,
   type TextChunk,
 } from '@opentui/core';
+import { isKeyName, KeyName } from '@cli/ui/key-name.js';
 import { useKeyboard } from '@opentui/react';
 
 import { type ModelInfo, type ProviderClient } from '@core/ports/chat-model';
@@ -70,6 +71,7 @@ const ADD_CUSTOM_ENTRY = {
 // Literal character to append to the search query, or undefined for control keys.
 function printableInput(key: KeyEvent): string | undefined {
   if (key.ctrl || key.meta) return undefined;
+  if (isKeyName(key.name)) return undefined;
   const sequence = key.sequence;
   if (!sequence) return undefined;
   for (const char of sequence) {
@@ -191,7 +193,8 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
   }, [step]);
 
   useKeyboard((key) => {
-    const isBack = key.name === 'escape' || (key.ctrl && key.name === 'c');
+    const isBack =
+      key.name === KeyName.Escape || (key.ctrl && key.name === KeyName.C);
 
     // OAuth-connect: only allow esc/ctrl+c to abort.
     if (step === 'oauth-connect') {
@@ -212,15 +215,15 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
         setStep('provider');
         return;
       }
-      if (key.name === 'up') {
+      if (key.name === KeyName.Up) {
         setAuthMethodIndex(0);
         return;
       }
-      if (key.name === 'down') {
+      if (key.name === KeyName.Down) {
         setAuthMethodIndex(1);
         return;
       }
-      if (key.name === 'return') {
+      if (key.name === KeyName.Return) {
         if (authMethodIndex === 0) {
           setOauthStatus('');
           setStep('oauth-connect');
@@ -298,14 +301,14 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       return;
     }
 
-    if (key.name === 'backspace' || key.name === 'delete') {
+    if (key.name === KeyName.Backspace || key.name === KeyName.Delete) {
       setQuery((prev) => prev.slice(0, -1));
       return;
     }
 
     if (
-      (key.meta && key.name === 'v') ||
-      (key.shift && key.name === 'insert')
+      (key.meta && key.name === KeyName.V) ||
+      (key.shift && key.name === KeyName.Insert)
     ) {
       const paste = pasteFromClipboard();
       if (paste) {
