@@ -20,6 +20,7 @@ import {
   toOpenAiWireMessages,
   type RawOpenAiToolCall,
 } from '@providers/openai-compatible/openai-wire';
+import { sendResponsesRequest } from '@providers/openai/openai-responses-client';
 
 interface OpenAiCompatibleProviderOptions {
   providerId: ProviderId;
@@ -38,6 +39,13 @@ interface OpenAiCompatibleProviderOptions {
 interface OpenAiModelsResponse {
   data?: Array<{
     id: string;
+    /**
+     * Copilot-only: the API surfaces this model is reachable through. Newer
+     * GPT-5 models advertise only "/responses", which this chat-completions
+     * client can't call (400 "unsupported_api_for_model"). Absent on plain
+     * OpenAI/legacy models, which do work via /chat/completions.
+     */
+    supported_endpoints?: string[];
   }>;
 }
 
@@ -59,6 +67,13 @@ interface OpenAiChatResponse {
 
 export class OpenAiCompatibleProvider implements ProviderClient {
   public readonly providerId: ProviderId;
+
+  /**
+   * Per-model `supported_endpoints` learned from {@link listModels} (Copilot).
+   * Used to route a turn to `/responses` for models that can't be reached via
+   * `/chat/completions` (e.g. gpt-5.4-mini, gpt-5.5).
+   */
+  private readonly modelEndpoints = new Map<string, string[]>();
 
   public constructor(
     private readonly options: OpenAiCompatibleProviderOptions
@@ -82,6 +97,51 @@ export class OpenAiCompatibleProvider implements ProviderClient {
   }
 
   private async sendChatRequest(request: ChatRequest): Promise<ChatResult> {
+    if (this.usesResponsesApi(request.model)) {
+      return this.sendResponsesChat(request);
+    }
+    try {
+      return await this.sendChatCompletions(request);
+    } catch (error) {
+      // Some models (newer Copilot GPT-5s) are only served via /responses and
+      // reject /chat/completions with `unsupported_api_for_model`. Remember
+      // that and retry on the Responses API so the turn still succeeds.
+      if (isUnsupportedApiForModelError(error)) {
+        this.modelEndpoints.set(request.model, ['/responses']);
+        return this.sendResponsesChat(request);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * True when the model advertises `/responses` but not `/chat/completions`.
+   * Unknown models (no listing yet) default to `/chat/completions`, with a
+   * fallback in {@link sendChatRequest} if the server rejects it.
+   */
+  private usesResponsesApi(model: string): boolean {
+    const endpoints = this.modelEndpoints.get(model);
+    if (!endpoints) return false;
+    return (
+      endpoints.includes('/responses') &&
+      !endpoints.includes('/chat/completions')
+    );
+  }
+
+  private async sendResponsesChat(request: ChatRequest): Promise<ChatResult> {
+    return sendResponsesRequest({
+      baseUrl: this.options.baseUrl,
+      headers: {
+        ...(await this.createHeaders()),
+        'content-type': 'application/json',
+        accept: 'text/event-stream',
+      },
+      request,
+      providerId: String(this.providerId),
+    });
+  }
+
+  private async sendChatCompletions(request: ChatRequest): Promise<ChatResult> {
     const messages = toOpenAiWireMessages(request.messages);
     const tools = toOpenAiToolDefinitions(request.tools);
 
@@ -197,6 +257,15 @@ export class OpenAiCompatibleProvider implements ProviderClient {
 
     void logModelsResponse(String(this.providerId), response);
 
+    // Remember each model's reachable endpoints so sendChat can route to
+    // /responses for models that don't accept /chat/completions.
+    this.modelEndpoints.clear();
+    for (const model of response.data ?? []) {
+      if (model.supported_endpoints) {
+        this.modelEndpoints.set(model.id, model.supported_endpoints);
+      }
+    }
+
     return (response.data ?? [])
       .map((model) => ({
         id: model.id,
@@ -239,5 +308,22 @@ function isToolsUnsupportedError(error: unknown): boolean {
     body.includes('does not support tool') ||
     (body.includes('tool') && body.includes('not supported')) ||
     (body.includes('function calling') && body.includes('not'))
+  );
+}
+
+/**
+ * Detects Copilot's 400 for models served only via the Responses API
+ * (`unsupported_api_for_model` / "not accessible via the /chat/completions
+ * endpoint"), so the turn can be retried on /responses.
+ */
+function isUnsupportedApiForModelError(error: unknown): boolean {
+  if (!(error instanceof HttpError) || error.status !== 400) {
+    return false;
+  }
+
+  const body = error.responseText.toLowerCase();
+  return (
+    body.includes('unsupported_api_for_model') ||
+    body.includes('not accessible via the /chat/completions')
   );
 }
