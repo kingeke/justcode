@@ -7,6 +7,8 @@ import React, {
   useState,
 } from 'react';
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import {
   createTextAttributes,
   parseColor,
@@ -47,11 +49,14 @@ import { createMessage } from '@core/domain/message';
 import type { ModelInfo, ProviderClient } from '@core/ports/chat-model';
 import type { GlobalConfig } from '@runtime/persistence/global-config';
 import { mergeProviderConfig } from '@runtime/persistence/global-config';
+import { resetAppState } from '@runtime/persistence/reset-app-state';
 import { renderDiff } from '@cli/ui/render-diff.js';
 import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
 import {
   COMMANDS,
+  CommandName,
   filterCommands,
+  isCommandName,
   parseCommandInput,
 } from '@cli/ui/commands.js';
 import { openFileInEditor } from '@cli/ui/open-file.js';
@@ -181,28 +186,28 @@ function commandLineContent(
     tc('  ', lead),
   ];
   const description =
-    cmd.name === 'thinking'
+    cmd.name === CommandName.Thinking
       ? state.thinkingCollapsed
         ? 'Expand thinking'
         : 'Collapse thinking'
       : cmd.description;
   chunks.push(tc(description, { fg: MUTED }));
 
-  if (cmd.name === 'auto-writes') {
+  if (cmd.name === CommandName.AutoWrites) {
     chunks.push(
       tc('  '),
       tc(`[${state.autoApplyWrites ? 'on' : 'off'}]`, {
         fg: state.autoApplyWrites ? 'green' : 'yellow',
       })
     );
-  } else if (cmd.name === 'expand-tools') {
+  } else if (cmd.name === CommandName.ExpandTools) {
     chunks.push(
       tc('  '),
       tc(`[${state.expandTools ? 'on' : 'off'}]`, {
         fg: state.expandTools ? 'green' : 'yellow',
       })
     );
-  } else if (cmd.name === 'read-limit') {
+  } else if (cmd.name === CommandName.ReadLimit) {
     chunks.push(tc('  '), tc(`[${state.maxReadLines} lines]`, { fg: 'green' }));
   }
 
@@ -1095,109 +1100,135 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setStatus('Working...');
   };
 
-  const executeCommand = (name: string, arg?: string): void => {
+  const executeCommand = (name: CommandName, arg?: string): void => {
     setInput('');
     setError(null);
 
-    if (name === 'models') {
-      setShowModelPicker(true);
-      return;
-    }
-
-    if (name === 'sessions') {
-      setShowSessionPicker(true);
-      return;
-    }
-
-    if (name === 'connect') {
-      setStatus('Select a provider to connect');
-      setShowConnectPicker(true);
-      return;
-    }
-
-    if (name === 'config') {
-      void openFileInEditor(props.configFilePath)
-        .then(() => {
-          setStatus('Opened config file');
-        })
-        .catch((caughtError: unknown) => {
-          setError(getErrorMessage(caughtError));
-        });
-      return;
-    }
-
-    if (name === 'read-limit') {
-      const trimmed = (arg ?? '').trim();
-      const current = maxReadLinesRef.current;
-      if (!trimmed) {
-        setStatus(
-          `Read limit is ${current} lines (use /read-limit <lines> to change)`
-        );
+    switch (name) {
+      case CommandName.Models:
+        setShowModelPicker(true);
         return;
-      }
-      const lines = Number.parseInt(trimmed, 10);
-      if (!Number.isFinite(lines) || lines <= 0) {
-        setError(
-          `Invalid read limit '${trimmed}'. Provide a positive number of lines.`
-        );
+
+      case CommandName.Sessions:
+        setShowSessionPicker(true);
         return;
-      }
-      maxReadLinesRef.current = lines;
-      setMaxReadLines(lines);
-      props.onMaxReadLinesChange?.(lines);
-      setStatus(`Read limit set to ${lines} lines`);
-      return;
-    }
 
-    if (name === 'auto-writes') {
-      const next = !autoApplyWritesRef.current;
-      setAutoApplyWrites(next);
-      autoApplyWritesRef.current = next;
-      props.onAutoApplyWritesChange?.(next);
-      setStatus(next ? 'Auto-applying writes' : 'Confirming each write');
-      return;
-    }
+      case CommandName.Connect:
+        setStatus('Select a provider to connect');
+        setShowConnectPicker(true);
+        return;
 
-    if (name === 'expand-tools') {
-      const next = !expandTools;
-      setExpandTools(next);
-      props.onExpandToolsChange?.(next);
-      setStatus(
-        next ? 'Showing full tool output inline' : 'Collapsing tool output'
-      );
-      return;
-    }
-
-    if (name === 'thinking') {
-      const next = !thinkingCollapsed;
-      setThinkingCollapsed(next);
-      props.onThinkingCollapsedChange?.(next);
-      setStatus(next ? 'Thinking collapsed' : 'Thinking expanded');
-      return;
-    }
-
-    if (name === 'new-session') {
-      resetFreshSessionState();
-      const newId = randomUUID();
-      const nextRequestedModel = activeModel || props.requestedModel;
-      nextSessionRequestedModelRef.current = nextRequestedModel;
-      setCurrentSessionId(newId);
-      return;
-    }
-
-    if (name === 'clear') {
-      resetFreshSessionState();
-      void props.chatSessionService
-        .clearSession(currentSessionId)
-        .then((fresh) => {
-          startTransition(() => {
-            setConversation(fresh);
-            setStatus('Ready');
+      case CommandName.Config:
+        void openFileInEditor(props.configFilePath)
+          .then(() => {
+            setStatus('Opened config file');
+          })
+          .catch((caughtError: unknown) => {
+            setError(getErrorMessage(caughtError));
           });
-        })
-        .catch((caughtError: unknown) => {
-          setError(getErrorMessage(caughtError));
-        });
+        return;
+
+      case CommandName.ReadLimit: {
+        const trimmed = (arg ?? '').trim();
+        const current = maxReadLinesRef.current;
+        if (!trimmed) {
+          setStatus(
+            `Read limit is ${current} lines (use /read-limit <lines> to change)`
+          );
+          return;
+        }
+        const lines = Number.parseInt(trimmed, 10);
+        if (!Number.isFinite(lines) || lines <= 0) {
+          setError(
+            `Invalid read limit '${trimmed}'. Provide a positive number of lines.`
+          );
+          return;
+        }
+        maxReadLinesRef.current = lines;
+        setMaxReadLines(lines);
+        props.onMaxReadLinesChange?.(lines);
+        setStatus(`Read limit set to ${lines} lines`);
+        return;
+      }
+
+      case CommandName.AutoWrites: {
+        const next = !autoApplyWritesRef.current;
+        setAutoApplyWrites(next);
+        autoApplyWritesRef.current = next;
+        props.onAutoApplyWritesChange?.(next);
+        setStatus(next ? 'Auto-applying writes' : 'Confirming each write');
+        return;
+      }
+
+      case CommandName.ExpandTools: {
+        const next = !expandTools;
+        setExpandTools(next);
+        props.onExpandToolsChange?.(next);
+        setStatus(
+          next ? 'Showing full tool output inline' : 'Collapsing tool output'
+        );
+        return;
+      }
+
+      case CommandName.Thinking: {
+        const next = !thinkingCollapsed;
+        setThinkingCollapsed(next);
+        props.onThinkingCollapsedChange?.(next);
+        setStatus(next ? 'Thinking collapsed' : 'Thinking expanded');
+        return;
+      }
+
+      case CommandName.NewSession: {
+        resetFreshSessionState();
+        const newId = randomUUID();
+        const nextRequestedModel = activeModel || props.requestedModel;
+        nextSessionRequestedModelRef.current = nextRequestedModel;
+        setCurrentSessionId(newId);
+        return;
+      }
+
+      case CommandName.Clear:
+        resetFreshSessionState();
+        void props.chatSessionService
+          .clearSession(currentSessionId)
+          .then((fresh) => {
+            startTransition(() => {
+              setConversation(fresh);
+              setStatus('Ready');
+            });
+          })
+          .catch((caughtError: unknown) => {
+            setError(getErrorMessage(caughtError));
+          });
+        return;
+
+      case CommandName.Reset: {
+        const configDirectory = join(homedir(), '.cache', 'justcode');
+        const resetConfig =
+          savedConfig.systemPrompt === undefined
+            ? {}
+            : { systemPrompt: savedConfig.systemPrompt };
+        void resetAppState(configDirectory)
+          .then(() => {
+            props.onConfigChange(resetConfig);
+            setSavedConfig(resetConfig);
+            setConnectedProviders([]);
+            setConnectModels(null);
+            setAllModels([]);
+            setActiveProviderId(undefined);
+            setActiveModel('');
+            setActiveModelInfo(null);
+            resetFreshSessionState();
+            const newId = randomUUID();
+            nextSessionRequestedModelRef.current = undefined;
+            setCurrentSessionId(newId);
+            setStatus('Reset complete');
+          })
+          .catch((caughtError: unknown) => {
+            setError(getErrorMessage(caughtError));
+          });
+        return;
+      }
     }
   };
 
@@ -1222,7 +1253,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
       if (hasArg) {
         // Explicit name + argument (e.g. "/read-limit 64").
-        if (COMMANDS.some((c) => c.name === commandName)) {
+        if (isCommandName(commandName)) {
           executeCommand(commandName, arg);
         } else {
           setError(`Unknown command '/${commandName}'.`);
@@ -1230,7 +1261,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       } else {
         // No argument: prefer an exact name (e.g. after tab-completing and
         // submitting), otherwise honour the highlighted suggestion.
-        const exact = COMMANDS.find((c) => c.name === commandName);
+        const exact = isCommandName(commandName)
+          ? COMMANDS.find((c) => c.name === commandName)
+          : undefined;
         const selected = exact ?? visibleCommands[selectedCommandIndex];
         if (selected) executeCommand(selected.name);
       }

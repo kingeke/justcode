@@ -12,6 +12,7 @@ import {
   readGlobalConfig,
   writeGlobalConfig,
 } from '@runtime/persistence/global-config';
+import { resetAppState } from '@runtime/persistence/reset-app-state';
 
 interface SharedOptions {
   provider?: string;
@@ -91,6 +92,17 @@ export function createCli(): Command {
       for (const model of models) {
         process.stdout.write(`- ${model.id}\n`);
       }
+    });
+
+  program
+    .command('reset')
+    .description(
+      'Reset app defaults and clear connected providers, pulled models, and sessions'
+    )
+    .action(async () => {
+      const appConfig = await loadAppConfig();
+      await resetAppState(appConfig.configDirectory);
+      process.stdout.write('Reset complete.\n');
     });
 
   return program;
