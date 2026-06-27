@@ -42,10 +42,13 @@ export function buildSystemPrompt(
 
   sections.push(
     '',
-    'You have access to the following tools. Use them when they help accomplish',
-    'the task - for example, prefer the write_file tool over printing file',
-    'contents when the user asks you to create or modify a file. Paths are relative',
-    'to the workspace root. Only call a tool when it is genuinely needed.',
+    'You have access to the following tools. Only call a tool when it is genuinely',
+    "needed to complete the user's request. If the current request can be handled",
+    'well with normal conversation, explanation, or reasoning alone, do not call',
+    'a tool. When discover_tools is available, use it only as a gateway when you',
+    'believe the request requires tool use and you need the full toolset revealed',
+    'before continuing. After that, call the actual tool you need. Paths are',
+    'relative to the workspace root.',
     '',
     'Available tools:',
     toolLines

@@ -1,5 +1,9 @@
 import type { Tool, ToolDefinition } from '@core/ports/tool';
 
+export interface AdvertisedToolDefinition extends ToolDefinition {
+  requiresApproval?: boolean;
+}
+
 /**
  * Holds the set of tools available to a chat session and exposes the lookups the
  * agentic loop needs: definitions to advertise to the model, and resolution by
@@ -7,9 +11,15 @@ import type { Tool, ToolDefinition } from '@core/ports/tool';
  */
 export class ToolRegistry {
   private readonly byName: Map<string, Tool>;
+  private readonly advertisedDefinitions: AdvertisedToolDefinition[];
 
-  public constructor(tools: Tool[] = []) {
+  public constructor(
+    tools: Tool[] = [],
+    advertisedDefinitions?: AdvertisedToolDefinition[]
+  ) {
     this.byName = new Map(tools.map((tool) => [tool.definition.name, tool]));
+    this.advertisedDefinitions =
+      advertisedDefinitions ?? tools.map((tool) => tool.definition);
   }
 
   public list(): Tool[] {
@@ -20,8 +30,8 @@ export class ToolRegistry {
     return this.byName.get(name);
   }
 
-  public definitions(): ToolDefinition[] {
-    return this.list().map((tool) => tool.definition);
+  public definitions(): AdvertisedToolDefinition[] {
+    return [...this.advertisedDefinitions];
   }
 
   public isEmpty(): boolean {

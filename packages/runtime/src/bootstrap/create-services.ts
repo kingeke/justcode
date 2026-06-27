@@ -18,6 +18,10 @@ import {
   ReadFileTool,
   DEFAULT_MAX_READ_LINES,
 } from '@runtime/tools/read-file-tool';
+import {
+  DiscoverToolsTool,
+  type DiscoverableToolDefinition,
+} from '@runtime/tools/discover-tools-tool';
 import { ProviderRegistry } from '@runtime/bootstrap/provider-registry';
 import { NullProvider } from '@runtime/bootstrap/null-provider';
 import { loadAppConfig } from '@runtime/config/app-config';
@@ -67,7 +71,7 @@ export async function createRuntimeServices(
   const readSettings = {
     maxReadLines: options.maxReadLines ?? DEFAULT_MAX_READ_LINES,
   };
-  const toolRegistry = new ToolRegistry([
+  const runtimeTools = [
     new WriteFileTool(workspaceFiles),
     new EditFileTool(workspaceFiles),
     new ApplyPatchTool(workspaceFiles),
@@ -79,7 +83,23 @@ export async function createRuntimeServices(
     new WebFetchTool(),
     new WebSearchTool(),
     new QuestionTool(),
-  ]);
+  ];
+  const discoverableTools: DiscoverableToolDefinition[] = runtimeTools.map(
+    (tool) => ({
+      ...tool.definition,
+      requiresApproval: tool.requiresApproval,
+    })
+  );
+  const discoverToolsTool = new DiscoverToolsTool(discoverableTools);
+  const toolRegistry = new ToolRegistry(
+    [discoverToolsTool, ...runtimeTools],
+    [
+      {
+        ...discoverToolsTool.definition,
+        requiresApproval: discoverToolsTool.requiresApproval,
+      },
+    ]
+  );
   const allProviders = createAllProviders(config, registry);
 
   return {

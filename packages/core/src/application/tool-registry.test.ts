@@ -28,4 +28,23 @@ describe('ToolRegistry', () => {
   it('is empty when constructed without tools', () => {
     expect(new ToolRegistry().isEmpty()).toBe(true);
   });
+
+  it('can advertise a different tool definition set than the executable tools', () => {
+    const registry = new ToolRegistry(
+      [fakeTool],
+      [
+        {
+          name: 'discover_tools',
+          description: 'dispatches to tools',
+          parameters: { type: 'object' },
+          requiresApproval: false,
+        },
+      ]
+    );
+
+    expect(registry.definitions()).toEqual([
+      expect.objectContaining({ name: 'discover_tools' }),
+    ]);
+    expect(registry.get('noop')).toBe(fakeTool);
+  });
 });

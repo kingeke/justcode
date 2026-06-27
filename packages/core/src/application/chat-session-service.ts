@@ -24,7 +24,10 @@ import type {
   UserQuestionRequest,
 } from '@core/ports/tool';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
-import type { ToolRegistry } from '@core/application/tool-registry';
+import {
+  type AdvertisedToolDefinition,
+  type ToolRegistry,
+} from '@core/application/tool-registry';
 import {
   DEFAULT_SYSTEM_PROMPT,
   buildSystemPrompt,
@@ -107,6 +110,10 @@ export interface ChatSessionOptions {
 export class ChatSessionService {
   private provider: ProviderClient;
   private readonly toolRegistry: ToolRegistry | undefined;
+  private readonly advertisedToolsByName = new Map<
+    string,
+    AdvertisedToolDefinition
+  >();
   private readonly workspaceRoot: string;
   private readonly workspaceFiles: WorkspaceFilePort | undefined;
   private readonly systemPrompt: string;
@@ -132,6 +139,9 @@ export class ChatSessionService {
     this.systemPrompt = options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     this.describeToolsInSystemPrompt =
       options.describeToolsInSystemPrompt ?? false;
+    for (const tool of this.toolRegistry?.definitions() ?? []) {
+      this.advertisedToolsByName.set(tool.name, tool);
+    }
   }
 
   public switchProvider(provider: ProviderClient): void {
@@ -180,11 +190,14 @@ export class ChatSessionService {
       input.attachments
     );
 
-    const toolDefinitions = this.toolRegistry?.definitions() ?? [];
+    const initialToolDefinitions = this.toolRegistry?.definitions() ?? [];
+    const fullToolDefinitions =
+      this.toolRegistry?.list().map((tool) => tool.definition) ?? [];
     const projectInstructions = await this.loadProjectInstructions();
     // Models known not to support tools are sent chat-only from the start; the
     // tool section is also dropped from the system prompt so we don't advertise
     // tools the model can't call.
+    let toolDefinitions = initialToolDefinitions;
     let toolsEnabled =
       toolDefinitions.length > 0 &&
       !this.toolUnsupportedModels.has(input.model);
@@ -267,6 +280,13 @@ export class ChatSessionService {
             name: call.name,
           })
         );
+
+        if (call.name === 'discover_tools') {
+          toolDefinitions = fullToolDefinitions;
+          toolsEnabled =
+            toolDefinitions.length > 0 &&
+            !this.toolUnsupportedModels.has(input.model);
+        }
       }
     }
 
@@ -311,20 +331,29 @@ export class ChatSessionService {
       return { content: `Unknown tool: ${call.name}`, isError: true };
     }
 
+    const effectiveToolName = call.name;
+    const requiresApproval = tool.requiresApproval;
+
     const view = await describeTool(tool, call.arguments, {
       workspaceRoot: this.workspaceRoot,
       ...(input.signal ? { signal: input.signal } : {}),
     });
     input.onToolActivity?.({
       phase: 'start',
-      toolName: call.name,
+      toolName: effectiveToolName,
       toolCallId: call.id,
       arguments: call.arguments,
       view,
     });
 
     let result: ToolResult;
-    const approved = await this.resolveApproval(tool, view, call, input);
+    const approved = await this.resolveApproval(
+      requiresApproval,
+      effectiveToolName,
+      view,
+      call,
+      input
+    );
     if (!approved) {
       result = { content: 'The user rejected this tool call.', isError: true };
     } else {
@@ -356,7 +385,7 @@ export class ChatSessionService {
 
     input.onToolActivity?.({
       phase: 'end',
-      toolName: call.name,
+      toolName: effectiveToolName,
       toolCallId: call.id,
       arguments: call.arguments,
       view,
@@ -433,17 +462,18 @@ export class ChatSessionService {
   }
 
   private async resolveApproval(
-    tool: Tool,
+    requiresApproval: boolean,
+    toolName: string,
     view: ToolInvocationView,
-    call: ToolCall,
+    _call: ToolCall,
     input: SubmitMessageInput
   ): Promise<boolean> {
-    if (!tool.requiresApproval || !input.requestApproval) {
+    if (!requiresApproval || !input.requestApproval) {
       return true;
     }
 
     return awaitWithAbort(
-      input.requestApproval({ toolName: call.name, ...view }),
+      input.requestApproval({ toolName, ...view }),
       input.signal
     );
   }

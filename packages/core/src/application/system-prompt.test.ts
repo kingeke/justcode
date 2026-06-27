@@ -16,4 +16,18 @@ describe('buildSystemPrompt', () => {
     );
     expect(prompt).toContain('Follow the repo rules.');
   });
+
+  it('tells the model to use discover_tools only when tool use is actually needed', () => {
+    const prompt = buildSystemPrompt('Custom prompt', '/workspace/root', [
+      {
+        name: 'discover_tools',
+        description: 'Reveal the full toolset when needed.',
+        parameters: { type: 'object' },
+      },
+    ]);
+
+    expect(prompt).toContain('If the current request can be handled');
+    expect(prompt).toContain('use it only as a gateway');
+    expect(prompt).toContain('After that, call the actual tool you need.');
+  });
 });

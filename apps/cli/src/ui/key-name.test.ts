@@ -21,7 +21,16 @@ describe('key-name', () => {
 
   describe('isNonPrintableKey', () => {
     it('treats named navigation/control keys as non-printable', () => {
-      for (const name of ['up', 'down', 'return', 'escape', 'space', 'tab', 'backspace', 'f1']) {
+      for (const name of [
+        'up',
+        'down',
+        'return',
+        'escape',
+        'space',
+        'tab',
+        'backspace',
+        'f1',
+      ]) {
         expect(isNonPrintableKey(name)).toBe(true);
       }
     });
@@ -29,7 +38,19 @@ describe('key-name', () => {
     it('keeps single-character keys printable (letters, digits, symbols)', () => {
       // Digits and '-' collide with OpenTUI numpad key names; letters collide
       // with combo identifiers. All must remain typeable in a search box.
-      for (const name of ['a', 'c', 'n', 'v', 'y', '1', '0', '9', '-', '/', '=']) {
+      for (const name of [
+        'a',
+        'c',
+        'n',
+        'v',
+        'y',
+        '1',
+        '0',
+        '9',
+        '-',
+        '/',
+        '=',
+      ]) {
         expect(isNonPrintableKey(name)).toBe(false);
       }
     });

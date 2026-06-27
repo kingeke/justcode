@@ -11,6 +11,7 @@ import {
 import { ProviderId } from '@core/ports/provider-catalog';
 import type { ConversationRepository } from '@core/ports/conversation-repository';
 import type { Tool } from '@core/ports/tool';
+import { DiscoverToolsTool } from '@runtime/tools/discover-tools-tool';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 
 class InMemoryConversationRepository implements ConversationRepository {
@@ -112,7 +113,10 @@ class RecordingWriteTool implements Tool {
 }
 
 /** Returns a tool call on the first turn, then a final answer. */
-function createToolCallingProvider(): ProviderClient {
+function createToolCallingProvider(
+  toolName = 'write_file',
+  toolArguments?: string
+): ProviderClient {
   let turn = 0;
   return {
     providerId: ProviderId.Openai,
@@ -124,8 +128,8 @@ function createToolCallingProvider(): ProviderClient {
           toolCalls: [
             {
               id: 'call-1',
-              name: 'write_file',
-              arguments: '{"path":"a.txt","content":"hi"}',
+              name: toolName,
+              arguments: toolArguments ?? '{"path":"a.txt","content":"hi"}',
             },
           ],
         };
@@ -519,5 +523,91 @@ describe('ChatSessionService', () => {
     expect(tool.executed).toEqual([]);
     expect(result.reply).toBe('All done.');
     expect(result.conversation.messages[2]?.content).toContain('rejected');
+  });
+
+  it('starts with discover_tools only, then exposes full tools after discovery', async () => {
+    const repository = new InMemoryConversationRepository();
+    const delegatedTool = new RecordingWriteTool();
+    const discoverTool = new DiscoverToolsTool([
+      {
+        ...delegatedTool.definition,
+        requiresApproval: delegatedTool.requiresApproval,
+      },
+    ]);
+    const seenRequests: Array<ChatRequest['tools']> = [];
+    let turn = 0;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat(request: ChatRequest): Promise<ChatResult> {
+        seenRequests.push(request.tools);
+        turn += 1;
+        if (turn === 1) {
+          return {
+            content: '',
+            toolCalls: [
+              {
+                id: 'call-discover',
+                name: 'discover_tools',
+                arguments: '{}',
+              },
+            ],
+          };
+        }
+        if (turn === 2) {
+          return {
+            content: '',
+            toolCalls: [
+              {
+                id: 'call-write',
+                name: 'write_file',
+                arguments: '{"path":"a.txt","content":"hi"}',
+              },
+            ],
+          };
+        }
+        return { content: 'All done.' };
+      },
+      async listModels() {
+        return [
+          { id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai },
+        ];
+      },
+      getDefaultModel() {
+        return 'gpt';
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry: new ToolRegistry(
+        [discoverTool, delegatedTool],
+        [
+          {
+            ...discoverTool.definition,
+            requiresApproval: discoverTool.requiresApproval,
+          },
+        ]
+      ),
+    });
+
+    const approvals: string[] = [];
+    const result = await service.submitMessage({
+      conversation: createConversation('session-1'),
+      model: 'gpt',
+      content: 'create a.txt',
+      requestApproval: async ({ toolName }) => {
+        approvals.push(toolName);
+        return true;
+      },
+    });
+
+    expect(seenRequests[0]).toEqual([
+      expect.objectContaining({ name: 'discover_tools' }),
+    ]);
+    expect(seenRequests[1]?.map((tool) => tool.name)).toEqual([
+      'discover_tools',
+      'write_file',
+    ]);
+    expect(approvals).toEqual(['write_file']);
+    expect(delegatedTool.executed).toEqual(['{"path":"a.txt","content":"hi"}']);
+    expect(result.reply).toBe('All done.');
   });
 });
