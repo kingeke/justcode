@@ -1,13 +1,14 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+
+import { cacheDirectory } from '@core/application/cache-dir';
 
 export async function logModelsResponse(
   providerId: string,
   response: unknown
 ): Promise<void> {
   try {
-    const dir = join(homedir(), '.cache', 'justcode');
+    const dir = cacheDirectory();
     await mkdir(dir, { recursive: true });
     const file = join(dir, 'models.json');
     let existing: Record<string, unknown> = {};

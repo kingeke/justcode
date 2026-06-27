@@ -2,7 +2,6 @@
 
 This document tracks the issues so far.
 
-- add model thinking option
 - ability to list a file with the necessary method, like reports.repository.ts::findMultipleBoq
 - queued messages
 

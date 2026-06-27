@@ -15,6 +15,8 @@ describe('commands', () => {
 
   it('filters commands by prefix', () => {
     expect(filterCommands('re').map((command) => command.name)).toEqual([
+      CommandName.Reasoning,
+      CommandName.ReadLimit,
       CommandName.Reset,
     ]);
   });

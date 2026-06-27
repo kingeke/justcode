@@ -279,6 +279,57 @@ describe('ChatSessionService', () => {
     expect(repository.conversation.title).toBe(title);
   });
 
+  it('frames the title request as data and sanitizes a runaway reply', async () => {
+    const repository = new InMemoryConversationRepository();
+    let titleUserMessage: string | undefined;
+    let callCount = 0;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Ollama,
+      async sendChat({ messages }): Promise<ChatResult> {
+        callCount += 1;
+        if (callCount === 1) {
+          return { content: 'reply:sure' };
+        }
+        titleUserMessage = messages.find((m) => m.role === 'user')?.content;
+        // Model ignored the prompt and answered with a markdown table.
+        return {
+          content: '| Category | Examples |\n|---|---|\n| Grains | Rice |',
+        };
+      },
+      async listModels() {
+        return [
+          {
+            id: 'llama3.1',
+            displayName: 'llama3.1',
+            providerId: ProviderId.Ollama,
+          },
+        ];
+      },
+      getDefaultModel() {
+        return undefined;
+      },
+    };
+
+    const service = new ChatSessionService(repository, provider);
+    const startedSession = await service.startSession({ sessionId: 's1' });
+
+    const title = await new Promise<string>((resolve) => {
+      void service.submitMessage({
+        conversation: startedSession.conversation,
+        model: startedSession.activeModel,
+        content: 'give me classifications of food in a table form',
+        onTitle: (_sessionId, generated) => resolve(generated),
+      });
+    });
+
+    // The first message is wrapped so the model treats it as data, not a request.
+    expect(titleUserMessage).toContain(
+      '<message>\ngive me classifications of food in a table form\n</message>'
+    );
+    // A table reply is reduced to its first line with markdown markers stripped.
+    expect(title).toBe('Category | Examples');
+  });
+
   it('lists saved sessions', async () => {
     const repository = new InMemoryConversationRepository();
     const service = new ChatSessionService(repository, createProviderStub());

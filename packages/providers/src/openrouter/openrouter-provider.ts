@@ -4,8 +4,13 @@ import {
   type ChatRequest,
   type ChatResult,
   type ModelInfo,
+  type ModelReasoning,
   type ProviderClient,
 } from '@core/ports/chat-model';
+import {
+  normalizeEffortLevels,
+  toReasoningEffort,
+} from '@providers/http/reasoning';
 import { ProviderId } from '@core/ports/provider-catalog';
 import {
   joinUrl,
@@ -29,6 +34,16 @@ interface OpenRouterModelsResponse {
       completion?: string | number;
       input_cache_read?: string | number;
       input_cache_write?: string | number;
+    };
+    /**
+     * Per-model reasoning capability. Present only for models that reason;
+     * `mandatory` models always reason (effort can't be disabled), and
+     * `supported_efforts` is the exact set of levels the model accepts.
+     */
+    reasoning?: {
+      mandatory?: boolean;
+      supported_efforts?: string[];
+      default_effort?: string;
     };
   }>;
 }
@@ -69,6 +84,16 @@ export class OpenRouterProvider implements ProviderClient {
       authorization: `Bearer ${this.apiKey}`,
       'content-type': 'application/json',
     };
+    // OpenRouter's unified `reasoning` param is normalized server-side and
+    // ignored for models that don't reason. `'off'` must be an explicit disable
+    // (`enabled: false`) — omitting the param lets a default-reasoning model keep
+    // reasoning.
+    const reasoning =
+      request.reasoningEffort === 'off'
+        ? { reasoning: { enabled: false } }
+        : request.reasoningEffort
+          ? { reasoning: { effort: request.reasoningEffort } }
+          : {};
 
     if (request.onToken) {
       let accumulated = '';
@@ -83,6 +108,7 @@ export class OpenRouterProvider implements ProviderClient {
             messages,
             stream: true,
             stream_options: { include_usage: true },
+            ...reasoning,
             ...(tools ? { tools, tool_choice: 'auto' } : {}),
           },
         },
@@ -114,6 +140,7 @@ export class OpenRouterProvider implements ProviderClient {
           model: request.model,
           messages,
           stream: false,
+          ...reasoning,
           ...(tools ? { tools, tool_choice: 'auto' } : {}),
         },
       }
@@ -190,7 +217,38 @@ export class OpenRouterProvider implements ProviderClient {
               },
             }
           : {}),
+        ...toModelReasoning(model.reasoning),
       }))
       .sort((left, right) => left.id.localeCompare(right.id));
   }
+}
+
+/**
+ * Translates OpenRouter's per-model reasoning block into the normalized
+ * {@link ModelReasoning}. Returns an empty object (no capability) when the model
+ * doesn't reason or advertises no usable effort levels.
+ */
+function toModelReasoning(
+  reasoning:
+    | {
+        mandatory?: boolean;
+        supported_efforts?: string[];
+        default_effort?: string;
+      }
+    | undefined
+): { reasoning?: ModelReasoning } {
+  if (!reasoning?.supported_efforts?.length) return {};
+  const effortLevels = normalizeEffortLevels(reasoning.supported_efforts);
+  if (effortLevels.length === 0) return {};
+  // Fall back to the lowest advertised level when the provider names no default,
+  // so a reasoning model always has a concrete default to preselect/apply.
+  const defaultEffort =
+    toReasoningEffort(reasoning.default_effort) ?? effortLevels[0];
+  return {
+    reasoning: {
+      effortLevels,
+      mandatory: reasoning.mandatory ?? false,
+      ...(defaultEffort ? { defaultEffort } : {}),
+    },
+  };
 }

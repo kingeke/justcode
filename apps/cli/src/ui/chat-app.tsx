@@ -47,7 +47,12 @@ import type { UserQuestionRequest } from '@core/ports/tool';
 import type { Conversation } from '@core/domain/conversation';
 import { createMessage } from '@core/domain/message';
 import { DEFAULT_SYSTEM_PROMPT } from '@core/application/system-prompt';
-import type { ModelInfo, ProviderClient } from '@core/ports/chat-model';
+import type {
+  ModelInfo,
+  ModelReasoning,
+  ProviderClient,
+  ReasoningEffort,
+} from '@core/ports/chat-model';
 import type { GlobalConfig } from '@runtime/persistence/global-config';
 import { mergeProviderConfig } from '@runtime/persistence/global-config';
 import { resetAppState } from '@runtime/persistence/reset-app-state';
@@ -66,6 +71,7 @@ import {
   type ConnectedProviderResult,
 } from '@cli/ui/connect-picker.js';
 import { ModelPicker } from '@cli/ui/model-picker.js';
+import { ReasoningPicker } from '@cli/ui/reasoning-picker.js';
 import { ResetPicker } from '@cli/ui/reset-picker.js';
 import { SessionPicker } from '@cli/ui/session-picker.js';
 import { ProviderId } from '@core/ports/provider-catalog.js';
@@ -110,6 +116,15 @@ interface ChatAppProps {
   onExpandToolsChange?: (expand: boolean) => void;
   initialMaxReadLines?: number;
   onMaxReadLinesChange?: (lines: number) => void;
+  initialReasoningEffortByModel?: Record<
+    string,
+    Record<string, ReasoningEffort | 'off' | undefined> | undefined
+  >;
+  onReasoningEffortChange?: (
+    providerId: string,
+    modelId: string,
+    effort: ReasoningEffort | 'off'
+  ) => void;
 }
 
 interface PendingApproval {
@@ -177,6 +192,21 @@ function tc(
   return chunk;
 }
 
+/**
+ * The reasoning effort actually sent for a model. The stored choice may be a
+ * level, the explicit sentinel `'off'`, or absent (the user hasn't chosen). A
+ * reasoning model with no stored choice falls back to its default effort; only
+ * an explicit `'off'` disables reasoning.
+ */
+function effectiveEffort(
+  reasoning: ModelReasoning | undefined,
+  stored: ReasoningEffort | 'off' | undefined
+): ReasoningEffort | 'off' | undefined {
+  if (!reasoning) return undefined;
+  if (stored) return stored;
+  return reasoning.defaultEffort ?? reasoning.effortLevels[0];
+}
+
 function commandLineContent(
   cmd: (typeof COMMANDS)[number],
   isSelected: boolean,
@@ -185,6 +215,10 @@ function commandLineContent(
     autoApplyWrites: boolean;
     expandTools: boolean;
     maxReadLines: number;
+    reasoning: {
+      supported: boolean;
+      effort: ReasoningEffort | 'off' | undefined;
+    };
   }
 ): StyledText {
   const lead = isSelected ? { fg: 'cyan' } : {};
@@ -217,6 +251,13 @@ function commandLineContent(
     );
   } else if (cmd.name === CommandName.ReadLimit) {
     chunks.push(tc('  '), tc(`[${state.maxReadLines} lines]`, { fg: 'green' }));
+  } else if (cmd.name === CommandName.Reasoning) {
+    chunks.push(
+      tc('  '),
+      state.reasoning.supported
+        ? tc(`[${state.reasoning.effort ?? 'off'}]`, { fg: 'green' })
+        : tc('[n/a]', { fg: MUTED })
+    );
   }
 
   return new StyledText(chunks);
@@ -465,6 +506,18 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const [maxReadLines, setMaxReadLines] = useState(
     props.initialMaxReadLines ?? DEFAULT_MAX_READ_LINES
   );
+  // Reasoning effort is chosen per model (only models that advertise reasoning
+  // support), nested by provider id. The ref mirrors the map so the submit
+  // closure reads fresh values.
+  const [reasoningEffortByModel, setReasoningEffortByModel] = useState<
+    Record<
+      string,
+      Record<string, ReasoningEffort | 'off' | undefined> | undefined
+    >
+  >(props.initialReasoningEffortByModel ?? {});
+  const reasoningEffortByModelRef = useRef(reasoningEffortByModel);
+  reasoningEffortByModelRef.current = reasoningEffortByModel;
+  const [showReasoningPicker, setShowReasoningPicker] = useState(false);
   const [pendingApproval, setPendingApproval] =
     useState<PendingApproval | null>(null);
   // A question the `question` tool put to the user; the answer is typed into the
@@ -556,9 +609,19 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
   const isCommandMode = input.startsWith('/') && !input.includes(' ');
   const commandQuery = isCommandMode ? (parseCommandInput(input) ?? '') : '';
+  // The reasoning command is only meaningful for models that advertise reasoning
+  // support, so hide it entirely otherwise.
+  const reasoningAvailable = Boolean(
+    activeModelInfo?.reasoning?.effortLevels.length
+  );
   const filteredCommands = useMemo(
-    () => (isCommandMode ? filterCommands(commandQuery) : []),
-    [isCommandMode, commandQuery]
+    () =>
+      isCommandMode
+        ? filterCommands(commandQuery).filter(
+            (cmd) => reasoningAvailable || cmd.name !== CommandName.Reasoning
+          )
+        : [],
+    [isCommandMode, commandQuery, reasoningAvailable]
   );
   const visibleCommands = filteredCommands.slice(0, MAX_COMMAND_ITEMS);
 
@@ -571,6 +634,13 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     [isCommandMode, input]
   );
   const showInterruptHint = isSending || pendingApproval !== null;
+  // The reasoning effort in force for the active model, shown beside its name.
+  const activeReasoningEffort = effectiveEffort(
+    activeModelInfo?.reasoning,
+    activeModelInfo
+      ? reasoningEffortByModel[activeModelInfo.providerId]?.[activeModel]
+      : undefined
+  );
   const displayStats = isSending
     ? getLiveStats(
         responseTimingRef.current,
@@ -738,7 +808,13 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   }, []);
 
   useKeyboard((key) => {
-    if (showModelPicker || showConnectPicker || showSessionPicker) return;
+    if (
+      showModelPicker ||
+      showConnectPicker ||
+      showSessionPicker ||
+      showReasoningPicker
+    )
+      return;
 
     const value = key.sequence ?? '';
 
@@ -1198,6 +1274,21 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         return;
       }
 
+      case CommandName.Reasoning: {
+        // Per-model setting: only models that advertise reasoning support can be
+        // configured, and the choices come from the model itself.
+        if (!activeModelInfo?.reasoning?.effortLevels.length) {
+          setStatus(
+            activeModelInfo
+              ? `${activeModelInfo.displayName} doesn't support reasoning effort`
+              : 'Pick a model before setting reasoning effort'
+          );
+          return;
+        }
+        setShowReasoningPicker(true);
+        return;
+      }
+
       case CommandName.NewSession: {
         resetFreshSessionState();
         const newId = randomUUID();
@@ -1414,9 +1505,18 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           value,
           requestController.signal
         );
+      const turnModel = activeModel || session.activeModel;
+      const turnProvider = activeModelInfo?.providerId ?? activeProviderId;
+      const turnEffort = effectiveEffort(
+        activeModelInfo?.reasoning,
+        turnProvider
+          ? reasoningEffortByModelRef.current[turnProvider]?.[turnModel]
+          : undefined
+      );
       const result = await props.chatSessionService.submitMessage({
         conversation: baseConversation,
-        model: activeModel || session.activeModel,
+        model: turnModel,
+        ...(turnEffort ? { reasoningEffort: turnEffort } : {}),
         content: value,
         attachments,
         signal: requestController.signal,
@@ -1649,6 +1749,30 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             loadSession(currentSessionId, activeModel);
           }
         }}
+      />
+    );
+  }
+
+  if (showReasoningPicker && activeModelInfo?.reasoning?.effortLevels.length) {
+    const providerId = activeModelInfo.providerId;
+    return (
+      <ReasoningPicker
+        model={activeModelInfo}
+        current={reasoningEffortByModel[providerId]?.[activeModel]}
+        onSelect={(effort) => {
+          setShowReasoningPicker(false);
+          setReasoningEffortByModel((prev) => ({
+            ...prev,
+            [providerId]: { ...prev[providerId], [activeModel]: effort },
+          }));
+          props.onReasoningEffortChange?.(providerId, activeModel, effort);
+          setStatus(
+            effort === 'off'
+              ? `Reasoning off for ${activeModelInfo.displayName}`
+              : `Reasoning effort for ${activeModelInfo.displayName} set to ${effort}`
+          );
+        }}
+        onCancel={() => setShowReasoningPicker(false)}
       />
     );
   }
@@ -1965,6 +2089,19 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                       autoApplyWrites,
                       expandTools,
                       maxReadLines,
+                      reasoning: {
+                        supported: Boolean(
+                          activeModelInfo?.reasoning?.effortLevels.length
+                        ),
+                        effort: effectiveEffort(
+                          activeModelInfo?.reasoning,
+                          activeModelInfo
+                            ? reasoningEffortByModel[
+                                activeModelInfo.providerId
+                              ]?.[activeModel]
+                            : undefined
+                        ),
+                      },
                     }
                   )}
                 />
@@ -2159,6 +2296,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                 activeModel || session?.activeModel || 'loading'
               }`}
             </text>
+            {reasoningAvailable ? (
+              <text fg="yellow" attributes={BOLD} wrapMode="none">
+                {` ${activeReasoningEffort ?? 'off'}`}
+              </text>
+            ) : null}
             {showInterruptHint ? (
               <text fg={MUTED}> · Press Esc to interrupt</text>
             ) : null}

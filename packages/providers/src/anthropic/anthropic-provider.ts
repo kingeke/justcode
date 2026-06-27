@@ -15,6 +15,10 @@ import {
   toAnthropicToolDefinitions,
   toAnthropicWireRequest,
 } from '@providers/anthropic/anthropic-wire';
+import {
+  supportsThinking,
+  thinkingBudgetTokens,
+} from '@providers/http/reasoning';
 
 const ANTHROPIC_VERSION = '2023-06-01';
 /** Beta flag required for Claude Pro/Max OAuth access tokens. */
@@ -26,7 +30,7 @@ const OAUTH_BETA = 'oauth-2025-04-20';
  */
 const CLAUDE_CODE_IDENTITY =
   "You are Claude Code, Anthropic's official CLI for Claude.";
-const _DEFAULT_MAX_TOKENS = 8192;
+const DEFAULT_MAX_TOKENS = 8192;
 
 export interface AnthropicProviderOptions {
   baseUrl: string;
@@ -67,8 +71,31 @@ export class AnthropicProvider implements ProviderClient {
   public async sendChat(request: ChatRequest): Promise<ChatResult> {
     const { system, messages } = toAnthropicWireRequest(request.messages);
     const tools = toAnthropicToolDefinitions(request.tools);
+    // Extended thinking maps the normalized effort to a token budget. Anthropic
+    // requires max_tokens to exceed budget_tokens, so size the response cap to
+    // the budget plus the default reply allowance. Older Claude models reject
+    // the thinking block, so gate on the model id.
+    const thinkingEffort =
+      request.reasoningEffort && request.reasoningEffort !== 'off'
+        ? request.reasoningEffort
+        : undefined;
+    const thinking =
+      thinkingEffort && supportsThinking(request.model)
+        ? {
+            thinking: {
+              type: 'enabled' as const,
+              budget_tokens: thinkingBudgetTokens(thinkingEffort),
+            },
+            max_tokens:
+              thinkingBudgetTokens(thinkingEffort) + DEFAULT_MAX_TOKENS,
+          }
+        : {};
     const body = {
       model: request.model,
+      // Anthropic requires max_tokens on every request. When extended thinking
+      // is enabled the spread below overrides this with budget + reply cap.
+      max_tokens: DEFAULT_MAX_TOKENS,
+      ...thinking,
       // Anthropic-only prompt caching: the top-level breakpoint auto-caches the
       // last cacheable block (the prefix shared across the agentic loop). Other
       // providers don't accept this field — applied here only.

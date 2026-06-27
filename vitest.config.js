@@ -13,6 +13,9 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // Redirects cache writes to a throwaway folder so tests never touch the
+    // real ~/.cache/justcode. Kept in sync with vitest.config.ts.
+    setupFiles: ['./vitest.setup.ts'],
     coverage: {
       reporter: ['text', 'lcov'],
     },

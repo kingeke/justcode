@@ -16,6 +16,9 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // Redirects cache writes to a throwaway folder so tests never touch the
+    // real ~/.cache/justcode.
+    setupFiles: ['./vitest.setup.ts'],
     // `opencode/` is a vendored reference checkout (gitignored); never run its tests.
     exclude: ['**/node_modules/**', '**/dist/**', 'opencode/**'],
     coverage: {

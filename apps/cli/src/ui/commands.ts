@@ -5,6 +5,7 @@ export enum CommandName {
   NewSession = 'new-session',
   Clear = 'clear',
   Thinking = 'thinking',
+  Reasoning = 'reasoning',
   AutoWrites = 'auto-writes',
   ExpandTools = 'expand-tools',
   ReadLimit = 'read-limit',
@@ -41,6 +42,10 @@ export const COMMANDS: Command[] = [
   {
     name: CommandName.Thinking,
     description: 'Toggle whether model reasoning is shown',
+  },
+  {
+    name: CommandName.Reasoning,
+    description: 'Choose reasoning effort for the current model',
   },
   {
     name: CommandName.AutoWrites,

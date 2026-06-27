@@ -4,10 +4,9 @@ import {
   createTextAttributes,
   RGBA,
   parseColor,
-  type KeyEvent,
   type TextChunk,
 } from '@opentui/core';
-import { isNonPrintableKey, KeyName } from '@cli/ui/key-name.js';
+import { KeyName, printableInput } from '@cli/ui/key-name.js';
 import { useKeyboard } from '@opentui/react';
 
 import type { ConversationSummary } from '@core/ports/conversation-repository';
@@ -25,18 +24,6 @@ interface SessionPickerProps {
   loading?: boolean;
   onSelect: (sessionId: string) => void;
   onCancel: () => void;
-}
-
-// Literal character to append to the search query, or undefined for control keys.
-function printableInput(key: KeyEvent): string | undefined {
-  if (key.ctrl || key.meta) return undefined;
-  if (isNonPrintableKey(key.name)) return undefined;
-  const sequence = key.sequence;
-  if (!sequence) return undefined;
-  for (const char of sequence) {
-    if (char < ' ' || char === '\x7f') return undefined;
-  }
-  return sequence;
 }
 
 function queryLineContent(query: string): StyledText {

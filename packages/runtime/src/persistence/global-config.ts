@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import type { ReasoningEffort } from '@core/ports/chat-model';
 import { ProviderId } from '@core/ports/provider-catalog';
 import type { ProviderConfig } from '@core/ports/provider-catalog';
 
@@ -10,6 +11,17 @@ export interface GlobalConfig {
   providers?: Partial<Record<ProviderId, ProviderConfig>>;
   systemPrompt?: string;
   thinkingCollapsed?: boolean;
+  /**
+   * Reasoning intensity per model, nested by provider id so entries are
+   * unambiguous across providers that share a model name:
+   * `{ openrouter: { "openai/gpt-5": "high" } }`. A model absent from the map
+   * uses the model's default effort; the explicit sentinel `'off'` disables
+   * reasoning for a model that would otherwise default to it.
+   */
+  reasoningEffortByModel?: Record<
+    string,
+    Record<string, ReasoningEffort | 'off' | undefined> | undefined
+  >;
   /** When true, file-writing tools run without per-call confirmation. */
   autoApplyWrites?: boolean;
   /** When true, finished tool calls render their full input/output inline. */

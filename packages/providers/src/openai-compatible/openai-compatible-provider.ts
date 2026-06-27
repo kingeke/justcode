@@ -6,6 +6,7 @@ import {
   type ChatResult,
   type ModelInfo,
   type ProviderClient,
+  type ReasoningEffort,
 } from '@core/ports/chat-model';
 import { type ProviderId } from '@core/ports/provider-catalog';
 import {
@@ -21,6 +22,7 @@ import {
   type RawOpenAiToolCall,
 } from '@providers/openai-compatible/openai-wire';
 import { sendResponsesRequest } from '@providers/openai/openai-responses-client';
+import { supportsReasoningEffort } from '@providers/http/reasoning';
 
 interface OpenAiCompatibleProviderOptions {
   providerId: ProviderId;
@@ -144,6 +146,14 @@ export class OpenAiCompatibleProvider implements ProviderClient {
   private async sendChatCompletions(request: ChatRequest): Promise<ChatResult> {
     const messages = toOpenAiWireMessages(request.messages);
     const tools = toOpenAiToolDefinitions(request.tools);
+    // Only reasoning-capable models accept `reasoning_effort`; sending it to a
+    // plain chat model 400s, so gate on the model id and omit otherwise.
+    const reasoningParam: { reasoning_effort?: ReasoningEffort } =
+      request.reasoningEffort &&
+      request.reasoningEffort !== 'off' &&
+      supportsReasoningEffort(request.model)
+        ? { reasoning_effort: request.reasoningEffort }
+        : {};
 
     if (request.onToken) {
       let accumulated = '';
@@ -159,6 +169,7 @@ export class OpenAiCompatibleProvider implements ProviderClient {
             messages,
             stream: true,
             stream_options: { include_usage: true },
+            ...reasoningParam,
             ...(tools ? { tools, tool_choice: 'auto' } : {}),
           },
         },
@@ -199,6 +210,7 @@ export class OpenAiCompatibleProvider implements ProviderClient {
           model: request.model,
           messages,
           stream: false,
+          ...reasoningParam,
           ...(tools ? { tools, tool_choice: 'auto' } : {}),
         },
       }

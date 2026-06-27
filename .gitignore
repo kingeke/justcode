@@ -8,3 +8,4 @@ coverage/
 test-files
 opencode
 debug.log
+.test-cache/

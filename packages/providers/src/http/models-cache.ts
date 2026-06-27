@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+import { cacheDirectory } from '@core/application/cache-dir';
 import type { ModelInfo, ProviderClient } from '@core/ports/chat-model';
 import type { ProviderId } from '@core/ports/provider-catalog';
 
@@ -20,12 +20,14 @@ interface CachedProviderModels {
 
 type ModelsCacheFile = Record<string, CachedProviderModels>;
 
-const CACHE_DIR = join(homedir(), '.cache', 'justcode');
-const CACHE_FILE = join(CACHE_DIR, 'models.json');
+// Resolved lazily (not at import time) so tests that set JUSTCODE_CACHE_DIR in a
+// setup file take effect even though this module is imported afterwards.
+const cacheDir = (): string => cacheDirectory();
+const cacheFile = (): string => join(cacheDir(), 'models.json');
 
 async function readCacheFile(): Promise<ModelsCacheFile> {
   try {
-    return JSON.parse(await readFile(CACHE_FILE, 'utf8')) as ModelsCacheFile;
+    return JSON.parse(await readFile(cacheFile(), 'utf8')) as ModelsCacheFile;
   } catch {
     // Missing or unreadable cache — treat as empty so callers refetch.
     return {};
@@ -37,11 +39,11 @@ async function writeCacheEntry(
   models: ModelInfo[]
 ): Promise<void> {
   try {
-    await mkdir(CACHE_DIR, { recursive: true });
+    await mkdir(cacheDir(), { recursive: true });
     const existing = await readCacheFile();
     existing[providerId] = { fetchedAt: new Date().toISOString(), models };
     await writeFile(
-      CACHE_FILE,
+      cacheFile(),
       JSON.stringify(existing, null, 2) + '\n',
       'utf8'
     );

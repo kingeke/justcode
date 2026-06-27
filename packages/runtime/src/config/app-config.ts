@@ -1,5 +1,5 @@
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { cacheDirectory } from '@core/application/cache-dir';
 import {
   readGlobalConfig,
   writeGlobalConfig,
@@ -62,8 +62,7 @@ export interface AppConfig {
 export async function loadAppConfig(
   configDirectory?: string
 ): Promise<AppConfig> {
-  const targetConfigDir =
-    configDirectory ?? join(homedir(), '.cache', 'justcode');
+  const targetConfigDir = configDirectory ?? cacheDirectory();
 
   const globalConfig = await readGlobalConfig(targetConfigDir);
   const configWithDefaults =

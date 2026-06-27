@@ -1,4 +1,5 @@
 import { logRequestResponse } from '@core/application/debug-log';
+import { ReasoningEffort } from '@core/ports/chat-model';
 import type {
   ChatRequest,
   ChatResult,
@@ -45,8 +46,15 @@ export async function sendResponsesRequest({
     ...(tools
       ? { tools, tool_choice: 'auto', parallel_tool_calls: false }
       : {}),
-    // gpt-5* are reasoning models; always send a reasoning block.
-    reasoning: { effort: 'medium', summary: 'auto' },
+    // gpt-5* are reasoning models; always send a reasoning block, defaulting to
+    // medium when the caller hasn't picked a level (`'off'` isn't valid here).
+    reasoning: {
+      effort:
+        request.reasoningEffort && request.reasoningEffort !== 'off'
+          ? request.reasoningEffort
+          : ReasoningEffort.Medium,
+      summary: 'auto',
+    },
     store: false,
     stream: true,
     include: [],

@@ -233,6 +233,9 @@ async function runChat(options: SharedOptions): Promise<void> {
       initialExpandTools: savedConfig.expandTools ?? true,
       initialMaxReadLines:
         savedConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES,
+      ...(savedConfig.reasoningEffortByModel
+        ? { initialReasoningEffortByModel: savedConfig.reasoningEffortByModel }
+        : {}),
       onModelChange: (modelId: string, modelProviderId: string) => {
         persistConfig({ lastModel: modelId, lastProvider: modelProviderId });
       },
@@ -249,6 +252,17 @@ async function runChat(options: SharedOptions): Promise<void> {
         runtime.setMaxReadLines(lines);
         persistConfig({
           cache: { ...currentConfig.cache, maxReadLines: lines },
+        });
+      },
+      onReasoningEffortChange: (providerId, modelId, effort) => {
+        persistConfig({
+          reasoningEffortByModel: {
+            ...currentConfig.reasoningEffortByModel,
+            [providerId]: {
+              ...currentConfig.reasoningEffortByModel?.[providerId],
+              [modelId]: effort,
+            },
+          },
         });
       },
     })

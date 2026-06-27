@@ -1,4 +1,4 @@
-import { terminalNamedSingleStrokeKeys } from '@opentui/core';
+import { terminalNamedSingleStrokeKeys, type KeyEvent } from '@opentui/core';
 
 export enum KeyName {
   Return = 'return',
@@ -45,4 +45,23 @@ export function isKeyName(value: string | undefined): value is KeyName {
  */
 export function isNonPrintableKey(value: string | undefined): boolean {
   return value !== undefined && value.length > 1 && KEY_NAME_SET.has(value);
+}
+
+/**
+ * The literal character a keystroke should insert into a text field, or
+ * undefined for control/navigation keys that must not produce text. Shared by
+ * the picker search boxes so they all treat input identically.
+ */
+export function printableInput(key: KeyEvent): string | undefined {
+  if (key.ctrl || key.meta) return undefined;
+  // Space reports the multi-character name 'space' (so isNonPrintableKey would
+  // reject it), but it's a literal character in search text.
+  if (key.name === KeyName.Space) return ' ';
+  if (isNonPrintableKey(key.name)) return undefined;
+  const sequence = key.sequence;
+  if (!sequence) return undefined;
+  for (const char of sequence) {
+    if (char < ' ' || char === '\x7f') return undefined;
+  }
+  return sequence;
 }
