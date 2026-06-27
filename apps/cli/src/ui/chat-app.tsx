@@ -220,9 +220,10 @@ function metricsLineContent(
 ): StyledText {
   const cachedTokens = metrics.cachedTokens;
   const newTokens = Math.max(metrics.inputTokens - cachedTokens, 0);
-  const pct = activeModelInfo?.contextWindow
-    ? contextPct(metrics.lastInputTokens, activeModelInfo.contextWindow)
-    : 0;
+  const pct =
+    activeModelInfo?.contextWindow == null
+      ? null
+      : contextPct(metrics.lastInputTokens, activeModelInfo.contextWindow);
 
   const chunks: TextChunk[] = [
     tc('ctx ', { fg: MUTED }),
@@ -233,9 +234,14 @@ function metricsLineContent(
     tc(newTokens.toLocaleString(), { fg: 'white' }),
     tc(' out ', { fg: MUTED }),
     tc(metrics.outputTokens.toLocaleString(), { fg: 'white' }),
-    tc(' ctx(%) ', { fg: MUTED }),
-    tc(`${pct}%`, { fg: pct > 80 ? 'yellow' : 'white' }),
   ];
+
+  if (pct != null) {
+    chunks.push(
+      tc(' ctx(%) ', { fg: MUTED }),
+      tc(`${pct}%`, { fg: pct > 80 ? 'yellow' : 'white' })
+    );
+  }
 
   if (metrics.cost > 0) {
     chunks.push(

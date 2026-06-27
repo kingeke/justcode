@@ -1,6 +1,7 @@
 import { Command, type OptionValues } from 'commander';
 import React from 'react';
 import { version as appVersion } from '../../../../package.json';
+import { createInterface } from 'node:readline/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { deleteDebugLog } from '@core/application/debug-log';
@@ -100,6 +101,12 @@ export function createCli(): Command {
       'Reset app defaults and clear connected providers, pulled models, and sessions'
     )
     .action(async () => {
+      const confirmed = await confirmReset();
+      if (!confirmed) {
+        process.stdout.write('Reset cancelled.\n');
+        return;
+      }
+
       const appConfig = await loadAppConfig();
       await resetAppState(appConfig.configDirectory);
       process.stdout.write('Reset complete.\n');
@@ -128,6 +135,31 @@ export function normalizeArgv(argv: readonly string[]): string[] {
 
     return [optionName, optionValue];
   });
+}
+
+async function confirmReset(): Promise<boolean> {
+  process.stdout.write(
+    'This will permanently reset JustCode to defaults and clear connected providers, pulled models, and sessions. This is irreversible.\n'
+  );
+
+  const readline = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  try {
+    const firstConfirmation = await readline.question('Continue? (y/N) ');
+    if (firstConfirmation.trim().toLowerCase() !== 'y') {
+      return false;
+    }
+
+    const secondConfirmation = await readline.question(
+      'Type RESET to confirm this irreversible action: '
+    );
+    return secondConfirmation.trim() === 'RESET';
+  } finally {
+    readline.close();
+  }
 }
 
 async function runChat(options: SharedOptions): Promise<void> {

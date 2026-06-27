@@ -1,11 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createRuntimeServicesMock, loadAppConfigMock, resetAppStateMock } =
-  vi.hoisted(() => ({
-    createRuntimeServicesMock: vi.fn(),
-    loadAppConfigMock: vi.fn(),
-    resetAppStateMock: vi.fn(),
-  }));
+const {
+  createInterfaceMock,
+  createRuntimeServicesMock,
+  loadAppConfigMock,
+  resetAppStateMock,
+} = vi.hoisted(() => ({
+  createInterfaceMock: vi.fn(),
+  createRuntimeServicesMock: vi.fn(),
+  loadAppConfigMock: vi.fn(),
+  resetAppStateMock: vi.fn(),
+}));
+
+vi.mock('node:readline/promises', () => ({
+  createInterface: createInterfaceMock,
+}));
 
 vi.mock('@runtime/bootstrap/create-services', () => ({
   createRuntimeServices: createRuntimeServicesMock,
@@ -34,6 +43,7 @@ import {
 
 describe('createCli', () => {
   beforeEach(() => {
+    createInterfaceMock.mockReset();
     createRuntimeServicesMock.mockReset();
     loadAppConfigMock.mockReset();
     resetAppStateMock.mockReset();
@@ -48,6 +58,13 @@ describe('createCli', () => {
       configDirectory: '/tmp/justcode',
     });
     resetAppStateMock.mockResolvedValue(undefined);
+    createInterfaceMock.mockReturnValue({
+      question: vi
+        .fn()
+        .mockResolvedValueOnce('y')
+        .mockResolvedValueOnce('RESET'),
+      close: vi.fn(),
+    });
   });
 
   it('passes the provider option to the models command', async () => {
@@ -71,15 +88,54 @@ describe('createCli', () => {
     ).toEqual(['node', 'justcode', 'models', '-p', 'lmstudio']);
   });
 
-  it('resets app state for the reset command', async () => {
+  it('resets app state for the reset command after double confirmation', async () => {
     const program = createCli();
 
     await program.parseAsync(['node', 'justcode', 'reset'], {
       from: 'node',
     });
 
+    expect(createInterfaceMock).toHaveBeenCalledWith({
+      input: process.stdin,
+      output: process.stdout,
+    });
     expect(loadAppConfigMock).toHaveBeenCalled();
     expect(resetAppStateMock).toHaveBeenCalledWith('/tmp/justcode');
+  });
+
+  it('cancels reset when the first confirmation is declined', async () => {
+    createInterfaceMock.mockReturnValueOnce({
+      question: vi.fn().mockResolvedValueOnce('n'),
+      close: vi.fn(),
+    });
+
+    const program = createCli();
+
+    await program.parseAsync(['node', 'justcode', 'reset'], {
+      from: 'node',
+    });
+
+    expect(loadAppConfigMock).not.toHaveBeenCalled();
+    expect(resetAppStateMock).not.toHaveBeenCalled();
+  });
+
+  it('cancels reset when the second confirmation does not match RESET', async () => {
+    createInterfaceMock.mockReturnValueOnce({
+      question: vi
+        .fn()
+        .mockResolvedValueOnce('y')
+        .mockResolvedValueOnce('reset'),
+      close: vi.fn(),
+    });
+
+    const program = createCli();
+
+    await program.parseAsync(['node', 'justcode', 'reset'], {
+      from: 'node',
+    });
+
+    expect(loadAppConfigMock).not.toHaveBeenCalled();
+    expect(resetAppStateMock).not.toHaveBeenCalled();
   });
 
   it('forces connect flow when the provider flag is not configured', () => {
