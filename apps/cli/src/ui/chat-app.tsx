@@ -46,6 +46,7 @@ import type {
 import type { UserQuestionRequest } from '@core/ports/tool';
 import type { Conversation } from '@core/domain/conversation';
 import { createMessage } from '@core/domain/message';
+import { DEFAULT_SYSTEM_PROMPT } from '@core/application/system-prompt';
 import type { ModelInfo, ProviderClient } from '@core/ports/chat-model';
 import type { GlobalConfig } from '@runtime/persistence/global-config';
 import { mergeProviderConfig } from '@runtime/persistence/global-config';
@@ -65,6 +66,7 @@ import {
   type ConnectedProviderResult,
 } from '@cli/ui/connect-picker.js';
 import { ModelPicker } from '@cli/ui/model-picker.js';
+import { ResetPicker } from '@cli/ui/reset-picker.js';
 import { SessionPicker } from '@cli/ui/session-picker.js';
 import { ProviderId } from '@core/ports/provider-catalog.js';
 import type { ConversationSummary } from '@core/ports/conversation-repository';
@@ -93,6 +95,12 @@ interface ChatAppProps {
   allProviders: ProviderClient[];
   createProvider: (id: ProviderId) => ProviderClient;
   onConfigChange: (config: GlobalConfig) => void;
+  /**
+   * Fully replaces the persisted config (used by reset). Unlike onConfigChange,
+   * this does not merge into the prior config, so dropped keys (e.g. connected
+   * providers) stay gone instead of being resurrected from stale in-memory state.
+   */
+  onConfigReset: (config: GlobalConfig) => void;
   onModelChange?: (modelId: string, providerId: string) => void;
   initialThinkingCollapsed?: boolean;
   onThinkingCollapsedChange?: (collapsed: boolean) => void;
@@ -294,6 +302,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const needsConnect = props.providerId === undefined;
   const [showConnectPicker, setShowConnectPicker] = useState(needsConnect);
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [showResetPicker, setShowResetPicker] = useState(false);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
   // When the model picker is opened right after connecting, it shows only the
   // freshly connected provider's models (allModels hasn't refreshed yet).
@@ -646,9 +655,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   ) as ProviderId[];
   const configuredProviders = savedConfig.providers ?? {};
 
+  // The startup providers carry their credentials in memory, so a reset must
+  // clear them too — otherwise the listModels effect below re-fetches from the
+  // old clients and resurrects the models cache (and the picker) from scratch.
+  const [baseProviders, setBaseProviders] = useState(props.allProviders);
+
   const availableProviders = useMemo(
-    () => mergeProviders(props.allProviders, connectedProviders),
-    [connectedProviders, props.allProviders]
+    () => mergeProviders(baseProviders, connectedProviders),
+    [connectedProviders, baseProviders]
   );
 
   const resolveProviderClient = (providerId: ProviderId): ProviderClient =>
@@ -1209,30 +1223,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         return;
 
       case CommandName.Reset: {
-        const configDirectory = join(homedir(), '.cache', 'justcode');
-        const resetConfig =
-          savedConfig.systemPrompt === undefined
-            ? {}
-            : { systemPrompt: savedConfig.systemPrompt };
-        void resetAppState(configDirectory)
-          .then(() => {
-            props.onConfigChange(resetConfig);
-            setSavedConfig(resetConfig);
-            setConnectedProviders([]);
-            setConnectModels(null);
-            setAllModels([]);
-            setActiveProviderId(undefined);
-            setActiveModel('');
-            setActiveModelInfo(null);
-            resetFreshSessionState();
-            const newId = randomUUID();
-            nextSessionRequestedModelRef.current = undefined;
-            setCurrentSessionId(newId);
-            setStatus('Reset complete');
-          })
-          .catch((caughtError: unknown) => {
-            setError(getErrorMessage(caughtError));
-          });
+        setShowModelPicker(false);
+        setShowSessionPicker(false);
+        setShowConnectPicker(false);
+        setShowResetPicker(true);
         return;
       }
     }
@@ -1660,6 +1654,52 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         }}
         onCancel={() => {
           setShowSessionPicker(false);
+        }}
+      />
+    );
+  }
+
+  if (showResetPicker) {
+    return (
+      <ResetPicker
+        onConfirm={() => {
+          const configDirectory = join(homedir(), '.cache', 'justcode');
+          void resetAppState(configDirectory)
+            .then(() => {
+              const resetConfig = {
+                systemPrompt: DEFAULT_SYSTEM_PROMPT,
+              };
+              props.onConfigReset(resetConfig);
+              setSavedConfig(resetConfig);
+              setBaseProviders([]);
+              setConnectedProviders([]);
+              setConnectModels(null);
+              setAllModels([]);
+              setActiveProviderId(undefined);
+              setActiveModel('');
+              setActiveModelInfo(null);
+              setShowModelPicker(false);
+              setShowSessionPicker(false);
+              setShowResetPicker(false);
+              setShowConnectPicker(true);
+              resetFreshSessionState();
+              nextSessionRequestedModelRef.current = undefined;
+              setSessionSummaries([]);
+              setSessionSummariesLoading(false);
+              setConversation(null);
+              setSession(null);
+              setInputWithCursorAtEnd('');
+              const newId = randomUUID();
+              setCurrentSessionId(newId);
+              setStatus('Reset complete · connect a provider to continue');
+            })
+            .catch((caughtError: unknown) => {
+              setShowResetPicker(false);
+              setError(getErrorMessage(caughtError));
+            });
+        }}
+        onCancel={() => {
+          setShowResetPicker(false);
         }}
       />
     );

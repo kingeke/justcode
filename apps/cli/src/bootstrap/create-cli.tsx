@@ -144,7 +144,7 @@ async function confirmReset(): Promise<boolean> {
 
   const readline = createInterface({
     input: process.stdin,
-    output: process.stdout,
+    output: undefined,
   });
 
   try {
@@ -220,6 +220,13 @@ async function runChat(options: SharedOptions): Promise<void> {
       createProvider: runtime.createProvider,
       onConfigChange: (nextConfig) => {
         persistConfig(nextConfig);
+      },
+      // Reset replaces the config wholesale: discard the stale in-memory config
+      // (which still holds connected providers) so persistConfig can't merge
+      // them back on the next write.
+      onConfigReset: (nextConfig) => {
+        currentConfig = nextConfig;
+        void writeGlobalConfig(appConfig.configDirectory, currentConfig);
       },
       initialThinkingCollapsed: savedConfig.thinkingCollapsed ?? false,
       initialAutoApplyWrites: savedConfig.autoApplyWrites ?? false,

@@ -12,8 +12,6 @@ import {
   toToolCall,
 } from '@providers/openai/openai-responses-wire';
 
-const RESPONSES_TIMEOUT_MS = 300_000;
-
 export interface SendResponsesRequestOptions {
   /** Base URL of the provider; `/responses` is appended. */
   baseUrl: string;
@@ -61,12 +59,7 @@ export async function sendResponsesRequest({
     method: 'POST',
     headers,
     body: JSON.stringify(body),
-    signal: request.signal
-      ? AbortSignal.any([
-          request.signal,
-          AbortSignal.timeout(RESPONSES_TIMEOUT_MS),
-        ])
-      : AbortSignal.timeout(RESPONSES_TIMEOUT_MS),
+    ...(request.signal ? { signal: request.signal } : {}),
   });
 
   if (!response.ok || !response.body) {

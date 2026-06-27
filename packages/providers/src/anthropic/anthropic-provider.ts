@@ -26,8 +26,7 @@ const OAUTH_BETA = 'oauth-2025-04-20';
  */
 const CLAUDE_CODE_IDENTITY =
   "You are Claude Code, Anthropic's official CLI for Claude.";
-const DEFAULT_MAX_TOKENS = 8192;
-const REQUEST_TIMEOUT_MS = 120_000;
+const _DEFAULT_MAX_TOKENS = 8192;
 
 export interface AnthropicProviderOptions {
   baseUrl: string;
@@ -70,7 +69,6 @@ export class AnthropicProvider implements ProviderClient {
     const tools = toAnthropicToolDefinitions(request.tools);
     const body = {
       model: request.model,
-      max_tokens: DEFAULT_MAX_TOKENS,
       // Anthropic-only prompt caching: the top-level breakpoint auto-caches the
       // last cacheable block (the prefix shared across the agentic loop). Other
       // providers don't accept this field — applied here only.
@@ -155,12 +153,7 @@ export class AnthropicProvider implements ProviderClient {
         accept: 'text/event-stream',
       },
       body: JSON.stringify({ ...body, stream: true }),
-      signal: request.signal
-        ? AbortSignal.any([
-            request.signal,
-            AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-          ])
-        : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      ...(request.signal ? { signal: request.signal } : {}),
     };
 
     const url = joinUrl(this.options.baseUrl, '/v1/messages');

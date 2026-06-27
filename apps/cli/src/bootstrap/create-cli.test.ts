@@ -97,7 +97,7 @@ describe('createCli', () => {
 
     expect(createInterfaceMock).toHaveBeenCalledWith({
       input: process.stdin,
-      output: process.stdout,
+      output: undefined,
     });
     expect(loadAppConfigMock).toHaveBeenCalled();
     expect(resetAppStateMock).toHaveBeenCalledWith('/tmp/justcode');
@@ -136,6 +136,28 @@ describe('createCli', () => {
 
     expect(loadAppConfigMock).not.toHaveBeenCalled();
     expect(resetAppStateMock).not.toHaveBeenCalled();
+  });
+
+  it('prints both reset confirmation prompts to stdout', async () => {
+    const writeSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    const program = createCli();
+
+    await program.parseAsync(['node', 'justcode', 'reset'], {
+      from: 'node',
+    });
+
+    expect(writeSpy).toHaveBeenCalledWith(
+      'This will permanently reset JustCode to defaults and clear connected providers, pulled models, and sessions. This is irreversible.\n'
+    );
+    expect(writeSpy).toHaveBeenCalledWith('Continue? (y/N) ');
+    expect(writeSpy).toHaveBeenCalledWith(
+      'Type RESET to confirm this irreversible action: '
+    );
+
+    writeSpy.mockRestore();
   });
 
   it('forces connect flow when the provider flag is not configured', () => {

@@ -191,9 +191,7 @@ export async function requestSseStream(
       accept: 'text/event-stream',
       ...options.headers,
     },
-    signal: options.signal
-      ? AbortSignal.any([options.signal, AbortSignal.timeout(120_000)])
-      : AbortSignal.timeout(120_000),
+    ...(options.signal ? { signal: options.signal } : {}),
   };
 
   if (options.body !== undefined) {
@@ -340,9 +338,7 @@ export async function requestNdjsonStream(
       'content-type': 'application/json',
       ...options.headers,
     },
-    signal: options.signal
-      ? AbortSignal.any([options.signal, AbortSignal.timeout(120_000)])
-      : AbortSignal.timeout(120_000),
+    ...(options.signal ? { signal: options.signal } : {}),
   };
 
   if (options.body !== undefined) {
