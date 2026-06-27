@@ -1,4 +1,4 @@
-import { appendFile, mkdir } from 'node:fs/promises';
+import { appendFile, mkdir, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 export interface DebugLogOptions {
@@ -32,6 +32,17 @@ export async function logDebug(
     await appendFile(filePath, `${formatEntry(value)}\n`, 'utf8');
   } catch {
     // best effort only; logging must never break the app
+  }
+}
+
+export async function deleteDebugLog(
+  options: DebugLogOptions = {}
+): Promise<void> {
+  try {
+    const filePath = options.filePath ?? join(process.cwd(), DEFAULT_FILE_NAME);
+    await unlink(filePath);
+  } catch {
+    // best effort only; startup cleanup must never break the app
   }
 }
 

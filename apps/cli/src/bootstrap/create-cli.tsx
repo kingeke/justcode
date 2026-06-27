@@ -3,6 +3,7 @@ import React from 'react';
 import { version as appVersion } from '../../../../package.json';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { deleteDebugLog } from '@core/application/debug-log';
 import type { ProviderId } from '@core/ports/provider-catalog';
 import { createRuntimeServices } from '@runtime/bootstrap/create-services';
 import { DEFAULT_MAX_READ_LINES } from '@runtime/tools/read-file-tool';
@@ -25,6 +26,8 @@ interface StartupProviderSelection {
 
 export function createCli(): Command {
   const program = new Command();
+
+  void deleteDebugLog();
 
   program
     .name('JustCode')
