@@ -91,6 +91,21 @@ const MAX_COMMAND_ITEMS = 8;
 // image blocks, not as this literal text.
 const IMAGE_MARKER_PATTERN = /\s*\[Image #\d+\]\s*/g;
 
+// A pasted image staged for the next send, tagged with the stable marker number
+// shown in its `[Image #n]` placeholder. The number lets us tell which image a
+// given marker refers to even after others are removed, so deleting a marker
+// drops the right image.
+type PendingImage = MessageImage & { marker: number };
+
+// The set of marker numbers (`[Image #n]`) currently present in `text`.
+function markersInText(text: string): Set<number> {
+  const numbers = new Set<number>();
+  for (const match of text.matchAll(/\[Image #(\d+)\]/g)) {
+    numbers.add(Number(match[1]));
+  }
+  return numbers;
+}
+
 const BOLD = createTextAttributes({ bold: true });
 // Muted text uses an explicit grey foreground rather than the SGR "dim" attribute:
 // dim renders inconsistently (often near-white) across terminals, whereas a grey
@@ -407,10 +422,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   }>({ startMs: 0, firstTokenMs: null });
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState('');
-  // Images pasted into the prompt, awaiting the next send. Each has a matching
-  // `[Image #n]` marker in the prompt text (see IMAGE_MARKER_PATTERN).
-  const [pendingImages, setPendingImages] = useState<MessageImage[]>([]);
-  const pendingImagesRef = useRef<MessageImage[]>([]);
+  // Images pasted into the prompt, awaiting the next send. Each carries a stable
+  // `marker` number matching its `[Image #n]` marker in the prompt text (see
+  // IMAGE_MARKER_PATTERN). Deleting a marker from the prompt drops its image
+  // (see reconcilePendingImages).
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const pendingImagesRef = useRef<PendingImage[]>([]);
   pendingImagesRef.current = pendingImages;
   // Bumping this remounts the text input so its cursor jumps to the end after
   // we replace the value programmatically (tab-completion); ink-text-input
@@ -439,9 +456,16 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     const image = readClipboardImage();
     if (!image) return false;
 
-    const count = pendingImagesRef.current.length + 1;
+    // Marker numbers are monotonic, not positional: reuse the next number above
+    // the highest still staged so a marker can never collide with an existing
+    // one after earlier images have been deleted.
+    const highest = pendingImagesRef.current.reduce(
+      (max, img) => Math.max(max, img.marker),
+      0
+    );
+    const count = highest + 1;
     const marker = `[Image #${count}]`;
-    setPendingImages((prev) => [...prev, image]);
+    setPendingImages((prev) => [...prev, { ...image, marker: count }]);
 
     const area = promptAreaRef.current;
     if (area && !area.isDestroyed) {
@@ -457,6 +481,18 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setStatus(`Image #${count} attached — send your message to include it`);
     return true;
   }, [input, setInputWithCursorAtEnd]);
+
+  // Drop any staged image whose `[Image #n]` marker the user has since deleted
+  // from the prompt. Called on every prompt edit so the images sent always match
+  // the markers the user can see.
+  const reconcilePendingImages = useCallback((text: string): void => {
+    if (pendingImagesRef.current.length === 0) return;
+    const present = markersInText(text);
+    if (pendingImagesRef.current.every((img) => present.has(img.marker))) {
+      return;
+    }
+    setPendingImages((prev) => prev.filter((img) => present.has(img.marker)));
+  }, []);
 
   const currentSessionLabel = conversation?.title ?? currentSessionId;
   const activeRequestControllerRef = useRef<AbortController | null>(null);
@@ -1597,7 +1633,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
     // Pull the staged images for this turn and strip their `[Image #n]` markers
     // from the prose — the images travel as proper image blocks, not as text.
-    const turnImages = pendingImagesRef.current;
+    const turnImages: MessageImage[] = pendingImagesRef.current.map(
+      ({ mediaType, data }) => ({ mediaType, data })
+    );
     const cleanedValue = value.replace(IMAGE_MARKER_PATTERN, ' ').trim();
     setPendingImages([]);
 
@@ -2581,6 +2619,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
               const promptArea = promptAreaRef.current;
               if (!promptArea || promptArea.isDestroyed) return;
               setInput(promptArea.plainText);
+              reconcilePendingImages(promptArea.plainText);
             }}
             ref={(next) => {
               promptAreaRef.current = next;
