@@ -44,3 +44,23 @@ describe('chat app queued messages', () => {
     expect(source).toContain('setInputWithCursorAtEnd(message)');
   });
 });
+
+describe('chat app method autocomplete', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'apps/cli/src/ui/chat-app.tsx'),
+    'utf8'
+  );
+
+  it('loads the referenced file symbols for a @path::method mention', () => {
+    expect(source).toContain('getActiveSymbolMention(input)');
+    expect(source).toContain(
+      'props.promptAttachmentService.listSymbols(path)'
+    );
+  });
+
+  it('navigates and applies the symbol suggestions like file mentions', () => {
+    expect(source).toContain('showSymbolSuggestions');
+    expect(source).toContain('applySymbolSuggestion(content, suggestion)');
+    expect(source).toContain('applyActiveSuggestion(input, selectedSuggestion)');
+  });
+});

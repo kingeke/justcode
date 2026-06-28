@@ -18,6 +18,7 @@ import {
   ReadFileTool,
   DEFAULT_MAX_READ_LINES,
 } from '@runtime/tools/read-file-tool';
+import { ReadFileMethodTool } from '@runtime/tools/read-file-method-tool';
 import {
   DiscoverToolsTool,
   type DiscoverableToolDefinition,
@@ -76,6 +77,7 @@ export async function createRuntimeServices(
     new EditFileTool(workspaceFiles),
     new ApplyPatchTool(workspaceFiles),
     new ReadFileTool(workspaceFiles, () => readSettings.maxReadLines),
+    new ReadFileMethodTool(workspaceFiles, () => readSettings.maxReadLines),
     new GrepTool(workspaceFiles),
     new GlobTool(workspaceFiles),
     new BashTool(),

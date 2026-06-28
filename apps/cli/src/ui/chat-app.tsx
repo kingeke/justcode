@@ -32,8 +32,11 @@ import { ansiToStyledText } from '@cli/ui/ansi-to-styled-text.js';
 
 import {
   applyMentionSuggestion,
+  applySymbolSuggestion,
   filterMentionSuggestions,
+  filterSymbolSuggestions,
   getActiveMentionQuery,
+  getActiveSymbolMention,
   hasActiveMentionTrigger,
   type PromptAttachmentService,
 } from '@core/application/prompt-attachment-service';
@@ -491,6 +494,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   >({});
   const [error, setError] = useState<string | null>(null);
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
+  // Symbols of the file referenced by an active `@path::` mention, cached by
+  // path so completing a method doesn't re-read the file on every keystroke.
+  const [symbolsByPath, setSymbolsByPath] = useState<{
+    path: string;
+    symbols: string[];
+  } | null>(null);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [thinkingCollapsed, setThinkingCollapsed] = useState(
@@ -670,14 +679,42 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       filterMentionSuggestions(workspaceFiles, activeMentionQuery ?? undefined),
     [activeMentionQuery, workspaceFiles]
   );
+  // A trailing `@path::query` mention switches the autocomplete from files to
+  // the symbols declared in that file (fetched lazily into symbolsByPath).
+  const activeSymbolMention = useMemo(
+    () => (isCommandMode ? undefined : getActiveSymbolMention(input)),
+    [isCommandMode, input]
+  );
+  const symbolsForPath =
+    symbolsByPath && activeSymbolMention?.path === symbolsByPath.path
+      ? symbolsByPath.symbols
+      : [];
+  const symbolSuggestions = useMemo(
+    () => filterSymbolSuggestions(symbolsForPath, activeSymbolMention?.query),
+    [symbolsForPath, activeSymbolMention?.query]
+  );
+  const showSymbolSuggestions =
+    activeSymbolMention !== undefined && symbolsForPath.length > 0;
   const showMentionSuggestions =
     activeMentionTrigger && !isCommandMode && workspaceFiles.length > 0;
   const noMentionMatches =
     activeMentionTrigger &&
     activeMentionQuery !== undefined &&
     mentionSuggestions.length === 0;
+  // The list the keyboard navigates, plus how applying it rewrites the prompt —
+  // symbol completion when `@path::` is active, file completion otherwise.
+  const activeSuggestions = showSymbolSuggestions
+    ? symbolSuggestions
+    : mentionSuggestions;
   const selectedSuggestion =
-    mentionSuggestions[selectedSuggestionIndex] ?? mentionSuggestions[0];
+    activeSuggestions[selectedSuggestionIndex] ?? activeSuggestions[0];
+  const applyActiveSuggestion = useCallback(
+    (content: string, suggestion: string): string =>
+      showSymbolSuggestions
+        ? applySymbolSuggestion(content, suggestion)
+        : applyMentionSuggestion(content, suggestion),
+    [showSymbolSuggestions]
+  );
 
   useEffect(() => {
     if (!activeMentionTrigger || isCommandMode) {
@@ -691,6 +728,26 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     isCommandMode,
     refreshWorkspaceFiles,
   ]);
+
+  // Load the referenced file's symbols when a `@path::` mention becomes active,
+  // cached by path so re-typing the symbol query doesn't re-read the file.
+  useEffect(() => {
+    const path = activeSymbolMention?.path;
+    if (!path || symbolsByPath?.path === path) {
+      return;
+    }
+
+    let cancelled = false;
+    void props.promptAttachmentService.listSymbols(path).then((symbols) => {
+      if (!cancelled) {
+        setSymbolsByPath({ path, symbols });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSymbolMention?.path, props.promptAttachmentService, symbolsByPath]);
 
   // Push `input` into the uncontrolled textarea only when it diverges — i.e. when
   // we changed it programmatically (clearing on submit, tab-completion, restoring
@@ -989,11 +1046,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       return;
     }
 
-    if (!showMentionSuggestions) return;
+    if (!showMentionSuggestions && !showSymbolSuggestions) return;
 
     if (key.name === 'down') {
       setSelectedSuggestionIndex((i) =>
-        Math.min(i + 1, mentionSuggestions.length - 1)
+        Math.min(i + 1, activeSuggestions.length - 1)
       );
       return;
     }
@@ -1004,7 +1061,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     if (key.name === 'tab') {
       if (selectedSuggestion) {
         setInputWithCursorAtEnd(
-          applyMentionSuggestion(input, selectedSuggestion)
+          applyActiveSuggestion(input, selectedSuggestion)
         );
       }
     }
@@ -1016,7 +1073,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
   useEffect(() => {
     setSelectedSuggestionIndex(0);
-  }, [activeMentionQuery]);
+  }, [activeMentionQuery, activeSymbolMention?.query]);
 
   useEffect(() => {
     if (isSending) return;
@@ -1425,10 +1482,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       return;
     }
 
-    if (showMentionSuggestions && selectedSuggestion) {
-      setInputWithCursorAtEnd(
-        applyMentionSuggestion(value, selectedSuggestion)
-      );
+    if (
+      (showSymbolSuggestions || showMentionSuggestions) &&
+      selectedSuggestion
+    ) {
+      setInputWithCursorAtEnd(applyActiveSuggestion(value, selectedSuggestion));
       return;
     }
 
@@ -2002,8 +2060,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           Provider: {activeProviderId} | Session: {currentSessionLabel}
         </text>
         <text fg={MUTED} flexShrink={0}>
-          Enter to send · Tab to complete @file or /command · Esc to cancel or
-          interrupt · Ctrl+C to exit
+          Enter to send · Tab to complete @file (or @file::method) or /command ·
+          Esc to cancel or interrupt · Ctrl+C to exit
         </text>
       </box>
 
@@ -2427,7 +2485,24 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           />
         </box>
 
-        {!isCommandMode && showMentionSuggestions ? (
+        {!isCommandMode && showSymbolSuggestions ? (
+          <box marginTop={1} flexDirection="column">
+            <text fg={MUTED}>
+              methods in {activeSymbolMention?.path}:
+            </text>
+            {symbolSuggestions.map((suggestion, index) => (
+              <text
+                key={suggestion}
+                {...(index === selectedSuggestionIndex ? { fg: 'cyan' } : {})}
+              >
+                {index === selectedSuggestionIndex ? '>' : ' '} ::{suggestion}
+              </text>
+            ))}
+            {symbolSuggestions.length === 0 ? (
+              <text fg={MUTED}>no method found</text>
+            ) : null}
+          </box>
+        ) : !isCommandMode && showMentionSuggestions ? (
           <box marginTop={1} flexDirection="column">
             <text fg={MUTED}>file suggestions:</text>
             {mentionSuggestions.map((suggestion, index) => (

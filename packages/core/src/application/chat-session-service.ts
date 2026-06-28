@@ -53,7 +53,6 @@ const MAX_SESSION_TITLE_LENGTH = 60;
  */
 function buildSessionTitleUserMessage(userMessage: string): string {
   return [
-    'Generate a title for the conversation that begins with this message:',
     `<message>\n${userMessage}\n</message>`,
   ].join('\n');
 }
