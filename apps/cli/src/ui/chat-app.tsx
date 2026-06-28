@@ -71,6 +71,7 @@ import {
 import { openFileInEditor } from '@cli/ui/open-file.js';
 import { KeyName } from '@cli/ui/key-name.js';
 import { prepareMarkdown } from '@cli/ui/markdown.js';
+import { MARKDOWN_SYNTAX_STYLES } from '@cli/ui/markdown-theme.js';
 import {
   ConnectPicker,
   type ConnectedProviderResult,
@@ -149,11 +150,14 @@ const MARKDOWN_FG = '#d4d4d4';
 const INPUT_BG = '#008B8B';
 
 // One shared SyntaxStyle for all markdown rendering. Created lazily on first use
-// (after the native renderer is initialised) so it isn't constructed at import time.
+// (after the native renderer is initialised) so it isn't constructed at import
+// time. Built from an explicit style map — a bare SyntaxStyle.create() registers
+// no styles, so every chunk resolves to the default and renders as unstyled raw
+// text; fromStyles is what makes headings, bold, code, links, etc. actually style.
 let sharedSyntaxStyle: SyntaxStyle | null = null;
 function getSyntaxStyle(): SyntaxStyle {
   if (!sharedSyntaxStyle) {
-    sharedSyntaxStyle = SyntaxStyle.create();
+    sharedSyntaxStyle = SyntaxStyle.fromStyles(MARKDOWN_SYNTAX_STYLES);
   }
   return sharedSyntaxStyle;
 }
@@ -168,21 +172,29 @@ function getSyntaxStyle(): SyntaxStyle {
 // renderer overdraws.
 const MarkdownView = React.memo(function MarkdownView({
   content,
-  streaming = false,
+  live = false,
 }: {
   content: string;
-  streaming?: boolean;
+  /** True for the in-flight streaming block, false for a committed message. */
+  live?: boolean;
 }): React.ReactNode {
+  // Committed messages render with `streaming` off so OpenTUI uses the
+  // tree-sitter highlighter, which both styles the markdown and conceals its
+  // markers (`#`, `**`, `` ` ``) — the clean look. The in-flight block renders
+  // with `streaming` on for incremental parsing as tokens arrive (markers show
+  // until it commits, then it re-renders concealed). Both depend on a populated
+  // SyntaxStyle; see getSyntaxStyle.
+  //
   // A committed message that wrapped its whole answer in a code fence, or left a
-  // fence unterminated, would otherwise render as literal text. Normalise it
-  // before parsing. While streaming we leave it alone — a fence is expected to
-  // be temporarily open as the block streams in.
-  const prepared = streaming ? content : prepareMarkdown(content);
+  // fence unterminated, would otherwise render as literal text, so normalise it
+  // first. The live block is left as-is — a fence is expected to be temporarily
+  // open as the block streams in.
+  const prepared = live ? content : prepareMarkdown(content);
   return (
     <markdown
       content={prepared}
       syntaxStyle={getSyntaxStyle()}
-      streaming={streaming}
+      streaming={live}
       tableOptions={{ style: 'grid' }}
       fg={MARKDOWN_FG}
       flexShrink={0}
@@ -2197,7 +2209,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
               </box>
             ) : null}
             {streamingContent ? (
-              <MarkdownView content={streamingContent} streaming />
+              <MarkdownView content={streamingContent} live />
             ) : null}
           </box>
         ) : null}

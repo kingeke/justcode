@@ -50,6 +50,7 @@
     "@shikijs/cli": "^4.2.0",
     "chalk": "5",
     "commander": "^13.1.0",
+    "dedent": "^1.7.2",
     "diff": "^9.0.0",
     "marked": "^15.0.12",
     "marked-shiki": "^1.2.1",

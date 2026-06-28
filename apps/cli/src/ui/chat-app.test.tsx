@@ -64,3 +64,21 @@ describe('chat app method autocomplete', () => {
     expect(source).toContain('applyActiveSuggestion(input, selectedSuggestion)');
   });
 });
+
+describe('chat app markdown rendering', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'apps/cli/src/ui/chat-app.tsx'),
+    'utf8'
+  );
+
+  it('renders committed messages via the tree-sitter (non-streaming) path', () => {
+    // Committed messages use streaming={live} → false, so OpenTUI styles AND
+    // conceals markers; the live block streams. Both need a populated SyntaxStyle.
+    expect(source).toContain('streaming={live}');
+    expect(source).toContain('SyntaxStyle.fromStyles(MARKDOWN_SYNTAX_STYLES)');
+  });
+
+  it('normalises committed content but leaves the live block alone', () => {
+    expect(source).toContain('const prepared = live ? content : prepareMarkdown(content)');
+  });
+});
