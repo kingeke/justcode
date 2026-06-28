@@ -9,3 +9,4 @@ test-files
 opencode
 debug.log
 .test-cache/
+release.md
