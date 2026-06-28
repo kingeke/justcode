@@ -2511,7 +2511,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             minHeight={3}
             maxHeight={6}
             wrapMode="word"
-            placeholder="Ask anything... (Ctrl+V to paste an image)"
+            placeholder="Ask anything..."
             backgroundColor={INPUT_BG}
             textColor="#111111"
             focusedTextColor="#111111"
