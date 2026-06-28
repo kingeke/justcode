@@ -39,18 +39,13 @@ export class DiscoverToolsTool implements Tool {
   }
 
   public async execute(
-    rawArguments: string,
+    _rawArguments: string,
     _context: ToolExecutionContext
   ): Promise<ToolResult> {
-    const trimmed = rawArguments.trim();
-    if (trimmed && trimmed !== '{}') {
-      return {
-        content:
-          'Invalid arguments: discover_tools takes no arguments. Call it with an empty object.',
-        isError: true,
-      };
-    }
-
+    // discover_tools takes no arguments, but models sometimes pass one by
+    // accident (e.g. a stray `{"tool":"…"}`). That's harmless — revealing the
+    // toolset doesn't depend on any input — so ignore whatever was passed and
+    // always succeed rather than bouncing the turn with an error.
     return {
       content:
         'Tool discovery acknowledged. The full toolset will now be available on the next model request. Call the actual tool you need next.',

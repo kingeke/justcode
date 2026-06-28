@@ -11,15 +11,24 @@ import {
   formatNumberedLine,
   splitLines,
 } from '@core/application/read-window';
+import {
+  extractSymbolBlock,
+  listFileSymbols,
+} from '@core/application/symbol-extraction';
 
 // Re-exported from core so the read_file tool and @-mention attachments share a
 // single default; the runtime still overrides it from user config.
 export { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
 
+/** How many candidate symbol names to suggest when a method isn't found. */
+const MAX_SUGGESTED_SYMBOLS = 30;
+
 interface ReadFileArguments {
   path: string;
   offset: number;
   limit?: number;
+  /** When set, read only this method/symbol's block instead of the whole file. */
+  method?: string;
 }
 
 /**
@@ -40,8 +49,13 @@ export class ReadFileTool implements Tool {
       'to the workspace root. Use "offset" (1-based line number, default 1) ' +
       'and "limit" (maximum lines to return) to page through large files; the ' +
       'result reports the line range shown, the total line count, and whether ' +
-      'more lines remain (pass the next offset to continue). Lines longer than ' +
-      `${MAX_LINE_LENGTH} characters are truncated and flagged.`,
+      'more lines remain (pass the next offset to continue). Pass "method" to ' +
+      'read just a single method/function/symbol\'s block (with the file\'s ' +
+      'real line numbers) instead of the whole file; if the method is not ' +
+      'found, the result lists the symbols declared in the file. Symbol ' +
+      'detection is heuristic — omit "method" to read the file if a symbol ' +
+      `can't be located. Lines longer than ${MAX_LINE_LENGTH} characters are ` +
+      'truncated and flagged.',
     parameters: {
       type: 'object',
       properties: {
@@ -53,13 +67,21 @@ export class ReadFileTool implements Tool {
           type: 'number',
           description:
             '1-based line number to start reading from. Defaults to 1 (the ' +
-            'first line). Use the offset reported by a previous read to continue.',
+            'first line). Use the offset reported by a previous read to ' +
+            'continue. When "method" is set, this is the 1-based line within ' +
+            'the method instead.',
         },
         limit: {
           type: 'number',
           description:
             'Maximum number of lines to return. Defaults to (and is capped at) ' +
             'the configured read limit.',
+        },
+        method: {
+          type: 'string',
+          description:
+            'Optional. Name of a method/function/symbol to read instead of the ' +
+            'whole file (e.g. "findMultipleBoq").',
         },
       },
       required: ['path'],
@@ -76,6 +98,9 @@ export class ReadFileTool implements Tool {
     const parsed = tryParse(rawArguments);
     if (!parsed) {
       return { title: 'read_file (unparseable arguments)' };
+    }
+    if (parsed.method) {
+      return { title: `read ${parsed.path}::${parsed.method}` };
     }
     const suffix = parsed.offset > 1 ? ` (from line ${parsed.offset})` : '';
     return { title: `read ${parsed.path}${suffix}` };
@@ -113,6 +138,10 @@ export class ReadFileTool implements Tool {
       };
     }
 
+    if (parsed.method) {
+      return this.readMethod(path, text, parsed.method, offset, limit);
+    }
+
     const lines = splitLines(text);
     const totalLines = lines.length;
     if (totalLines === 0) {
@@ -148,6 +177,74 @@ export class ReadFileTool implements Tool {
       `use offset=${lineEnd + 1} to continue)`;
     return { content: `${header}\n${body}${footer}` };
   }
+
+  /**
+   * Reads a single method/symbol block. `offset` is 1-based within the method;
+   * displayed line numbers stay aligned to the original file. On a miss, lists
+   * the file's symbols so the model can retry.
+   */
+  private readMethod(
+    path: string,
+    text: string,
+    method: string,
+    offset: number,
+    limit: number | undefined
+  ): ToolResult {
+    const block = extractSymbolBlock(text, method);
+    if (!block) {
+      const symbols = listFileSymbols(text);
+      const suggestion = symbols.length
+        ? ` Symbols found in this file: ${formatSymbolList(symbols)}.`
+        : ' No symbols were detected in this file.';
+      return {
+        content: `Method '${method}' was not found in ${path}.${suggestion} Omit "method" to read the whole file.`,
+        isError: true,
+      };
+    }
+
+    const blockLength = block.lines.length;
+    if (offset > blockLength) {
+      return {
+        content: `Offset ${offset} is past the end of ${path}::${method} (${blockLength} lines).`,
+        isError: true,
+      };
+    }
+
+    const maxLines = Math.max(1, Math.floor(this.getMaxLines()));
+    const requested =
+      limit !== undefined ? Math.min(limit, maxLines) : maxLines;
+    const sliceStart = offset - 1;
+    const sliceEnd = Math.min(sliceStart + requested, blockLength);
+    const firstFileLine = block.startLine + sliceStart;
+    const truncated = sliceEnd < blockLength;
+
+    const body = block.lines
+      .slice(sliceStart, sliceEnd)
+      .map((line, index) => formatNumberedLine(firstFileLine + index, line))
+      .join('\n');
+
+    const lastFileLine = block.startLine + sliceEnd - 1;
+    const blockEnd = block.startLine + blockLength - 1;
+    const header = `${path}::${method} lines ${firstFileLine}-${lastFileLine} of ${block.startLine}-${blockEnd}`;
+    if (!truncated) {
+      return { content: `${header}\n${body}` };
+    }
+
+    const remaining = blockLength - sliceEnd;
+    const footer =
+      `\n\n(truncated: ${remaining} more line${remaining === 1 ? '' : 's'} in ` +
+      `this method; use offset=${sliceEnd + 1} to continue)`;
+    return { content: `${header}\n${body}${footer}` };
+  }
+}
+
+function formatSymbolList(symbols: string[]): string {
+  const shown = symbols.slice(0, MAX_SUGGESTED_SYMBOLS);
+  const suffix =
+    symbols.length > shown.length
+      ? `, … (+${symbols.length - shown.length} more)`
+      : '';
+  return shown.join(', ') + suffix;
 }
 
 function tryParse(rawArguments: string): ReadFileArguments | undefined {
@@ -167,10 +264,16 @@ function tryParse(rawArguments: string): ReadFileArguments | undefined {
       limit = Math.max(1, Math.floor(parsed.limit));
     }
 
+    const method =
+      typeof parsed.method === 'string' && parsed.method.trim()
+        ? parsed.method.trim()
+        : undefined;
+
     return {
       path: parsed.path,
       offset,
       ...(limit !== undefined ? { limit } : {}),
+      ...(method !== undefined ? { method } : {}),
     };
   } catch {
     return undefined;

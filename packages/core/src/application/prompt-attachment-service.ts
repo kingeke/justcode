@@ -207,14 +207,14 @@ export function filterSymbolSuggestions(
     .map(({ symbol }) => symbol);
 }
 
-/** Replaces the partial `::query` at the end of the prompt with `::symbol `. */
+/** Replaces the partial `::query` at the end of the prompt with `::symbol`. */
 export function applySymbolSuggestion(
   content: string,
   symbol: string
 ): string {
   return content.replace(
     /(@[^\s@]*?::)[^\s@:]*$/,
-    `$1${symbol.replaceAll('$', '$$$$')} `
+    `$1${symbol.replaceAll('$', '$$$$')}`
   );
 }
 
@@ -300,7 +300,7 @@ export function applyMentionSuggestion(
 ): string {
   return content.replace(
     /(^|\s)@[^\s@]*$/,
-    `$1@${suggestedPath.replaceAll('$', '$$$$')} `
+    `$1@${suggestedPath.replaceAll('$', '$$$$')}`
   );
 }
 

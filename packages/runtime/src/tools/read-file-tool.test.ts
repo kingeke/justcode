@@ -162,4 +162,69 @@ describe('ReadFileTool', () => {
   it('does not require approval', () => {
     expect(tool.requiresApproval).toBe(false);
   });
+
+  describe('method reads', () => {
+    const file = [
+      'export class Repo {',
+      '  async findOne(id) {',
+      '    return id;',
+      '  }',
+      '',
+      '  async findMany(ids) {',
+      '    const rows = await db.many(ids);',
+      '    return rows;',
+      '  }',
+      '}',
+    ].join('\n');
+
+    it('reads just the named method with real file line numbers', async () => {
+      await seed('repo.ts', file);
+
+      const result = await tool.execute(
+        JSON.stringify({ path: 'repo.ts', method: 'findMany' }),
+        { workspaceRoot }
+      );
+
+      expect(result.isError).toBeFalsy();
+      expect(result.content).toBe(
+        [
+          'repo.ts::findMany lines 6-9 of 6-9',
+          '6 |   async findMany(ids) {',
+          '7 |     const rows = await db.many(ids);',
+          '8 |     return rows;',
+          '9 |   }',
+        ].join('\n')
+      );
+    });
+
+    it('pages within a method via offset and limit', async () => {
+      await seed('repo.ts', file);
+
+      const result = await tool.execute(
+        JSON.stringify({
+          path: 'repo.ts',
+          method: 'findMany',
+          offset: 2,
+          limit: 1,
+        }),
+        { workspaceRoot }
+      );
+
+      expect(result.content).toContain('repo.ts::findMany lines 7-7 of 6-9');
+      expect(result.content).toContain('use offset=3 to continue');
+    });
+
+    it('lists available symbols when the method is not found', async () => {
+      await seed('repo.ts', file);
+
+      const result = await tool.execute(
+        JSON.stringify({ path: 'repo.ts', method: 'missing' }),
+        { workspaceRoot }
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content).toContain("Method 'missing' was not found");
+      expect(result.content).toContain('findMany');
+    });
+  });
 });

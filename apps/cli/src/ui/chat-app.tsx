@@ -70,6 +70,7 @@ import {
 } from '@cli/ui/commands.js';
 import { openFileInEditor } from '@cli/ui/open-file.js';
 import { KeyName } from '@cli/ui/key-name.js';
+import { prepareMarkdown } from '@cli/ui/markdown.js';
 import {
   ConnectPicker,
   type ConnectedProviderResult,
@@ -172,9 +173,14 @@ const MarkdownView = React.memo(function MarkdownView({
   content: string;
   streaming?: boolean;
 }): React.ReactNode {
+  // A committed message that wrapped its whole answer in a code fence, or left a
+  // fence unterminated, would otherwise render as literal text. Normalise it
+  // before parsing. While streaming we leave it alone — a fence is expected to
+  // be temporarily open as the block streams in.
+  const prepared = streaming ? content : prepareMarkdown(content);
   return (
     <markdown
-      content={content}
+      content={prepared}
       syntaxStyle={getSyntaxStyle()}
       streaming={streaming}
       tableOptions={{ style: 'grid' }}

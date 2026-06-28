@@ -192,7 +192,7 @@ describe('prompt mention helpers', () => {
   it('applies the selected suggestion to the current mention', () => {
     expect(
       applyMentionSuggestion('Review @apps/cli/s', 'apps/cli/src/index.tsx')
-    ).toBe('Review @apps/cli/src/index.tsx ');
+    ).toBe('Review @apps/cli/src/index.tsx');
   });
 
   it('parses a mention into its path and optional symbol', () => {
@@ -247,7 +247,7 @@ describe('prompt mention helpers', () => {
         'look at @reports.repository.ts::find',
         'findMultipleBoq'
       )
-    ).toBe('look at @reports.repository.ts::findMultipleBoq ');
+    ).toBe('look at @reports.repository.ts::findMultipleBoq');
   });
 
 });

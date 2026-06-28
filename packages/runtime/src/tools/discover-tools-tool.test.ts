@@ -20,14 +20,16 @@ describe('DiscoverToolsTool', () => {
     expect(result.content).toContain('full toolset');
   });
 
-  it('rejects non-empty arguments', async () => {
+  it('ignores stray arguments passed by accident and still succeeds', async () => {
     const tool = new DiscoverToolsTool([]);
 
-    await expect(
-      tool.execute(JSON.stringify({ tool_name: 'read_file' }), {
-        workspaceRoot: '/tmp',
-      })
-    ).resolves.toEqual(expect.objectContaining({ isError: true }));
+    const result = await tool.execute(
+      JSON.stringify({ tool_name: 'read_file' }),
+      { workspaceRoot: '/tmp' }
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content).toContain('Tool discovery acknowledged');
   });
 
   it('allows an empty string or empty object call shape from providers', async () => {
