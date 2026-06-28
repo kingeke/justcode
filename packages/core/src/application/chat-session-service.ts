@@ -108,6 +108,15 @@ export interface SubmitMessageInput {
    * the chat turn (and thus the user's next message).
    */
   onTitle?: (sessionId: string, title: string) => void;
+  /**
+   * Pulls any messages the user queued while this turn is running so they can
+   * steer the model on the fly. Called at the start of every agent step; the
+   * returned text (all queued messages combined, or null when nothing is
+   * queued) is appended as a user message before the next model call, so the
+   * model sees the new instructions at the earliest round-trip rather than only
+   * after the whole turn finishes.
+   */
+  drainSteering?: () => string | null;
 }
 
 export interface SubmitMessageResult {
@@ -238,6 +247,16 @@ export class ChatSessionService {
     // done when the model says it's done, not after an arbitrary N steps.
     for (;;) {
       throwIfAborted(input.signal);
+
+      // Steer the in-flight turn: fold any messages the user queued since the
+      // last step into a user message before this model call. Consecutive
+      // same-role messages are merged by the provider adapters, so this sits
+      // cleanly after the preceding tool results.
+      const steering = input.drainSteering?.();
+      if (steering && steering.trim()) {
+        working.push(createMessage('user', steering.trim()));
+      }
+
       const systemMessage = createMessage(
         'system',
         buildSystemPrompt(

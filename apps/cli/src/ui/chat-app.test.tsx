@@ -14,3 +14,33 @@ describe('chat app metrics line', () => {
     expect(source).toContain('activeModelInfo?.contextWindow == null');
   });
 });
+
+describe('chat app queued messages', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'apps/cli/src/ui/chat-app.tsx'),
+    'utf8'
+  );
+
+  it('queues plain messages typed while a turn is sending', () => {
+    expect(source).toContain('if (isSending) {');
+    expect(source).toContain(
+      'setQueuedMessages((queue) => [...queue, value.trim()])'
+    );
+  });
+
+  it('steers the in-flight turn by draining the queue into one message', () => {
+    expect(source).toContain('drainSteering: () => {');
+    expect(source).toContain("const combined = queued.join('\\n\\n')");
+  });
+
+  it('sends anything left in the queue together once the turn ends', () => {
+    expect(source).toContain("const combined = queuedMessages.join('\\n\\n')");
+    expect(source).toContain('void submit(combined)');
+  });
+
+  it('lets the user edit the queue with the arrow keys', () => {
+    expect(source).toContain('queueEditIndex !== null');
+    expect(source).toContain('setQueueEditIndex(queuedMessages.length - 1)');
+    expect(source).toContain('setInputWithCursorAtEnd(message)');
+  });
+});

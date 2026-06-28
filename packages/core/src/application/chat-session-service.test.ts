@@ -504,6 +504,71 @@ describe('ChatSessionService', () => {
     expect(toolMessage?.content).toBe('wrote the file');
   });
 
+  it('folds queued steering messages into the in-flight turn before the next model call', async () => {
+    const repository = new InMemoryConversationRepository();
+    const tool = new RecordingWriteTool();
+    const seenMessageRoles: string[][] = [];
+    let turn = 0;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat({ messages }): Promise<ChatResult> {
+        seenMessageRoles.push(messages.map((m) => m.role));
+        turn += 1;
+        if (turn === 1) {
+          return {
+            content: '',
+            toolCalls: [
+              {
+                id: 'call-1',
+                name: 'write_file',
+                arguments: '{"path":"a.txt","content":"hi"}',
+              },
+            ],
+          };
+        }
+        return { content: 'All done.' };
+      },
+      async listModels() {
+        return [{ id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai }];
+      },
+      getDefaultModel() {
+        return 'gpt';
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry: new ToolRegistry([tool]),
+    });
+
+    // Nothing is queued at the first step (the user has only just submitted);
+    // the steering message arrives by the second step, mirroring a user typing
+    // while the turn runs.
+    let drainCalls = 0;
+    const result = await service.submitMessage({
+      conversation: createConversation('session-1'),
+      model: 'gpt',
+      content: 'create a.txt',
+      drainSteering: () => {
+        drainCalls += 1;
+        return drainCalls === 2 ? 'actually make it b.txt' : null;
+      },
+    });
+
+    // The first model call sees no steering; the second sees the queued message
+    // appended as a user turn after the tool result.
+    expect(seenMessageRoles[0]).toEqual(['system', 'user']);
+    expect(seenMessageRoles[1]).toEqual([
+      'system',
+      'user',
+      'assistant',
+      'tool',
+      'user',
+    ]);
+    const steered = result.conversation.messages.find(
+      (m) => m.role === 'user' && m.content === 'actually make it b.txt'
+    );
+    expect(steered).toBeDefined();
+  });
+
   it('retries chat-only and omits tools when the model rejects tools', async () => {
     const repository = new InMemoryConversationRepository();
     const tool = new RecordingWriteTool();

@@ -66,6 +66,7 @@ import {
   parseCommandInput,
 } from '@cli/ui/commands.js';
 import { openFileInEditor } from '@cli/ui/open-file.js';
+import { KeyName } from '@cli/ui/key-name.js';
 import {
   ConnectPicker,
   type ConnectedProviderResult,
@@ -422,6 +423,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       return null;
     });
     setIsSending(false);
+    setQueuedMessages([]);
+    setQueueEditIndex(null);
     setConversation(null);
     setError(null);
     setLastStats(null);
@@ -534,6 +537,19 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   // Index into the finished bash rows while browsing them with the keyboard;
   // null means we're not browsing (the prompt has focus as usual).
   const [browseIndex, setBrowseIndex] = useState<number | null>(null);
+  // Messages submitted while a turn is in flight. They're folded into the
+  // running turn to steer the model at the next round-trip (see drainSteering),
+  // and any left over when the turn ends are sent together as the next turn.
+  const [queuedMessages, setQueuedMessages] = useState<string[]>([]);
+  // Mirrors queuedMessages so the steering callback (captured once when a turn
+  // starts) always reads the latest queue rather than a stale snapshot.
+  const queuedMessagesRef = useRef<string[]>([]);
+  queuedMessagesRef.current = queuedMessages;
+  // Index into queuedMessages while editing the queue with the keyboard; null
+  // means we're not editing (the prompt has focus as usual). Pressing ↑ from an
+  // empty prompt enters this mode, and Enter pulls the selected message back
+  // into the prompt for editing.
+  const [queueEditIndex, setQueueEditIndex] = useState<number | null>(null);
   const [expandedBashIds, setExpandedBashIds] = useState<Set<string>>(
     () => new Set()
   );
@@ -702,12 +718,13 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   });
 
   useEffect(() => {
-    // While a question is pending the prompt doubles as the answer box, so focus
-    // it then too even though the turn is still sending.
+    // The prompt stays focused even while a turn is sending so the user can type
+    // ahead and queue the next message. Only the keyboard-driven browse/edit
+    // modes (which steer arrows to navigation) take focus away from it.
     if (
       !terminalFocused ||
       browseIndex !== null ||
-      (isSending && pendingQuestion === null)
+      queueEditIndex !== null
     ) {
       return;
     }
@@ -718,7 +735,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     }
 
     area.focus();
-  }, [browseIndex, isSending, pendingQuestion, terminalFocused]);
+  }, [browseIndex, queueEditIndex, isSending, pendingQuestion, terminalFocused]);
 
   const configuredProviderIds = Object.keys(
     savedConfig.providers ?? {}
@@ -845,6 +862,52 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       // Otherwise clear any typed text and arm exit for EXIT_WINDOW_MS.
       if (input) setInputWithCursorAtEnd('');
       armExit();
+      return;
+    }
+
+    // Editing the queued messages: arrows move the selection, Enter pulls the
+    // selected message back into the prompt (removing it from the queue) so it
+    // can be edited and resent, Esc returns to the prompt.
+    if (queueEditIndex !== null) {
+      if (key.name === KeyName.Escape) {
+        setQueueEditIndex(null);
+        return;
+      }
+      if (key.name === KeyName.Up) {
+        setQueueEditIndex((i) => Math.max(0, (i ?? 0) - 1));
+        return;
+      }
+      if (key.name === KeyName.Down) {
+        setQueueEditIndex((i) =>
+          Math.min(queuedMessages.length - 1, (i ?? 0) + 1)
+        );
+        return;
+      }
+      if (key.name === KeyName.Return) {
+        const index = queueEditIndex;
+        const message = queuedMessages[index];
+        if (message !== undefined) {
+          setQueuedMessages((queue) => queue.filter((_, i) => i !== index));
+          setQueueEditIndex(null);
+          setInputWithCursorAtEnd(message);
+        }
+        return;
+      }
+      // Swallow everything else so stray keys don't leak while editing.
+      return;
+    }
+
+    // Enter queue-edit mode from an empty prompt when messages are queued. This
+    // takes priority over bash browsing (which only triggers when idle), so a
+    // queued-up message is always reachable with ↑ while a turn is in flight.
+    if (
+      key.name === KeyName.Up &&
+      !input &&
+      queuedMessages.length > 0 &&
+      !isCommandMode &&
+      !showMentionSuggestions
+    ) {
+      setQueueEditIndex(queuedMessages.length - 1);
       return;
     }
 
@@ -990,6 +1053,32 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       return Math.min(current, bashToolMessages.length - 1);
     });
   }, [bashToolMessages.length]);
+
+  // Leave queue-edit mode when the queue empties, and clamp the cursor if the
+  // queue shrank (e.g. a message was sent or pulled out for editing).
+  useEffect(() => {
+    setQueueEditIndex((current) => {
+      if (current === null) return null;
+      if (queuedMessages.length === 0) return null;
+      return Math.min(current, queuedMessages.length - 1);
+    });
+  }, [queuedMessages.length]);
+
+  // Send anything still queued once the active turn finishes. Most messages are
+  // folded into the running turn via steering; this catches whatever was queued
+  // after the model's final round-trip (or while idle). They're combined into a
+  // single turn so they're sent all at once. Paused while the user is editing
+  // the queue so their in-progress edit isn't sent out from under them.
+  useEffect(() => {
+    if (isSending || queueEditIndex !== null) return;
+    if (queuedMessages.length === 0) return;
+    if (!conversation || !session) return;
+
+    const combined = queuedMessages.join('\n\n');
+    setQueuedMessages([]);
+    void submit(combined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSending, queuedMessages, queueEditIndex, conversation, session]);
 
   useEffect(() => {
     return () => {
@@ -1324,7 +1413,17 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   };
 
   const submit = async (value: string): Promise<void> => {
-    if (isSending || !value.trim()) return;
+    if (!value.trim()) return;
+
+    // A turn is already in flight: queue plain messages to send next instead of
+    // dropping them. Commands aren't queued (they'd run against a moving session
+    // state), so they're simply ignored until the turn finishes.
+    if (isSending) {
+      if (parseCommandInput(value) !== null) return;
+      setQueuedMessages((queue) => [...queue, value.trim()]);
+      setInputWithCursorAtEnd('');
+      return;
+    }
 
     if (showMentionSuggestions && selectedSuggestion) {
       setInputWithCursorAtEnd(
@@ -1523,6 +1622,27 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         requestApproval,
         requestUserInput,
         onToolActivity,
+        drainSteering: () => {
+          const queued = queuedMessagesRef.current;
+          if (queued.length === 0) return null;
+          const combined = queued.join('\n\n');
+          // Clear the queue and surface the steering message in the transcript
+          // now, so it's visibly part of the conversation before the model's
+          // next round-trip (the committed turn replaces it at the end).
+          setQueuedMessages([]);
+          // Commit any prose streamed so far first, so the steering message
+          // lands after it rather than before the in-progress answer.
+          flushStreamedText();
+          setConversation((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  messages: [...prev.messages, createMessage('user', combined)],
+                }
+              : prev
+          );
+          return combined;
+        },
         onTitle: (sessionId, title) => {
           setConversation((prev) =>
             prev && prev.sessionId === sessionId ? { ...prev, title } : prev
@@ -2190,6 +2310,41 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           </box>
         ) : null}
 
+        {queuedMessages.length > 0 ? (
+          <box
+            marginTop={1}
+            flexShrink={0}
+            flexDirection="column"
+            border
+            borderStyle="rounded"
+            borderColor={queueEditIndex !== null ? 'cyan' : MUTED}
+            paddingX={1}
+          >
+            <text fg={MUTED}>
+              {queueEditIndex !== null
+                ? 'editing queue · ↑/↓ select · enter to edit · esc back'
+                : `${queuedMessages.length} queued message${
+                    queuedMessages.length === 1 ? '' : 's'
+                  } · steering the model · ↑ to edit`}
+            </text>
+            {queuedMessages.map((message, index) => (
+              <text
+                key={index}
+                content={
+                  new StyledText([
+                    tc(index === queueEditIndex ? '› ' : '  ', {
+                      fg: index === queueEditIndex ? 'cyan' : MUTED,
+                    }),
+                    tc(firstLine(message), {
+                      fg: index === queueEditIndex ? 'cyan' : 'white',
+                    }),
+                  ])
+                }
+              />
+            ))}
+          </box>
+        ) : null}
+
         <box
           marginTop={1}
           width="100%"
@@ -2209,12 +2364,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             textColor="#111111"
             focusedTextColor="#111111"
             cursorColor="white"
-            // The prompt is also the answer box while a question is pending, so
-            // it stays focusable even though the turn is still "sending".
+            // The prompt stays focusable while a turn is sending (so the user
+            // can type ahead and queue the next message) and while a question is
+            // pending (it doubles as the answer box). Only the keyboard browse/
+            // edit modes steer focus away to drive their arrow navigation.
             focused={
               terminalFocused &&
               browseIndex === null &&
-              (!isSending || pendingQuestion !== null)
+              queueEditIndex === null
             }
             onSubmit={() => {
               const text = promptAreaRef.current?.plainText ?? input;
