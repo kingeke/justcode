@@ -14,6 +14,10 @@ import type {
   UserQuestionRequest,
 } from '@core/ports/tool';
 import { cacheDirectory } from '@core/application/cache-dir';
+import {
+  deleteDebugLog,
+  setDebugLogDirectory,
+} from '@core/application/debug-log';
 import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
 import { PROVIDER_BY_ID } from '@core/ports/provider-catalog';
 import {
@@ -65,8 +69,22 @@ export class ChatBridge {
   public constructor(
     private readonly post: (message: HostToWebview) => void,
     private readonly workspaceRoot: string,
-    private readonly onConnectProvider?: () => void
-  ) {}
+    private readonly onConnectProvider?: () => void,
+    /**
+     * Asks the user to confirm deleting a session, returning whether to proceed.
+     * Injected by the view provider so the bridge stays VSCode-agnostic; when
+     * absent (e.g. in tests) deletion is treated as unconfirmed.
+     */
+    private readonly onConfirmDeleteSession?: (
+      title: string
+    ) => Promise<boolean>
+  ) {
+    // The extension host's cwd isn't the workspace, so anchor the debug log to
+    // the workspace root (where the CLI writes it) and clear stale entries from
+    // a previous run, mirroring the CLI's startup behaviour.
+    setDebugLogDirectory(workspaceRoot);
+    void deleteDebugLog();
+  }
 
   /** Routes an inbound webview message to its handler. */
   public async handle(message: WebviewToHost): Promise<void> {
@@ -107,6 +125,9 @@ export class ChatBridge {
         return;
       case WebviewMessageType.OpenSession:
         await this.openSession(message.sessionId);
+        return;
+      case WebviewMessageType.DeleteSession:
+        await this.deleteSession(message.sessionId);
         return;
       case WebviewMessageType.ToggleAutoWrites:
         await this.toggleAutoWrites();
@@ -192,6 +213,19 @@ export class ChatBridge {
       return;
     }
 
+    // On a fresh resume `this.activeModel` is unset, so fall back to the last
+    // model the user picked. `lastProvider` is already restored as the active
+    // provider via app-config, so only honour `lastModel` when it belongs to the
+    // active provider — otherwise the model id wouldn't exist for this provider
+    // and `startSession` would request a bogus model.
+    if (
+      !this.activeModel &&
+      globalConfig.lastModel &&
+      globalConfig.lastProvider === services.providerId
+    ) {
+      this.activeModel = globalConfig.lastModel;
+    }
+
     try {
       const session = await services.chatSessionService.startSession({
         sessionId: this.sessionId,
@@ -200,28 +234,12 @@ export class ChatBridge {
       this.conversation = session.conversation;
       this.activeModel = session.activeModel;
 
-      // Fetch models from every configured provider in parallel, then merge.
-      // Providers that fail (e.g. unreachable) are silently skipped.
-      const perProvider = await Promise.allSettled(
-        services.allProviders.map((p) => p.listModels())
-      );
-      const seen = new Set<string>();
-      this.models = perProvider.flatMap((result) =>
-        result.status === 'fulfilled'
-          ? result.value.filter((m) => {
-              if (seen.has(m.id)) return false;
-              seen.add(m.id);
-              return true;
-            })
-          : []
-      );
-      // Always include the active session's models in case a provider isn't in allProviders.
-      for (const m of session.availableModels) {
-        if (!seen.has(m.id)) {
-          seen.add(m.id);
-          this.models.push(m);
-        }
-      }
+      // Render immediately with just the active provider's models. Listing every
+      // configured provider blocks on the slowest one — a single unreachable
+      // host (a down remote, or a local provider that isn't running) would stall
+      // the whole panel for up to the request timeout. The full list arrives via
+      // a follow-up `ModelsUpdate` once the background fetch settles.
+      this.models = session.availableModels;
 
       this.post({
         type: HostMessageType.Ready,
@@ -237,6 +255,8 @@ export class ChatBridge {
           ? { sessionTitle: session.conversation.title }
           : {}),
       });
+
+      void this.refreshAllModels(services, session.availableModels);
     } catch (error) {
       this.post({
         type: HostMessageType.Ready,
@@ -251,6 +271,43 @@ export class ChatBridge {
         maxReadLines: this.maxReadLines,
       });
     }
+  }
+
+  /**
+   * Lists every configured provider's models in the background and pushes the
+   * merged result to the webview. The active provider's models (already shown by
+   * `sendReady`) seed the list so the dropdown is never missing the live session,
+   * and providers that fail (e.g. unreachable) are silently skipped.
+   */
+  private async refreshAllModels(
+    services: RuntimeServices,
+    activeModels: ModelInfo[]
+  ): Promise<void> {
+    const perProvider = await Promise.allSettled(
+      services.allProviders.map((p) => p.listModels())
+    );
+    const seen = new Set<string>();
+    const merged = perProvider.flatMap((result) =>
+      result.status === 'fulfilled'
+        ? result.value.filter((m) => {
+            if (seen.has(m.id)) return false;
+            seen.add(m.id);
+            return true;
+          })
+        : []
+    );
+    for (const m of activeModels) {
+      if (!seen.has(m.id)) {
+        seen.add(m.id);
+        merged.push(m);
+      }
+    }
+
+    this.models = merged;
+    this.post({
+      type: HostMessageType.ModelsUpdate,
+      models: merged.map(toWebviewModel),
+    });
   }
 
   /** Runs one agent turn, streaming tokens, tool activity, and approvals. */
@@ -383,6 +440,40 @@ export class ChatBridge {
     this.sessionId = sessionId;
     this.conversation = undefined;
     await this.sendReady();
+  }
+
+  private async deleteSession(sessionId: string): Promise<void> {
+    const services = await this.ensureServices();
+
+    // Confirm against the session's title (falling back to a generic label) so
+    // the dialog names what's about to be removed.
+    let title = 'this session';
+    try {
+      const summaries = await services.chatSessionService.listSessions();
+      const match = summaries.find((s) => s.sessionId === sessionId);
+      if (match?.title) title = `"${match.title}"`;
+    } catch {
+      // Listing failed — fall back to the generic label rather than blocking.
+    }
+
+    const confirmed = (await this.onConfirmDeleteSession?.(title)) ?? false;
+    if (!confirmed) return;
+
+    try {
+      await services.chatSessionService.clearSession(sessionId);
+    } catch (error) {
+      this.post({ type: HostMessageType.Error, message: errorMessage(error) });
+      return;
+    }
+
+    // If the deleted session was the one loaded, drop it so reopening the chat
+    // starts fresh rather than resurrecting the cleared conversation.
+    if (sessionId === this.sessionId) {
+      this.sessionId = randomUUID();
+      this.conversation = undefined;
+    }
+
+    await this.sendSessionsList();
   }
 
   private async switchProviderForModel(modelId: string): Promise<void> {
@@ -546,7 +637,23 @@ function truncate(text: string, limit: number): string {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (!(error instanceof Error)) return String(error);
+
+  // Node's undici fetch throws a bare `TypeError: fetch failed` and stashes the
+  // real transport reason (DNS, TLS, ECONNREFUSED, proxy, ...) on `.cause`,
+  // sometimes nested one level deeper. The CLI runs on Bun whose fetch surfaces
+  // this differently, which is why the same failure reads as an opaque "fetch
+  // failed" only in the extension. Walk the cause chain so the user sees why.
+  const parts: string[] = [error.message];
+  let cause: unknown = (error as { cause?: unknown }).cause;
+  const seen = new Set<unknown>([error]);
+  while (cause instanceof Error && !seen.has(cause)) {
+    seen.add(cause);
+    const code = (cause as { code?: string }).code;
+    parts.push(code ? `${cause.message} (${code})` : cause.message);
+    cause = (cause as { cause?: unknown }).cause;
+  }
+  return parts.join(': ');
 }
 
 function isAbortError(error: unknown): boolean {

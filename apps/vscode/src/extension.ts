@@ -1,8 +1,35 @@
+import * as dns from 'node:dns';
+import * as net from 'node:net';
+
 import * as vscode from 'vscode';
 
 import { ChatViewProvider } from '@ext/host/chat-view-provider';
 
+/**
+ * Make the extension host's `fetch` (Node/undici) behave like the CLI's (Bun) on
+ * networks with broken IPv6. Node resolves DNS "verbatim" since v17, so it tries
+ * the AAAA (IPv6) address first; when the local network advertises IPv6 but has
+ * no working route, the connection dies and undici surfaces only a generic
+ * "fetch failed" — which is why the same request works in the Bun CLI, over a
+ * VPN, or in curl (all of which fall back to IPv4 via Happy Eyeballs) but not in
+ * the extension. Preferring IPv4 and enabling Happy Eyeballs removes the stall.
+ */
+function hardenNetworkForBrokenIpv6(): void {
+  try {
+    dns.setDefaultResultOrder('ipv4first');
+  } catch {
+    // Older runtimes may not support it; the autoSelectFamily fallback covers us.
+  }
+  try {
+    net.setDefaultAutoSelectFamily?.(true);
+  } catch {
+    // Best-effort: not available on every Node version the host might ship.
+  }
+}
+
 export function activate(context: vscode.ExtensionContext): void {
+  hardenNetworkForBrokenIpv6();
+
   const provider = new ChatViewProvider(context.extensionUri);
 
   context.subscriptions.push(

@@ -76,6 +76,11 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.OpenSession, sessionId });
   };
 
+  const deleteSession = (sessionId: string): void => {
+    // The host shows a native confirmation dialog before removing anything.
+    postToHost({ type: WebviewMessageType.DeleteSession, sessionId });
+  };
+
   const openModelPicker = (): void => {
     dispatch({ type: LocalActionType.SetView, view: 'model-picker' });
   };
@@ -111,6 +116,7 @@ export function App(): React.JSX.Element {
         loading={state.status === ChatStatus.Loading}
         sessions={state.sessions}
         onOpen={openSession}
+        onDelete={deleteSession}
         onNewSession={newSession}
       />
     );
@@ -174,7 +180,7 @@ export function App(): React.JSX.Element {
         ) : null}
 
         {state.busy && !state.streaming && !state.thinking && !state.approval ? (
-          <div className="working">{APP_NAME} is working…</div>
+          <div className="working">Tinkering…</div>
         ) : null}
 
         {state.approval ? (

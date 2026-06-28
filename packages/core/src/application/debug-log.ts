@@ -22,12 +22,27 @@ export interface RequestResponseLogEntry {
 
 const DEFAULT_FILE_NAME = 'debug.log';
 
+// Directory the default `debug.log` lives in. The CLI runs anchored to the
+// workspace so `process.cwd()` is correct there, but hosts that aren't anchored
+// to a cwd (e.g. the VSCode extension host, whose cwd is VSCode's own working
+// directory) must override this so logs land somewhere the user can find them.
+let baseDirectory: string | undefined;
+
+/** Override the directory the default `debug.log` is written to. */
+export function setDebugLogDirectory(directory: string): void {
+  baseDirectory = directory;
+}
+
+function defaultFilePath(): string {
+  return join(baseDirectory ?? process.cwd(), DEFAULT_FILE_NAME);
+}
+
 export async function logDebug(
   value: unknown,
   options: DebugLogOptions = {}
 ): Promise<void> {
   try {
-    const filePath = options.filePath ?? join(process.cwd(), DEFAULT_FILE_NAME);
+    const filePath = options.filePath ?? defaultFilePath();
     await mkdir(dirname(filePath), { recursive: true });
     // Prepend so the newest entry is at the top of the file. Best-effort: read
     // the prior contents (if any) and rewrite with the new entry first.
@@ -47,7 +62,7 @@ export async function deleteDebugLog(
   options: DebugLogOptions = {}
 ): Promise<void> {
   try {
-    const filePath = options.filePath ?? join(process.cwd(), DEFAULT_FILE_NAME);
+    const filePath = options.filePath ?? defaultFilePath();
     await unlink(filePath);
   } catch {
     // best effort only; startup cleanup must never break the app

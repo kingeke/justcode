@@ -1,7 +1,7 @@
 import * as React from 'react';
 
 import type { WebviewSessionSummary } from '@ext/shared/protocol';
-import { PlusIcon } from '@ext/webview/components/Icons';
+import { PlusIcon, TrashIcon } from '@ext/webview/components/Icons';
 
 function relativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -19,6 +19,7 @@ interface SessionsViewProps {
   loading: boolean;
   sessions: WebviewSessionSummary[];
   onOpen: (sessionId: string) => void;
+  onDelete: (sessionId: string) => void;
   onNewSession: () => void;
 }
 
@@ -26,6 +27,7 @@ export function SessionsView({
   loading,
   sessions,
   onOpen,
+  onDelete,
   onNewSession,
 }: SessionsViewProps): React.JSX.Element {
   return (
@@ -49,21 +51,31 @@ export function SessionsView({
           <div className="sessions-empty">No sessions yet.</div>
         ) : (
           sessions.map((session) => (
-            <button
-              key={session.sessionId}
-              type="button"
-              className="session-item"
-              onClick={() => onOpen(session.sessionId)}
-            >
-              <span className="session-item-title">
-                {session.title ?? 'New chat'}
-              </span>
-              <span className="session-item-meta">
-                {session.messageCount} msg
-                {session.messageCount !== 1 ? 's' : ''} ·{' '}
-                {relativeTime(session.updatedAt)}
-              </span>
-            </button>
+            <div key={session.sessionId} className="session-row">
+              <button
+                type="button"
+                className="session-item"
+                onClick={() => onOpen(session.sessionId)}
+              >
+                <span className="session-item-title">
+                  {session.title ?? 'New chat'}
+                </span>
+                <span className="session-item-meta">
+                  {session.messageCount} msg
+                  {session.messageCount !== 1 ? 's' : ''} ·{' '}
+                  {relativeTime(session.updatedAt)}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="icon-btn session-delete-btn"
+                title="Delete session"
+                aria-label="Delete session"
+                onClick={() => onDelete(session.sessionId)}
+              >
+                <TrashIcon size={15} />
+              </button>
+            </div>
           ))
         )}
       </div>

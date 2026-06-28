@@ -79,6 +79,7 @@ import {
 import { ModelPicker } from '@cli/ui/model-picker.js';
 import { ReasoningPicker } from '@cli/ui/reasoning-picker.js';
 import { ResetPicker } from '@cli/ui/reset-picker.js';
+import { ClearSessionsPicker } from '@cli/ui/clear-sessions-picker.js';
 import { SessionPicker } from '@cli/ui/session-picker.js';
 import { ProviderId } from '@core/ports/provider-catalog.js';
 import type { ConversationSummary } from '@core/ports/conversation-repository';
@@ -388,6 +389,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showResetPicker, setShowResetPicker] = useState(false);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
+  // Sessions queued for the /clear-sessions confirmation: the ids to delete are
+  // stashed in a ref while the picker shows their count.
+  const [showClearSessionsPicker, setShowClearSessionsPicker] = useState(false);
+  const [sessionsToDeleteCount, setSessionsToDeleteCount] = useState(0);
+  const sessionsToDeleteRef = useRef<string[]>([]);
   // When the model picker is opened right after connecting, it shows only the
   // freshly connected provider's models (allModels hasn't refreshed yet).
   const [connectModels, setConnectModels] = useState<ModelInfo[] | null>(null);
@@ -1572,6 +1578,28 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           });
         return;
 
+      case CommandName.ClearSessions: {
+        void props.chatSessionService
+          .listSessions()
+          .then((sessions) => {
+            if (sessions.length === 0) {
+              setStatus('No saved sessions to delete');
+              return;
+            }
+            sessionsToDeleteRef.current = sessions.map((s) => s.sessionId);
+            setSessionsToDeleteCount(sessions.length);
+            setShowModelPicker(false);
+            setShowSessionPicker(false);
+            setShowConnectPicker(false);
+            setShowResetPicker(false);
+            setShowClearSessionsPicker(true);
+          })
+          .catch((caughtError: unknown) => {
+            setError(getErrorMessage(caughtError));
+          });
+        return;
+      }
+
       case CommandName.Reset: {
         setShowModelPicker(false);
         setShowSessionPicker(false);
@@ -2151,6 +2179,41 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         }}
         onCancel={() => {
           setShowResetPicker(false);
+        }}
+      />
+    );
+  }
+
+  if (showClearSessionsPicker) {
+    return (
+      <ClearSessionsPicker
+        count={sessionsToDeleteCount}
+        onConfirm={() => {
+          const ids = sessionsToDeleteRef.current;
+          void Promise.allSettled(
+            ids.map((id) => props.chatSessionService.clearSession(id))
+          )
+            .then(() => {
+              // The active session may have been among those deleted; drop into
+              // a fresh one so the transcript doesn't reference cleared history.
+              resetFreshSessionState();
+              setSessionSummaries([]);
+              setShowClearSessionsPicker(false);
+              const newId = randomUUID();
+              nextSessionRequestedModelRef.current =
+                activeModel || props.requestedModel;
+              setCurrentSessionId(newId);
+              setStatus(
+                `Deleted ${ids.length} session${ids.length === 1 ? '' : 's'}`
+              );
+            })
+            .catch((caughtError: unknown) => {
+              setShowClearSessionsPicker(false);
+              setError(getErrorMessage(caughtError));
+            });
+        }}
+        onCancel={() => {
+          setShowClearSessionsPicker(false);
         }}
       />
     );

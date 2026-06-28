@@ -38,6 +38,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         const terminal = vscode.window.createTerminal('JustCode Connect');
         terminal.show();
         terminal.sendText('justcode connect');
+      },
+      async (title) => {
+        const choice = await vscode.window.showWarningMessage(
+          `Delete ${title}? This cannot be undone.`,
+          { modal: true },
+          'Delete'
+        );
+        return choice === 'Delete';
       }
     );
     this.bridge = bridge;

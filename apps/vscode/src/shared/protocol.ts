@@ -19,6 +19,7 @@ export enum HostMessageType {
   ApprovalRequest = 'approvalRequest',
   UserInputRequest = 'userInputRequest',
   TurnComplete = 'turnComplete',
+  ModelsUpdate = 'modelsUpdate',
   Error = 'error',
 }
 
@@ -37,6 +38,7 @@ export enum WebviewMessageType {
   SetReadLimit = 'setReadLimit',
   ListSessions = 'listSessions',
   OpenSession = 'openSession',
+  DeleteSession = 'deleteSession',
   ConnectProvider = 'connectProvider',
 }
 
@@ -195,8 +197,19 @@ export interface ErrorMessage {
   aborted?: boolean;
 }
 
+/**
+ * The full, merged model list across all configured providers. Sent shortly
+ * after {@link ReadyMessage}, which only carries the active provider's models so
+ * the panel can render without waiting on slow/unreachable providers.
+ */
+export interface ModelsUpdateMessage {
+  type: HostMessageType.ModelsUpdate;
+  models: WebviewModel[];
+}
+
 export type HostToWebview =
   | ReadyMessage
+  | ModelsUpdateMessage
   | SessionsListMessage
   | TitleUpdateMessage
   | TokenMessage
@@ -267,6 +280,12 @@ export interface OpenSessionMessage {
   sessionId: string;
 }
 
+/** The user asked to delete a session; the host confirms before removing it. */
+export interface DeleteSessionMessage {
+  type: WebviewMessageType.DeleteSession;
+  sessionId: string;
+}
+
 /** The user wants to connect a new provider (host opens terminal). */
 export interface ConnectProviderMessage {
   type: WebviewMessageType.ConnectProvider;
@@ -299,6 +318,7 @@ export type WebviewToHost =
   | NewSessionMessage
   | ListSessionsMessage
   | OpenSessionMessage
+  | DeleteSessionMessage
   | ConnectProviderMessage
   | ToggleAutoWritesMessage
   | ToggleExpandToolsMessage

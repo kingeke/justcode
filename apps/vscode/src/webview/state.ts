@@ -130,6 +130,9 @@ export function reducer(state: ChatState, action: Action): ChatState {
         sessionTitle: action.sessionTitle,
       };
 
+    case HostMessageType.ModelsUpdate:
+      return { ...state, models: action.models };
+
     case HostMessageType.SessionsList:
       return {
         ...state,

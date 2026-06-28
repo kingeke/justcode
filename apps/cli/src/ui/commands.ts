@@ -4,6 +4,7 @@ export enum CommandName {
   Sessions = 'sessions',
   NewSession = 'new-session',
   Clear = 'clear',
+  ClearSessions = 'clear-sessions',
   Thinking = 'thinking',
   Reasoning = 'reasoning',
   AutoWrites = 'auto-writes',
@@ -38,6 +39,10 @@ export const COMMANDS: Command[] = [
   {
     name: CommandName.Clear,
     description: 'Clear the current session and start fresh',
+  },
+  {
+    name: CommandName.ClearSessions,
+    description: 'Delete all saved sessions',
   },
   {
     name: CommandName.Thinking,
