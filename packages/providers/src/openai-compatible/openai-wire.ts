@@ -16,9 +16,13 @@ interface WireToolCall {
   function: { name: string; arguments: string };
 }
 
+export type OpenAiContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 export interface OpenAiWireMessage {
   role: string;
-  content: string | null;
+  content: string | OpenAiContentPart[] | null;
   tool_call_id?: string;
   tool_calls?: WireToolCall[];
 }
@@ -47,9 +51,22 @@ export function toOpenAiWireMessages(
       };
     }
 
+    // A user message with images becomes a multi-part content array: the prose
+    // as a text part, plus each image as a data-URI `image_url` part. Without
+    // images, the simpler string form is kept.
+    const text = renderMessageContentForModel(message);
+    if (message.role === 'user' && message.images?.length) {
+      const parts: OpenAiContentPart[] = message.images.map((image) => ({
+        type: 'image_url' as const,
+        image_url: { url: `data:${image.mediaType};base64,${image.data}` },
+      }));
+      parts.push({ type: 'text', text });
+      return { role: message.role, content: parts };
+    }
+
     return {
       role: message.role,
-      content: renderMessageContentForModel(message),
+      content: text,
     };
   });
 }

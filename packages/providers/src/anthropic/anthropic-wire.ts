@@ -30,10 +30,20 @@ export interface AnthropicToolResultBlock {
   content: string;
 }
 
+export interface AnthropicImageBlock {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: string;
+    data: string;
+  };
+}
+
 export type AnthropicContentBlock =
   | AnthropicTextBlock
   | AnthropicToolUseBlock
-  | AnthropicToolResultBlock;
+  | AnthropicToolResultBlock
+  | AnthropicImageBlock;
 
 export interface AnthropicWireMessage {
   role: 'user' | 'assistant';
@@ -110,10 +120,24 @@ export function toAnthropicWireRequest(
       continue;
     }
 
-    // user
-    push('user', [
-      { type: 'text', text: renderMessageContentForModel(message) },
-    ]);
+    // user: images first (so the model has them in view), then the prose.
+    const userBlocks: AnthropicContentBlock[] = [];
+    for (const image of message.images ?? []) {
+      userBlocks.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: image.mediaType,
+          data: image.data,
+        },
+      });
+    }
+    // Skip an empty text block (image-only message) — the API rejects it.
+    const userText = renderMessageContentForModel(message);
+    if (userText.trim() || userBlocks.length === 0) {
+      userBlocks.push({ type: 'text', text: userText });
+    }
+    push('user', userBlocks);
   }
 
   return {

@@ -11,6 +11,7 @@ import { useKeyboard } from '@opentui/react';
 import { type ModelInfo } from '@core/ports/chat-model';
 import { PROVIDER_IDS } from '@core/ports/provider-catalog';
 import { PROVIDER_BY_ID } from '@core/ports/provider-catalog';
+import type { ProviderId } from '@core/ports/provider-catalog';
 import {
   normalizeSingleLinePaste,
   pasteFromClipboard,
@@ -51,6 +52,13 @@ const SORT_STATES: SortState[] = SORT_MODES.flatMap((mode) => [
 interface ModelPickerProps {
   models: ModelInfo[];
   currentModel: string;
+  /**
+   * The active provider, so the ✓ marks the model actually in use rather than
+   * every model that merely shares its id. Different providers (e.g. Ollama and
+   * a LiteLLM proxy in front of it) can expose the same model id, so the id
+   * alone is ambiguous. Optional: when absent, the marker falls back to id-only.
+   */
+  currentProviderId?: ProviderId | undefined;
   onSelect: (model: ModelInfo) => void;
   onCancel: () => void;
 }
@@ -202,7 +210,10 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
           {visibleRows.map((entry, i) => {
             const absoluteIndex = scrollOffsetRef.current + i;
             const isFocused = absoluteIndex === focusedIndex;
-            const isCurrent = entry.model.id === props.currentModel;
+            const isCurrent =
+              entry.model.id === props.currentModel &&
+              (props.currentProviderId === undefined ||
+                entry.model.providerId === props.currentProviderId);
 
             return (
               <box

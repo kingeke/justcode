@@ -6,6 +6,7 @@ import {
   createMessage,
   type ChatMessage,
   type MessageAttachment,
+  type MessageImage,
   type ToolCall,
 } from '@core/domain/message';
 import {
@@ -93,6 +94,8 @@ export interface SubmitMessageInput {
   reasoningEffort?: ReasoningEffortChoice;
   content: string;
   attachments?: MessageAttachment[];
+  /** Images attached to this message (e.g. pasted from the clipboard). */
+  images?: MessageImage[];
   signal?: AbortSignal;
   onToken?: (token: string) => void;
   onThinkingToken?: (token: string) => void;
@@ -210,7 +213,9 @@ export class ChatSessionService {
   ): Promise<SubmitMessageResult> {
     const trimmedContent = input.content.trim();
 
-    if (!trimmedContent) {
+    // An image-only message is valid: the prose may be empty when the user just
+    // pastes a screenshot and hits enter, so don't reject it.
+    if (!trimmedContent && !input.images?.length) {
       throw new Error('Message content cannot be empty.');
     }
 
@@ -218,7 +223,8 @@ export class ChatSessionService {
       'user',
       trimmedContent,
       new Date(),
-      input.attachments
+      input.attachments,
+      input.images?.length ? { images: input.images } : undefined
     );
 
     const initialToolDefinitions = this.toolRegistry?.definitions() ?? [];

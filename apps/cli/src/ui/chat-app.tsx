@@ -26,7 +26,7 @@ import {
   useSelectionHandler,
   useTerminalDimensions,
 } from '@opentui/react';
-import { copyToClipboard } from '@cli/ui/clipboard.js';
+import { copyToClipboard, readClipboardImage } from '@cli/ui/clipboard.js';
 import { Spinner } from '@cli/ui/spinner.js';
 import { ansiToStyledText } from '@cli/ui/ansi-to-styled-text.js';
 
@@ -48,7 +48,7 @@ import type {
 } from '@core/application/chat-session-service';
 import type { UserQuestionRequest } from '@core/ports/tool';
 import type { Conversation } from '@core/domain/conversation';
-import { createMessage } from '@core/domain/message';
+import { createMessage, type MessageImage } from '@core/domain/message';
 import { DEFAULT_SYSTEM_PROMPT } from '@core/application/system-prompt';
 import type {
   ModelInfo,
@@ -84,6 +84,12 @@ import { ProviderId } from '@core/ports/provider-catalog.js';
 import type { ConversationSummary } from '@core/ports/conversation-repository';
 
 const MAX_COMMAND_ITEMS = 8;
+
+// Cosmetic placeholder inserted into the prompt for each pasted image (e.g.
+// "[Image #1]"), mirroring the actual images held in `pendingImages`. Stripped
+// from the prompt text before the message is sent — the images travel as proper
+// image blocks, not as this literal text.
+const IMAGE_MARKER_PATTERN = /\s*\[Image #\d+\]\s*/g;
 
 const BOLD = createTextAttributes({ bold: true });
 // Muted text uses an explicit grey foreground rather than the SGR "dim" attribute:
@@ -401,6 +407,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   }>({ startMs: 0, firstTokenMs: null });
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState('');
+  // Images pasted into the prompt, awaiting the next send. Each has a matching
+  // `[Image #n]` marker in the prompt text (see IMAGE_MARKER_PATTERN).
+  const [pendingImages, setPendingImages] = useState<MessageImage[]>([]);
+  const pendingImagesRef = useRef<MessageImage[]>([]);
+  pendingImagesRef.current = pendingImages;
   // Bumping this remounts the text input so its cursor jumps to the end after
   // we replace the value programmatically (tab-completion); ink-text-input
   // otherwise keeps its own cursor offset.
@@ -421,6 +432,32 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       setInputKey((key) => key + 1);
     }
   }, []);
+  // Pull an image off the OS clipboard (if any) and stage it for the next send,
+  // dropping a `[Image #n]` marker into the prompt so the user sees it's been
+  // attached. Returns true when an image was found and attached.
+  const attachClipboardImage = useCallback((): boolean => {
+    const image = readClipboardImage();
+    if (!image) return false;
+
+    const count = pendingImagesRef.current.length + 1;
+    const marker = `[Image #${count}]`;
+    setPendingImages((prev) => [...prev, image]);
+
+    const area = promptAreaRef.current;
+    if (area && !area.isDestroyed) {
+      const existing = area.plainText;
+      const lead = existing.length > 0 && !existing.endsWith(' ') ? ' ' : '';
+      area.insertText(`${lead}${marker} `);
+      setInput(area.plainText);
+    } else {
+      const base = input.length && !input.endsWith(' ') ? `${input} ` : input;
+      setInputWithCursorAtEnd(`${base}${marker} `);
+    }
+
+    setStatus(`Image #${count} attached — send your message to include it`);
+    return true;
+  }, [input, setInputWithCursorAtEnd]);
+
   const currentSessionLabel = conversation?.title ?? currentSessionId;
   const activeRequestControllerRef = useRef<AbortController | null>(null);
   const nextSessionRequestedModelRef = useRef<string | undefined>(undefined);
@@ -446,6 +483,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setIsSending(false);
     setQueuedMessages([]);
     setQueueEditIndex(null);
+    setPendingImages([]);
     setConversation(null);
     setError(null);
     setLastStats(null);
@@ -936,8 +974,17 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       }
       // Otherwise clear any typed text and arm exit for EXIT_WINDOW_MS.
       if (input) setInputWithCursorAtEnd('');
+      setPendingImages([]);
       armExit();
       return;
+    }
+
+    // Ctrl+V attaches an image from the clipboard. This is the reliable trigger:
+    // terminals don't forward pasted image bytes over stdin, so we read the OS
+    // clipboard directly. (A plain Cmd/Ctrl+V text paste still works as usual
+    // via the textarea's own paste handling.)
+    if (key.ctrl && key.name === 'v') {
+      if (attachClipboardImage()) return;
     }
 
     // Editing the queued messages: arrows move the selection, Enter pulls the
@@ -1036,6 +1083,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
       if (input) {
         setInputWithCursorAtEnd('');
+        setPendingImages([]);
         disarmExit();
         setStatus('Ready');
         return;
@@ -1495,7 +1543,15 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     // state), so they're simply ignored until the turn finishes.
     if (isSending) {
       if (parseCommandInput(value) !== null) return;
-      setQueuedMessages((queue) => [...queue, value.trim()]);
+      // Queued messages can't carry images (they're folded into the running
+      // turn as plain steering text), so strip the markers and drop any staged
+      // images, noting it so the paste isn't silently lost.
+      const queuedText = value.replace(IMAGE_MARKER_PATTERN, ' ').trim();
+      if (pendingImagesRef.current.length > 0) {
+        setPendingImages([]);
+        setStatus('Images are only sent with a new message, not while sending');
+      }
+      if (queuedText) setQueuedMessages((queue) => [...queue, queuedText]);
       setInputWithCursorAtEnd('');
       return;
     }
@@ -1539,6 +1595,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
     if (!conversation || !session) return;
 
+    // Pull the staged images for this turn and strip their `[Image #n]` markers
+    // from the prose — the images travel as proper image blocks, not as text.
+    const turnImages = pendingImagesRef.current;
+    const cleanedValue = value.replace(IMAGE_MARKER_PATTERN, ' ').trim();
+    setPendingImages([]);
+
     const requestController = new AbortController();
     activeRequestControllerRef.current = requestController;
     submittedPromptRef.current = value;
@@ -1548,7 +1610,13 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setError(null);
     setIsSending(true);
     // Show the user's message immediately, before the model starts responding.
-    const optimisticUserMessage = createMessage('user', value.trim());
+    const optimisticUserMessage = createMessage(
+      'user',
+      cleanedValue,
+      new Date(),
+      undefined,
+      turnImages.length ? { images: turnImages } : undefined
+    );
     setConversation({
       ...baseConversation,
       messages: [...baseConversation.messages, optimisticUserMessage],
@@ -1677,7 +1745,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     try {
       const attachments =
         await props.promptAttachmentService.resolveAttachments(
-          value,
+          cleanedValue,
           requestController.signal
         );
       const turnModel = activeModel || session.activeModel;
@@ -1692,7 +1760,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         conversation: baseConversation,
         model: turnModel,
         ...(turnEffort ? { reasoningEffort: turnEffort } : {}),
-        content: value,
+        content: cleanedValue,
+        ...(turnImages.length ? { images: turnImages } : {}),
         attachments,
         signal: requestController.signal,
         requestApproval,
@@ -1935,6 +2004,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       <ModelPicker
         models={connectModels ?? allModels}
         currentModel={activeModel}
+        currentProviderId={activeModelInfo?.providerId ?? activeProviderId}
         onSelect={handleModelSelect}
         onCancel={() => {
           setShowModelPicker(false);
@@ -2188,6 +2258,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     attached: @{attachment.path}
                   </text>
                 ))}
+                {message.images?.length ? (
+                  <text fg={MUTED}>
+                    🖼 {message.images.length} image
+                    {message.images.length === 1 ? '' : 's'} attached
+                  </text>
+                ) : null}
               </box>
             );
           })
@@ -2435,11 +2511,20 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             minHeight={3}
             maxHeight={6}
             wrapMode="word"
-            placeholder="Ask anything..."
+            placeholder="Ask anything... (Ctrl+V to paste an image)"
             backgroundColor={INPUT_BG}
             textColor="#111111"
             focusedTextColor="#111111"
             cursorColor="white"
+            // A terminal forwards a paste over stdin, but pasted image data is
+            // not part of it — so when a paste carries no text, check the OS
+            // clipboard for an image and attach it instead of inserting nothing.
+            onPaste={(event: { bytes?: Uint8Array; preventDefault: () => void }) => {
+              if (event.bytes && event.bytes.length > 0) return;
+              if (attachClipboardImage()) {
+                event.preventDefault();
+              }
+            }}
             // The prompt stays focusable while a turn is sending (so the user
             // can type ahead and queue the next message) and while a question is
             // pending (it doubles as the answer box). Only the keyboard browse/

@@ -18,6 +18,19 @@ describe('renderMessageContentForModel', () => {
     ).toContain('File: src/app.ts');
   });
 
+  it('attaches images passed via extras', () => {
+    const message = createMessage('user', 'look at this', new Date(), undefined, {
+      images: [{ mediaType: 'image/png', data: 'AAAA' }],
+    });
+
+    expect(message.images).toEqual([{ mediaType: 'image/png', data: 'AAAA' }]);
+  });
+
+  it('omits the images field when none are provided', () => {
+    const message = createMessage('user', 'hi');
+    expect(message.images).toBeUndefined();
+  });
+
   it('can persist assistant thinking metadata', () => {
     const message = createMessage(
       'assistant',

@@ -24,7 +24,7 @@ describe('chat app queued messages', () => {
   it('queues plain messages typed while a turn is sending', () => {
     expect(source).toContain('if (isSending) {');
     expect(source).toContain(
-      'setQueuedMessages((queue) => [...queue, value.trim()])'
+      'setQueuedMessages((queue) => [...queue, queuedText])'
     );
   });
 

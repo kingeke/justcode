@@ -8,6 +8,16 @@ export interface MessageAttachment {
 }
 
 /**
+ * An image attached to a user message (e.g. pasted from the clipboard), carried
+ * to the model as a base64 content block. `mediaType` is the image's MIME type
+ * (e.g. `image/png`); `data` is its base64-encoded bytes (no data: URI prefix).
+ */
+export interface MessageImage {
+  mediaType: string;
+  data: string;
+}
+
+/**
  * A request from the model to invoke a tool. `arguments` is the raw JSON string
  * exactly as the model produced it — parsing/validation is the tool's concern.
  */
@@ -23,6 +33,8 @@ export interface ChatMessage {
   content: string;
   createdAt: string;
   attachments?: MessageAttachment[];
+  /** Images attached to a `user` message, sent to the model as image blocks. */
+  images?: MessageImage[];
   /** Set on `assistant` messages that request one or more tool invocations. */
   toolCalls?: ToolCall[];
   /** Set on `tool` messages: the id of the `ToolCall` this result answers. */
@@ -40,6 +52,7 @@ export interface CreateMessageExtras {
   toolCalls?: ToolCall[];
   toolCallId?: string;
   name?: string;
+  images?: MessageImage[];
   thinking?: {
     content: string;
     durationMs: number;
@@ -59,6 +72,7 @@ export function createMessage(
     content,
     createdAt: createdAt.toISOString(),
     ...(attachments?.length ? { attachments } : {}),
+    ...(extras?.images?.length ? { images: extras.images } : {}),
     ...(extras?.toolCalls?.length ? { toolCalls: extras.toolCalls } : {}),
     ...(extras?.toolCallId ? { toolCallId: extras.toolCallId } : {}),
     ...(extras?.name ? { name: extras.name } : {}),

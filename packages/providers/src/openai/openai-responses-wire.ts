@@ -13,10 +13,14 @@ import type { ToolDefinition } from '@core/ports/tool';
  * items, and tools are flattened (no `function` wrapper).
  */
 
+export type ResponsesContentPart =
+  | { type: 'input_text' | 'output_text'; text: string }
+  | { type: 'input_image'; image_url: string };
+
 export interface ResponsesInputItem {
   type: 'message' | 'function_call' | 'function_call_output';
   role?: 'user' | 'assistant';
-  content?: Array<{ type: 'input_text' | 'output_text'; text: string }>;
+  content?: ResponsesContentPart[];
   call_id?: string;
   name?: string;
   arguments?: string;
@@ -81,15 +85,24 @@ export function toResponsesPayload(messages: ChatMessage[]): ResponsesPayload {
     }
 
     const text = renderMessageContentForModel(message);
+    const isAssistant = message.role === 'assistant';
+    const content: ResponsesContentPart[] = [];
+    if (!isAssistant) {
+      for (const image of message.images ?? []) {
+        content.push({
+          type: 'input_image',
+          image_url: `data:${image.mediaType};base64,${image.data}`,
+        });
+      }
+    }
+    content.push({
+      type: isAssistant ? 'output_text' : 'input_text',
+      text,
+    });
     input.push({
       type: 'message',
-      role: message.role === 'assistant' ? 'assistant' : 'user',
-      content: [
-        {
-          type: message.role === 'assistant' ? 'output_text' : 'input_text',
-          text,
-        },
-      ],
+      role: isAssistant ? 'assistant' : 'user',
+      content,
     });
   }
 
