@@ -740,7 +740,18 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         : [],
     [isCommandMode, commandQuery, reasoningAvailable]
   );
-  const visibleCommands = filteredCommands.slice(0, MAX_COMMAND_ITEMS);
+  // Only MAX_COMMAND_ITEMS rows fit at once, so scroll a window over the full
+  // list rather than truncating it — otherwise selection can't move past the
+  // last visible row. The window slides down once the selection reaches the
+  // bottom, always keeping the highlighted command in view.
+  const commandWindowStart =
+    selectedCommandIndex >= MAX_COMMAND_ITEMS
+      ? selectedCommandIndex - MAX_COMMAND_ITEMS + 1
+      : 0;
+  const visibleCommands = filteredCommands.slice(
+    commandWindowStart,
+    commandWindowStart + MAX_COMMAND_ITEMS
+  );
 
   const activeMentionQuery = useMemo(
     () => (isCommandMode ? null : getActiveMentionQuery(input)),
@@ -1129,10 +1140,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       return;
     }
 
-    if (isCommandMode && visibleCommands.length) {
+    if (isCommandMode && filteredCommands.length) {
       if (key.name === 'down') {
         setSelectedCommandIndex((i) =>
-          Math.min(i + 1, visibleCommands.length - 1)
+          Math.min(i + 1, filteredCommands.length - 1)
         );
         return;
       }
@@ -1141,7 +1152,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         return;
       }
       if (key.name === 'tab') {
-        const cmd = visibleCommands[selectedCommandIndex];
+        const cmd = filteredCommands[selectedCommandIndex];
         if (cmd) setInputWithCursorAtEnd(`/${cmd.name} `);
         return;
       }
@@ -1622,7 +1633,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         const exact = isCommandName(commandName)
           ? COMMANDS.find((c) => c.name === commandName)
           : undefined;
-        const selected = exact ?? visibleCommands[selectedCommandIndex];
+        const selected = exact ?? filteredCommands[selectedCommandIndex];
         if (selected) executeCommand(selected.name);
       }
       setInput('');
@@ -2393,7 +2404,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                 <text
                   content={commandLineContent(
                     cmd,
-                    index === selectedCommandIndex,
+                    commandWindowStart + index === selectedCommandIndex,
                     {
                       thinkingCollapsed,
                       autoApplyWrites,
