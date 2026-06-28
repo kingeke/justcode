@@ -80,7 +80,8 @@ function modelMeta(m: WebviewModel): string {
 interface ModelPickerViewProps {
   models: WebviewModel[];
   activeModel: string | undefined;
-  onSelect: (modelId: string) => void;
+  activeProviderId: string | undefined;
+  onSelect: (model: WebviewModel) => void;
   onClose: () => void;
   onConnectProvider: () => void;
 }
@@ -88,6 +89,7 @@ interface ModelPickerViewProps {
 export function ModelPickerView({
   models,
   activeModel,
+  activeProviderId,
   onSelect,
   onClose,
   onConnectProvider,
@@ -197,9 +199,12 @@ export function ModelPickerView({
               <div className="model-group-header">{group.providerName}</div>
               {group.models.map((model) => (
                 <ModelRow
-                  key={model.id}
+                  key={`${model.providerId}:${model.id}`}
                   model={model}
-                  active={model.id === activeModel}
+                  active={
+                    model.id === activeModel &&
+                    model.providerId === activeProviderId
+                  }
                   onSelect={onSelect}
                 />
               ))}
@@ -208,9 +213,12 @@ export function ModelPickerView({
         ) : (
           sorted.map((model) => (
             <ModelRow
-              key={model.id}
+              key={`${model.providerId}:${model.id}`}
               model={model}
-              active={model.id === activeModel}
+              active={
+                model.id === activeModel &&
+                model.providerId === activeProviderId
+              }
               onSelect={onSelect}
             />
           ))
@@ -227,14 +235,14 @@ function ModelRow({
 }: {
   model: WebviewModel;
   active: boolean;
-  onSelect: (id: string) => void;
+  onSelect: (model: WebviewModel) => void;
 }): React.JSX.Element {
   const meta = modelMeta(model);
   return (
     <button
       type="button"
       className={`model-item ${active ? 'model-item-active' : ''}`}
-      onClick={() => onSelect(model.id)}
+      onClick={() => onSelect(model)}
     >
       <div className="model-item-left">
         <span className="model-item-name">{model.displayName}</span>

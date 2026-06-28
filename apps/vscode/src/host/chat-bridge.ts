@@ -108,8 +108,8 @@ export class ChatBridge {
         return;
       case WebviewMessageType.SelectModel:
         this.activeModel = message.modelId;
-        await this.persistModelSelection(message.modelId);
-        await this.switchProviderForModel(message.modelId);
+        await this.persistModelSelection(message.modelId, message.providerId);
+        await this.switchToProvider(message.providerId);
         return;
       case WebviewMessageType.ConnectProvider:
         this.onConnectProvider?.();
@@ -128,6 +128,9 @@ export class ChatBridge {
         return;
       case WebviewMessageType.DeleteSession:
         await this.deleteSession(message.sessionId);
+        return;
+      case WebviewMessageType.ClearSessions:
+        await this.clearAllSessions();
         return;
       case WebviewMessageType.ToggleAutoWrites:
         await this.toggleAutoWrites();
@@ -286,19 +289,23 @@ export class ChatBridge {
     const perProvider = await Promise.allSettled(
       services.allProviders.map((p) => p.listModels())
     );
+    // Dedup on provider + id, not id alone: the same model id (e.g.
+    // "gpt-5.4-mini") is offered by multiple providers (openai, copilot, ...)
+    // and each is a distinct, separately selectable entry.
+    const key = (m: ModelInfo): string => `${m.providerId}:${m.id}`;
     const seen = new Set<string>();
     const merged = perProvider.flatMap((result) =>
       result.status === 'fulfilled'
         ? result.value.filter((m) => {
-            if (seen.has(m.id)) return false;
-            seen.add(m.id);
+            if (seen.has(key(m))) return false;
+            seen.add(key(m));
             return true;
           })
         : []
     );
     for (const m of activeModels) {
-      if (!seen.has(m.id)) {
-        seen.add(m.id);
+      if (!seen.has(key(m))) {
+        seen.add(key(m));
         merged.push(m);
       }
     }
@@ -476,29 +483,57 @@ export class ChatBridge {
     await this.sendSessionsList();
   }
 
-  private async switchProviderForModel(modelId: string): Promise<void> {
-    const model = this.models.find((m) => m.id === modelId);
-    if (!model) return;
-    const services = this.services;
-    if (!services || services.providerId === model.providerId) return;
+  private async clearAllSessions(): Promise<void> {
+    const services = await this.ensureServices();
+
+    let summaries;
     try {
-      const provider = services.createProvider(model.providerId as ProviderId);
+      summaries = await services.chatSessionService.listSessions();
+    } catch (error) {
+      this.post({ type: HostMessageType.Error, message: errorMessage(error) });
+      return;
+    }
+
+    if (summaries.length === 0) return;
+
+    const label = `all ${summaries.length} session${summaries.length === 1 ? '' : 's'}`;
+    const confirmed = (await this.onConfirmDeleteSession?.(label)) ?? false;
+    if (!confirmed) return;
+
+    await Promise.allSettled(
+      summaries.map((s) => services.chatSessionService.clearSession(s.sessionId))
+    );
+
+    // The open session was almost certainly among those cleared; start fresh so
+    // the chat view doesn't resurrect a deleted conversation.
+    this.sessionId = randomUUID();
+    this.conversation = undefined;
+
+    await this.sendSessionsList();
+  }
+
+  private async switchToProvider(providerId: string): Promise<void> {
+    const services = this.services;
+    if (!services || services.providerId === providerId) return;
+    try {
+      const provider = services.createProvider(providerId as ProviderId);
       services.chatSessionService.switchProvider(provider);
-      services.providerId = model.providerId as ProviderId;
+      services.providerId = providerId as ProviderId;
     } catch {
       // Switch failed — the next turn will surface the error naturally.
     }
   }
 
-  private async persistModelSelection(modelId: string): Promise<void> {
-    const model = this.models.find((m) => m.id === modelId);
-    if (!model) return;
+  private async persistModelSelection(
+    modelId: string,
+    providerId: string
+  ): Promise<void> {
     const configDir = cacheDirectory();
     const config = await readGlobalConfig(configDir);
     await writeGlobalConfig(configDir, {
       ...config,
       lastModel: modelId,
-      lastProvider: model.providerId,
+      lastProvider: providerId,
     });
   }
 

@@ -39,6 +39,7 @@ export enum WebviewMessageType {
   ListSessions = 'listSessions',
   OpenSession = 'openSession',
   DeleteSession = 'deleteSession',
+  ClearSessions = 'clearSessions',
   ConnectProvider = 'connectProvider',
 }
 
@@ -256,6 +257,8 @@ export interface UserInputResponseMessage {
 export interface SelectModelMessage {
   type: WebviewMessageType.SelectModel;
   modelId: string;
+  /** Provider the model belongs to; disambiguates ids shared across providers. */
+  providerId: string;
 }
 
 /** The user switched the active provider; the host re-lists its models. */
@@ -284,6 +287,11 @@ export interface OpenSessionMessage {
 export interface DeleteSessionMessage {
   type: WebviewMessageType.DeleteSession;
   sessionId: string;
+}
+
+/** The user asked to delete every saved session; the host confirms first. */
+export interface ClearSessionsMessage {
+  type: WebviewMessageType.ClearSessions;
 }
 
 /** The user wants to connect a new provider (host opens terminal). */
@@ -319,6 +327,7 @@ export type WebviewToHost =
   | ListSessionsMessage
   | OpenSessionMessage
   | DeleteSessionMessage
+  | ClearSessionsMessage
   | ConnectProviderMessage
   | ToggleAutoWritesMessage
   | ToggleExpandToolsMessage

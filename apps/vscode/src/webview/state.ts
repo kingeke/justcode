@@ -89,7 +89,7 @@ export type LocalAction =
   | { type: LocalActionType.OptimisticSubmit; content: string }
   | { type: LocalActionType.DismissApproval }
   | { type: LocalActionType.DismissInput }
-  | { type: LocalActionType.SelectModel; modelId: string }
+  | { type: LocalActionType.SelectModel; modelId: string; providerId: string }
   | { type: LocalActionType.ToggleAutoWrites }
   | { type: LocalActionType.ToggleExpandTools }
   | { type: LocalActionType.SetReadLimit; lines: number }
@@ -207,7 +207,11 @@ export function reducer(state: ChatState, action: Action): ChatState {
       };
 
     case LocalActionType.SelectModel:
-      return { ...state, activeModel: action.modelId };
+      return {
+        ...state,
+        activeModel: action.modelId,
+        providerId: action.providerId,
+      };
 
     case LocalActionType.ToggleAutoWrites:
       return { ...state, autoApplyWrites: !state.autoApplyWrites };

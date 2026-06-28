@@ -4,6 +4,7 @@ import { APP_NAME } from '@core/branding';
 import {
   WebviewMessageType,
   WebviewRole,
+  type WebviewModel,
 } from '@ext/shared/protocol';
 import { onHostMessage, postToHost } from '@ext/webview/vscode-api';
 import {
@@ -55,9 +56,17 @@ export function App(): React.JSX.Element {
     dispatch({ type: LocalActionType.DismissInput });
   };
 
-  const selectModel = (modelId: string): void => {
-    dispatch({ type: LocalActionType.SelectModel, modelId });
-    postToHost({ type: WebviewMessageType.SelectModel, modelId });
+  const selectModel = (model: WebviewModel): void => {
+    dispatch({
+      type: LocalActionType.SelectModel,
+      modelId: model.id,
+      providerId: model.providerId,
+    });
+    postToHost({
+      type: WebviewMessageType.SelectModel,
+      modelId: model.id,
+      providerId: model.providerId,
+    });
   };
 
   const selectProvider = (providerId: string): void => {
@@ -79,6 +88,11 @@ export function App(): React.JSX.Element {
   const deleteSession = (sessionId: string): void => {
     // The host shows a native confirmation dialog before removing anything.
     postToHost({ type: WebviewMessageType.DeleteSession, sessionId });
+  };
+
+  const clearAllSessions = (): void => {
+    // The host confirms before deleting every saved session.
+    postToHost({ type: WebviewMessageType.ClearSessions });
   };
 
   const openModelPicker = (): void => {
@@ -117,6 +131,7 @@ export function App(): React.JSX.Element {
         sessions={state.sessions}
         onOpen={openSession}
         onDelete={deleteSession}
+        onClearAll={clearAllSessions}
         onNewSession={newSession}
       />
     );
@@ -127,8 +142,9 @@ export function App(): React.JSX.Element {
       <ModelPickerView
         models={state.models}
         activeModel={state.activeModel}
-        onSelect={(modelId) => {
-          selectModel(modelId);
+        activeProviderId={state.providerId}
+        onSelect={(model) => {
+          selectModel(model);
           closeModelPicker();
         }}
         onClose={closeModelPicker}

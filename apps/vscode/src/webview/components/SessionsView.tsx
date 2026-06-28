@@ -20,6 +20,7 @@ interface SessionsViewProps {
   sessions: WebviewSessionSummary[];
   onOpen: (sessionId: string) => void;
   onDelete: (sessionId: string) => void;
+  onClearAll: () => void;
   onNewSession: () => void;
 }
 
@@ -28,20 +29,33 @@ export function SessionsView({
   sessions,
   onOpen,
   onDelete,
+  onClearAll,
   onNewSession,
 }: SessionsViewProps): React.JSX.Element {
   return (
     <div className="sessions-view">
       <div className="sessions-header">
         <span className="sessions-title">Sessions</span>
-        <button
-          type="button"
-          className="icon-btn"
-          title="New session"
-          onClick={onNewSession}
-        >
-          <PlusIcon />
-        </button>
+        <div className="sessions-header-actions">
+          <button
+            type="button"
+            className="icon-btn"
+            title="Delete all sessions"
+            aria-label="Delete all sessions"
+            disabled={sessions.length === 0}
+            onClick={onClearAll}
+          >
+            <TrashIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            title="New session"
+            onClick={onNewSession}
+          >
+            <PlusIcon />
+          </button>
+        </div>
       </div>
 
       <div className="sessions-list">
