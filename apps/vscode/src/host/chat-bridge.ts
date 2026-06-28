@@ -1,0 +1,554 @@
+import { randomUUID } from 'node:crypto';
+
+import type { Conversation } from '@core/domain/conversation';
+import { APP_NAME } from '@core/branding';
+import type { MessageRole } from '@core/domain/message';
+import type { ModelInfo, ProviderClient } from '@core/ports/chat-model';
+import { ProviderId } from '@core/ports/provider-catalog';
+import type {
+  ToolApprovalRequest,
+  ToolActivityEvent,
+} from '@core/application/chat-session-service';
+import type {
+  ToolInvocationView,
+  UserQuestionRequest,
+} from '@core/ports/tool';
+import { cacheDirectory } from '@core/application/cache-dir';
+import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
+import { PROVIDER_BY_ID } from '@core/ports/provider-catalog';
+import {
+  readGlobalConfig,
+  writeGlobalConfig,
+} from '@runtime/persistence/global-config';
+import {
+  createRuntimeServices,
+  type RuntimeServices,
+} from '@runtime/bootstrap/create-services';
+
+import {
+  HostMessageType,
+  ToolPhase,
+  WebviewMessageType,
+  WebviewRole,
+  type HostToWebview,
+  type WebviewMessage,
+  type WebviewToHost,
+  type WebviewModel,
+  type WebviewToolView,
+} from '@ext/shared/protocol';
+
+/** Longest tool-result snippet we forward to the webview as a preview. */
+const RESULT_PREVIEW_LIMIT = 2000;
+
+/**
+ * Owns a single chat session and translates between the webview's message
+ * protocol and `ChatSessionService`. It is deliberately ignorant of VSCode: the
+ * host hands it a `post` function and forwards inbound webview messages, which
+ * keeps the agent wiring unit-testable without a real webview.
+ */
+export class ChatBridge {
+  private services: RuntimeServices | undefined;
+  private conversation: Conversation | undefined;
+  private activeModel: string | undefined;
+  private models: ModelInfo[] = [];
+  private abortController: AbortController | undefined;
+  private readonly pendingApprovals = new Map<
+    string,
+    (approved: boolean) => void
+  >();
+  private readonly pendingInputs = new Map<string, (value: string) => void>();
+  private sessionId: string = randomUUID();
+  private autoApplyWrites = false;
+  private expandTools = false;
+  private maxReadLines = DEFAULT_MAX_READ_LINES;
+
+  public constructor(
+    private readonly post: (message: HostToWebview) => void,
+    private readonly workspaceRoot: string,
+    private readonly onConnectProvider?: () => void
+  ) {}
+
+  /** Routes an inbound webview message to its handler. */
+  public async handle(message: WebviewToHost): Promise<void> {
+    switch (message.type) {
+      case WebviewMessageType.Init:
+        await this.sendSessionsList();
+        return;
+      case WebviewMessageType.Submit:
+        await this.submit(message.content);
+        return;
+      case WebviewMessageType.Cancel:
+        this.abortController?.abort();
+        return;
+      case WebviewMessageType.ApprovalResponse:
+        this.pendingApprovals.get(message.id)?.(message.approved);
+        this.pendingApprovals.delete(message.id);
+        return;
+      case WebviewMessageType.UserInputResponse:
+        this.pendingInputs.get(message.id)?.(message.value);
+        this.pendingInputs.delete(message.id);
+        return;
+      case WebviewMessageType.SelectModel:
+        this.activeModel = message.modelId;
+        await this.persistModelSelection(message.modelId);
+        await this.switchProviderForModel(message.modelId);
+        return;
+      case WebviewMessageType.ConnectProvider:
+        this.onConnectProvider?.();
+        return;
+      case WebviewMessageType.SelectProvider:
+        await this.selectProvider(message.providerId);
+        return;
+      case WebviewMessageType.NewSession:
+        await this.resetSession();
+        return;
+      case WebviewMessageType.ListSessions:
+        await this.sendSessionsList();
+        return;
+      case WebviewMessageType.OpenSession:
+        await this.openSession(message.sessionId);
+        return;
+      case WebviewMessageType.ToggleAutoWrites:
+        await this.toggleAutoWrites();
+        return;
+      case WebviewMessageType.ToggleExpandTools:
+        await this.toggleExpandTools();
+        return;
+      case WebviewMessageType.SetReadLimit:
+        await this.setReadLimit(message.lines);
+        return;
+    }
+  }
+
+  public dispose(): void {
+    this.abortController?.abort();
+    this.pendingApprovals.clear();
+    this.pendingInputs.clear();
+  }
+
+  /** Builds (once) and returns the runtime services for this session. */
+  private async ensureServices(): Promise<RuntimeServices> {
+    if (!this.services) {
+      this.services = await createRuntimeServices({
+        workspaceRoot: this.workspaceRoot,
+      });
+    }
+    return this.services;
+  }
+
+  /** Loads the session and pushes a full state snapshot to the webview. */
+  private async sendReady(): Promise<void> {
+    // Load persisted settings so the webview always starts in sync.
+    const configDir = cacheDirectory();
+    const globalConfig = await readGlobalConfig(configDir);
+    this.autoApplyWrites = globalConfig.autoApplyWrites ?? false;
+    this.expandTools = globalConfig.expandTools ?? false;
+    this.maxReadLines = globalConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES;
+
+    let services: RuntimeServices;
+    try {
+      services = await this.ensureServices();
+    } catch (error) {
+      this.post({
+        type: HostMessageType.Ready,
+        providerId: undefined,
+        activeModel: undefined,
+        models: [],
+        providers: [],
+        messages: [],
+        notice: `Failed to start ${APP_NAME}: ${errorMessage(error)}`,
+        autoApplyWrites: this.autoApplyWrites,
+        expandTools: this.expandTools,
+        maxReadLines: this.maxReadLines,
+      });
+      return;
+    }
+
+    // Apply the current read limit to the runtime.
+    services.setMaxReadLines(this.maxReadLines);
+
+    const providers = services.allProviders.map((provider) => ({
+      id: provider.providerId,
+      name: provider.providerId,
+    }));
+
+    // With no configured provider the session is backed by a NullProvider whose
+    // model listing is empty; surface a notice instead of letting startSession
+    // throw, so the user sees how to proceed rather than a blank panel.
+    if (!services.providerId) {
+      this.post({
+        type: HostMessageType.Ready,
+        providerId: undefined,
+        activeModel: undefined,
+        models: [],
+        providers,
+        messages: [],
+        notice:
+          `No provider is configured. Connect one with the ${APP_NAME} CLI (or set the provider env vars), then reload this view.`,
+        autoApplyWrites: this.autoApplyWrites,
+        expandTools: this.expandTools,
+        maxReadLines: this.maxReadLines,
+      });
+      return;
+    }
+
+    try {
+      const session = await services.chatSessionService.startSession({
+        sessionId: this.sessionId,
+        ...(this.activeModel ? { requestedModel: this.activeModel } : {}),
+      });
+      this.conversation = session.conversation;
+      this.activeModel = session.activeModel;
+
+      // Fetch models from every configured provider in parallel, then merge.
+      // Providers that fail (e.g. unreachable) are silently skipped.
+      const perProvider = await Promise.allSettled(
+        services.allProviders.map((p) => p.listModels())
+      );
+      const seen = new Set<string>();
+      this.models = perProvider.flatMap((result) =>
+        result.status === 'fulfilled'
+          ? result.value.filter((m) => {
+              if (seen.has(m.id)) return false;
+              seen.add(m.id);
+              return true;
+            })
+          : []
+      );
+      // Always include the active session's models in case a provider isn't in allProviders.
+      for (const m of session.availableModels) {
+        if (!seen.has(m.id)) {
+          seen.add(m.id);
+          this.models.push(m);
+        }
+      }
+
+      this.post({
+        type: HostMessageType.Ready,
+        providerId: services.providerId,
+        activeModel: session.activeModel,
+        models: this.models.map(toWebviewModel),
+        providers,
+        messages: toWebviewMessages(session.conversation),
+        autoApplyWrites: this.autoApplyWrites,
+        expandTools: this.expandTools,
+        maxReadLines: this.maxReadLines,
+        ...(session.conversation.title !== undefined
+          ? { sessionTitle: session.conversation.title }
+          : {}),
+      });
+    } catch (error) {
+      this.post({
+        type: HostMessageType.Ready,
+        providerId: services.providerId,
+        activeModel: undefined,
+        models: [],
+        providers,
+        messages: [],
+        notice: `Could not load models for ${services.providerId}: ${errorMessage(error)}`,
+        autoApplyWrites: this.autoApplyWrites,
+        expandTools: this.expandTools,
+        maxReadLines: this.maxReadLines,
+      });
+    }
+  }
+
+  /** Runs one agent turn, streaming tokens, tool activity, and approvals. */
+  private async submit(content: string): Promise<void> {
+    if (this.abortController) {
+      this.post({
+        type: HostMessageType.Error,
+        message: 'A turn is already in progress.',
+      });
+      return;
+    }
+
+    const services = await this.ensureServices();
+    if (!this.conversation || !this.activeModel) {
+      this.post({
+        type: HostMessageType.Error,
+        message: 'No active session. Configure a provider and reload.',
+      });
+      return;
+    }
+
+    const abortController = new AbortController();
+    this.abortController = abortController;
+
+    try {
+      const result = await services.chatSessionService.submitMessage({
+        conversation: this.conversation,
+        model: this.activeModel,
+        content,
+        signal: abortController.signal,
+        onToken: (token) =>
+          this.post({ type: HostMessageType.Token, token }),
+        onThinkingToken: (token) =>
+          this.post({ type: HostMessageType.Thinking, token }),
+        onToolActivity: (event) => this.postToolActivity(event),
+        ...(!this.autoApplyWrites && {
+          requestApproval: (request) => this.requestApproval(request),
+        }),
+        requestUserInput: (request) => this.requestUserInput(request),
+        onTitle: (_sessionId, title) =>
+          this.post({ type: HostMessageType.TitleUpdate, title }),
+      });
+
+      this.conversation = result.conversation;
+      this.post({
+        type: HostMessageType.TurnComplete,
+        messages: toWebviewMessages(result.conversation),
+        ...(result.usage ? { usage: result.usage } : {}),
+      });
+    } catch (error) {
+      const aborted = isAbortError(error);
+      this.post({
+        type: HostMessageType.Error,
+        message: aborted ? 'Turn cancelled.' : errorMessage(error),
+        aborted,
+      });
+    } finally {
+      this.abortController = undefined;
+      // Any approval/input prompts still open belong to the turn that just
+      // ended; drop them so a late webview reply can't resolve a stale promise.
+      this.pendingApprovals.clear();
+      this.pendingInputs.clear();
+    }
+  }
+
+  private postToolActivity(event: ToolActivityEvent): void {
+    this.post({
+      type: HostMessageType.ToolActivity,
+      phase: event.phase === 'start' ? ToolPhase.Start : ToolPhase.End,
+      toolName: event.toolName,
+      toolCallId: event.toolCallId,
+      view: toToolView(event.view),
+      ...(event.result
+        ? {
+            isError: event.result.isError ?? false,
+            resultPreview: truncate(event.result.content, RESULT_PREVIEW_LIMIT),
+          }
+        : {}),
+    });
+  }
+
+  private requestApproval(request: ToolApprovalRequest): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      const id = randomUUID();
+      this.pendingApprovals.set(id, resolve);
+      this.post({
+        type: HostMessageType.ApprovalRequest,
+        id,
+        toolName: request.toolName,
+        view: toToolView(request),
+      });
+    });
+  }
+
+  private requestUserInput(request: UserQuestionRequest): Promise<string> {
+    return new Promise<string>((resolve) => {
+      const id = randomUUID();
+      this.pendingInputs.set(id, resolve);
+      this.post({
+        type: HostMessageType.UserInputRequest,
+        id,
+        question: request.question,
+        ...(request.options ? { options: request.options } : {}),
+      });
+    });
+  }
+
+  private async sendSessionsList(): Promise<void> {
+    try {
+      const services = await this.ensureServices();
+      const summaries = await services.chatSessionService.listSessions();
+      this.post({
+        type: HostMessageType.SessionsList,
+        sessions: summaries.map((s) => ({
+          sessionId: s.sessionId,
+          ...(s.title !== undefined ? { title: s.title } : {}),
+          updatedAt: s.updatedAt,
+          messageCount: s.messageCount,
+        })),
+      });
+    } catch (error) {
+      this.post({
+        type: HostMessageType.SessionsList,
+        sessions: [],
+      });
+    }
+  }
+
+  private async openSession(sessionId: string): Promise<void> {
+    this.sessionId = sessionId;
+    this.conversation = undefined;
+    await this.sendReady();
+  }
+
+  private async switchProviderForModel(modelId: string): Promise<void> {
+    const model = this.models.find((m) => m.id === modelId);
+    if (!model) return;
+    const services = this.services;
+    if (!services || services.providerId === model.providerId) return;
+    try {
+      const provider = services.createProvider(model.providerId as ProviderId);
+      services.chatSessionService.switchProvider(provider);
+      services.providerId = model.providerId as ProviderId;
+    } catch {
+      // Switch failed — the next turn will surface the error naturally.
+    }
+  }
+
+  private async persistModelSelection(modelId: string): Promise<void> {
+    const model = this.models.find((m) => m.id === modelId);
+    if (!model) return;
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      lastModel: modelId,
+      lastProvider: model.providerId,
+    });
+  }
+
+  private async toggleAutoWrites(): Promise<void> {
+    this.autoApplyWrites = !this.autoApplyWrites;
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      autoApplyWrites: this.autoApplyWrites,
+    });
+  }
+
+  private async toggleExpandTools(): Promise<void> {
+    this.expandTools = !this.expandTools;
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      expandTools: this.expandTools,
+    });
+  }
+
+  private async setReadLimit(lines: number): Promise<void> {
+    this.maxReadLines = lines;
+    const services = this.services;
+    if (services) {
+      services.setMaxReadLines(lines);
+    }
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      cache: { ...config.cache, maxReadLines: lines },
+    });
+  }
+
+  private async selectProvider(providerId: string): Promise<void> {
+    const services = await this.ensureServices();
+    let provider: ProviderClient;
+    try {
+      provider = services.createProvider(providerId as ProviderId);
+    } catch (error) {
+      this.post({ type: HostMessageType.Error, message: errorMessage(error) });
+      return;
+    }
+
+    services.chatSessionService.switchProvider(provider);
+    services.providerId = providerId as ProviderId;
+    // Clear the requested model so the new provider's default is resolved.
+    this.activeModel = undefined;
+    await this.sendReady();
+  }
+
+  private async resetSession(): Promise<void> {
+    const services = this.services;
+    if (services && this.conversation) {
+      try {
+        await services.chatSessionService.clearSession(this.sessionId);
+      } catch {
+        // A fresh session id sidesteps a clear failure; the old file is orphaned
+        // but never read again.
+      }
+    }
+    this.sessionId = randomUUID();
+    this.conversation = undefined;
+    await this.sendReady();
+  }
+}
+
+function toWebviewModel(model: ModelInfo): WebviewModel {
+  const entry = PROVIDER_BY_ID[model.providerId];
+  const result: WebviewModel = {
+    id: model.id,
+    displayName: model.displayName,
+    providerId: model.providerId,
+    providerName: entry?.name ?? model.providerId,
+  };
+  if (model.contextWindow != null) {
+    result.contextWindow = model.contextWindow;
+  }
+  if (model.pricing) {
+    result.inputCostPerM = model.pricing.inputPerToken * 1_000_000;
+    result.outputCostPerM = model.pricing.outputPerToken * 1_000_000;
+  } else if (entry?.local) {
+    result.local = true;
+  }
+  return result;
+}
+
+function toToolView(view: ToolInvocationView): WebviewToolView {
+  return {
+    title: view.title,
+    ...(view.preview ? { preview: view.preview } : {}),
+    ...(view.diff ? { diff: view.diff } : {}),
+  };
+}
+
+/**
+ * Flattens a persisted conversation into the transcript the webview renders.
+ * System messages are internal; assistant messages that only carried tool calls
+ * (no prose) are dropped because their work is shown as tool activity instead.
+ */
+function toWebviewMessages(conversation: Conversation): WebviewMessage[] {
+  const result: WebviewMessage[] = [];
+  for (const message of conversation.messages) {
+    if (message.role === 'system') continue;
+    if (message.role === 'assistant' && !message.content.trim()) continue;
+    result.push({
+      id: message.id,
+      role: toWebviewRole(message.role),
+      content: message.content,
+      ...(message.role === 'tool' && message.name
+        ? { toolName: message.name }
+        : {}),
+    });
+  }
+  return result;
+}
+
+function toWebviewRole(role: MessageRole): WebviewRole {
+  switch (role) {
+    case 'user':
+      return WebviewRole.User;
+    case 'assistant':
+      return WebviewRole.Assistant;
+    case 'tool':
+      return WebviewRole.Tool;
+    case 'system':
+      return WebviewRole.System;
+  }
+}
+
+function truncate(text: string, limit: number): string {
+  return text.length <= limit ? text : `${text.slice(0, limit)}\n… (truncated)`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}

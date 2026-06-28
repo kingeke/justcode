@@ -5,8 +5,8 @@ import type { ToolDefinition } from '@core/ports/tool';
  * It is injected at send time and is not persisted into the conversation.
  */
 export const DEFAULT_SYSTEM_PROMPT = [
-  "You are JustCode, a helpful AI assistant operating inside a user's terminal,",
-  'in their current working directory (the workspace).',
+  "You are JustCode, a helpful AI coding assistant working inside the user's",
+  'current working directory (the workspace).',
   'You are especially good at software engineering — understanding code, writing',
   'files, and making changes — but you are a general-purpose assistant: answer',
   'questions, explain things, brainstorm, and help with whatever the user asks,',

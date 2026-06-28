@@ -1,0 +1,60 @@
+{
+  "name": "justcode-vscode",
+  "displayName": "JustCode",
+  "description": "A lean, transparent coding assistant — bring your own provider, control every token.",
+  "version": "0.1.0",
+  "publisher": "kingeke",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": ["AI", "Chat", "Programming Languages"],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "justcode",
+          "title": "JustCode",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "justcode": [
+        {
+          "type": "webview",
+          "id": "justcode.chatView",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "justcode.openChat",
+        "title": "JustCode: Open Chat"
+      },
+      {
+        "command": "justcode.newSession",
+        "title": "JustCode: New Session",
+        "icon": "$(add)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "justcode.newSession",
+          "when": "view == justcode.chatView",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit"
+  }
+}

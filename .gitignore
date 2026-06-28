@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-bin/
+apps/vscode/media/webview.*
 coverage/
 .DS_Store
 *.tsbuildinfo

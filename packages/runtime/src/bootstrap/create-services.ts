@@ -48,6 +48,12 @@ export interface CreateRuntimeOptions {
   allowDefaultProvider?: boolean;
   /** Initial per-read line cap; falls back to the default when unset. */
   maxReadLines?: number;
+  /**
+   * Root the workspace tools resolve paths against. The CLI uses the process's
+   * working directory; hosts that aren't anchored to a cwd (e.g. the VSCode
+   * extension) pass the active workspace folder instead.
+   */
+  workspaceRoot?: string;
 }
 
 export async function createRuntimeServices(
@@ -66,7 +72,7 @@ export async function createRuntimeServices(
     ? registry.create(providerId)
     : new NullProvider();
   const repository = new FileConversationRepository(config.sessionsDirectory);
-  const workspaceRoot = process.cwd();
+  const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const workspaceFiles = new LocalWorkspaceFileService(workspaceRoot);
   const readSettings = {
     maxReadLines: options.maxReadLines ?? DEFAULT_MAX_READ_LINES,
