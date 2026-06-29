@@ -9,7 +9,11 @@
   "engines": {
     "vscode": "^1.84.0"
   },
-  "categories": ["AI", "Chat", "Programming Languages"],
+  "categories": [
+    "AI",
+    "Chat",
+    "Programming Languages"
+  ],
   "main": "./dist/extension.js",
   "activationEvents": [],
   "contributes": {
@@ -18,7 +22,7 @@
         {
           "id": "justcode",
           "title": "JustCode",
-          "icon": "media/icon.svg"
+          "icon": "media/emblem.svg"
         }
       ]
     },

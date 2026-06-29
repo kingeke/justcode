@@ -1,7 +1,8 @@
 import * as React from 'react';
 
 import type { WebviewSessionSummary } from '@ext/shared/protocol';
-import { PlusIcon, TrashIcon } from '@ext/webview/components/Icons';
+import { CogIcon, PlusIcon, TrashIcon } from '@ext/webview/components/Icons';
+import { logoUri } from '@ext/webview/vscode-api';
 
 function relativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -22,6 +23,7 @@ interface SessionsViewProps {
   onDelete: (sessionId: string) => void;
   onClearAll: () => void;
   onNewSession: () => void;
+  onOpenSettings: () => void;
 }
 
 export function SessionsView({
@@ -31,11 +33,22 @@ export function SessionsView({
   onDelete,
   onClearAll,
   onNewSession,
+  onOpenSettings,
 }: SessionsViewProps): React.JSX.Element {
   return (
     <div className="sessions-view">
       <div className="sessions-header">
-        <span className="sessions-title">Sessions</span>
+        <span className="sessions-title">
+          {logoUri ? (
+            <img
+              className="brand-logo"
+              src={logoUri}
+              alt=""
+              aria-hidden="true"
+            />
+          ) : null}
+          Sessions
+        </span>
         <div className="sessions-header-actions">
           <button
             type="button"
@@ -54,6 +67,15 @@ export function SessionsView({
             onClick={onNewSession}
           >
             <PlusIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            title="Settings"
+            aria-label="Settings"
+            onClick={onOpenSettings}
+          >
+            <CogIcon />
           </button>
         </div>
       </div>

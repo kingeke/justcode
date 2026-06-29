@@ -2,22 +2,30 @@ import * as vscode from 'vscode';
 
 import { APP_NAME } from '@core/branding';
 import { ChatBridge } from '@ext/host/chat-bridge';
-import {
-  WebviewMessageType,
-  type WebviewToHost,
-} from '@ext/shared/protocol';
+import { SettingsPanel } from '@ext/host/settings-panel';
+import { WebviewMessageType, type WebviewToHost } from '@ext/shared/protocol';
 
 /**
  * Hosts the chat webview in the sidebar. It owns the webview lifecycle, renders
  * the HTML shell (with a strict CSP), and pairs each view with a {@link
- * ChatBridge} that runs the actual agent session.
+ * ChatBridge} that runs the actual agent session. It also owns the {@link
+ * SettingsPanel} editor tab, opened from the sidebar's settings button.
  */
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'justcode.chatView';
 
   private bridge: ChatBridge | undefined;
+  private readonly settings: SettingsPanel;
 
-  public constructor(private readonly extensionUri: vscode.Uri) {}
+  public constructor(private readonly extensionUri: vscode.Uri) {
+    this.settings = new SettingsPanel(
+      extensionUri,
+      () => openConnectTerminal(),
+      // A connect/disconnect in the Settings tab invalidates the sidebar's
+      // cached provider; let the live session reload from config.
+      () => void this.bridge?.refreshProviders()
+    );
+  }
 
   public resolveWebviewView(webviewView: vscode.WebviewView): void {
     const { webview } = webviewView;
@@ -34,11 +42,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         void webview.postMessage(message);
       },
       resolveWorkspaceRoot(),
-      () => {
-        const terminal = vscode.window.createTerminal('JustCode Connect');
-        terminal.show();
-        terminal.sendText('justcode connect');
-      },
+      () => openConnectTerminal(),
       async (title) => {
         const choice = await vscode.window.showWarningMessage(
           `Delete ${title}? This cannot be undone.`,
@@ -46,7 +50,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           'Delete'
         );
         return choice === 'Delete';
-      }
+      },
+      () => this.settings.reveal()
     );
     this.bridge = bridge;
 
@@ -76,6 +81,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const styleUri = webview.asWebviewUri(
       vscode.Uri.joinPath(mediaUri, 'webview.css')
     );
+    // Only the host can resolve a bundled `media/` asset to a webview-safe URI;
+    // hand it to the webview as a global so the UI can show the brand emblem.
+    const logoUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(mediaUri, 'emblem.svg')
+    );
     const nonce = createNonce();
     const csp = [
       `default-src 'none'`,
@@ -96,10 +106,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   </head>
   <body>
     <div id="root"></div>
+    <script nonce="${nonce}">window.JUSTCODE_LOGO_URI = ${JSON.stringify(logoUri.toString())};</script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
   </body>
 </html>`;
   }
+}
+
+/** Opens a terminal running the CLI's interactive provider-connect flow. */
+function openConnectTerminal(): void {
+  const terminal = vscode.window.createTerminal('JustCode Connect');
+  terminal.show();
+  terminal.sendText('justcode connect');
 }
 
 /** Workspace folder the tools resolve against; the first folder, or undefined. */

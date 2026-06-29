@@ -42,8 +42,7 @@ export function App(): React.JSX.Element {
   const onTranscriptScroll = (): void => {
     const el = transcriptRef.current;
     if (!el) return;
-    const distanceFromBottom =
-      el.scrollHeight - el.scrollTop - el.clientHeight;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     stickToBottomRef.current = distanceFromBottom <= 24;
   };
 
@@ -127,6 +126,12 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.ConnectProvider });
   };
 
+  const openSettings = (): void => {
+    // Settings lives in its own editor tab (a separate webview panel); ask the
+    // host to reveal it rather than swapping the sidebar's view.
+    postToHost({ type: WebviewMessageType.OpenSettings });
+  };
+
   const toggleAutoWrites = (): void => {
     dispatch({ type: LocalActionType.ToggleAutoWrites });
     postToHost({ type: WebviewMessageType.ToggleAutoWrites });
@@ -153,6 +158,7 @@ export function App(): React.JSX.Element {
         onDelete={deleteSession}
         onClearAll={clearAllSessions}
         onNewSession={newSession}
+        onOpenSettings={openSettings}
       />
     );
   }
@@ -184,9 +190,7 @@ export function App(): React.JSX.Element {
         >
           ← Back
         </button>
-        <span className="chat-title">
-          {state.sessionTitle ?? 'New chat'}
-        </span>
+        <span className="chat-title">{state.sessionTitle ?? 'New chat'}</span>
       </div>
 
       <div
@@ -219,7 +223,10 @@ export function App(): React.JSX.Element {
           />
         ) : null}
 
-        {state.busy && !state.streaming && !state.thinking && !state.approval ? (
+        {state.busy &&
+        !state.streaming &&
+        !state.thinking &&
+        !state.approval ? (
           <div className="working">Tinkering…</div>
         ) : null}
 

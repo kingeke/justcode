@@ -7,7 +7,6 @@ import {
   type UserInputRequestMessage,
   type WebviewMessage,
   type WebviewModel,
-  type WebviewProvider,
   type WebviewSessionSummary,
   type WebviewToolView,
   type WebviewUsage,
@@ -40,7 +39,6 @@ export interface ChatState {
   providerId?: string | undefined;
   activeModel?: string | undefined;
   models: WebviewModel[];
-  providers: WebviewProvider[];
   notice?: string | undefined;
   messages: WebviewMessage[];
   busy: boolean;
@@ -63,7 +61,6 @@ export const initialState: ChatState = {
   view: 'sessions',
   sessions: [],
   models: [],
-  providers: [],
   messages: [],
   busy: false,
   thinking: '',
@@ -116,7 +113,6 @@ export function reducer(state: ChatState, action: Action): ChatState {
         providerId: action.providerId,
         activeModel: action.activeModel,
         models: action.models,
-        providers: action.providers,
         messages: action.messages,
         notice: action.notice,
         busy: false,

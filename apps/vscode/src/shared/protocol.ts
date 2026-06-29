@@ -41,6 +41,7 @@ export enum WebviewMessageType {
   DeleteSession = 'deleteSession',
   ClearSessions = 'clearSessions',
   ConnectProvider = 'connectProvider',
+  OpenSettings = 'openSettings',
 }
 
 /** Roles the transcript renders. Mirrors the persisted message roles. */
@@ -77,10 +78,22 @@ export interface WebviewModel {
   local?: boolean | undefined;
 }
 
-/** A provider the user can connect to, flattened for the webview. */
+/**
+ * How a provider authenticates, used to label it in the settings list with a
+ * short badge ("API Key", "Sign-in", "Local", "Custom").
+ */
+export type WebviewProviderKind = 'apiKey' | 'oauth' | 'local' | 'custom';
+
+/** A provider shown in the settings list, flattened from the catalog + config. */
 export interface WebviewProvider {
   id: string;
   name: string;
+  /** One-line description from the provider catalog. */
+  description: string;
+  /** True when the user has saved credentials for this provider. */
+  connected: boolean;
+  /** Auth method, drives the badge shown next to the name. */
+  kind: WebviewProviderKind;
 }
 
 /** Before/after text for a file a tool is about to change. */
@@ -131,7 +144,6 @@ export interface ReadyMessage {
   providerId: string | undefined;
   activeModel: string | undefined;
   models: WebviewModel[];
-  providers: WebviewProvider[];
   messages: WebviewMessage[];
   /** Human-readable reason the session can't chat yet (e.g. no provider). */
   notice?: string;
@@ -312,6 +324,11 @@ export interface ConnectProviderMessage {
   type: WebviewMessageType.ConnectProvider;
 }
 
+/** The user opened Settings; the host reveals the settings editor tab. */
+export interface OpenSettingsMessage {
+  type: WebviewMessageType.OpenSettings;
+}
+
 /** The user toggled auto-approval for write tools. */
 export interface ToggleAutoWritesMessage {
   type: WebviewMessageType.ToggleAutoWrites;
@@ -342,6 +359,7 @@ export type WebviewToHost =
   | DeleteSessionMessage
   | ClearSessionsMessage
   | ConnectProviderMessage
+  | OpenSettingsMessage
   | ToggleAutoWritesMessage
   | ToggleExpandToolsMessage
   | SetReadLimitMessage;

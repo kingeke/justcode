@@ -8,22 +8,18 @@ import type {
   ProviderClient,
   TokenUsage,
 } from '@core/ports/chat-model';
-import { ProviderId } from '@core/ports/provider-catalog';
+import { ProviderId, PROVIDER_BY_ID } from '@core/ports/provider-catalog';
 import type {
   ToolApprovalRequest,
   ToolActivityEvent,
 } from '@core/application/chat-session-service';
-import type {
-  ToolInvocationView,
-  UserQuestionRequest,
-} from '@core/ports/tool';
+import type { ToolInvocationView, UserQuestionRequest } from '@core/ports/tool';
 import { cacheDirectory } from '@core/application/cache-dir';
 import {
   deleteDebugLog,
   setDebugLogDirectory,
 } from '@core/application/debug-log';
 import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
-import { PROVIDER_BY_ID } from '@core/ports/provider-catalog';
 import {
   readGlobalConfig,
   writeGlobalConfig,
@@ -93,7 +89,9 @@ export class ChatBridge {
      */
     private readonly onConfirmDeleteSession?: (
       title: string
-    ) => Promise<boolean>
+    ) => Promise<boolean>,
+    /** Reveals the Settings editor tab; injected by the view provider. */
+    private readonly onOpenSettings?: () => void
   ) {
     // The extension host's cwd isn't the workspace, and anchoring to the
     // workspace root would scatter a debug.log into every project (and force the
@@ -131,6 +129,9 @@ export class ChatBridge {
         return;
       case WebviewMessageType.ConnectProvider:
         this.onConnectProvider?.();
+        return;
+      case WebviewMessageType.OpenSettings:
+        this.onOpenSettings?.();
         return;
       case WebviewMessageType.SelectProvider:
         await this.selectProvider(message.providerId);
@@ -185,7 +186,8 @@ export class ChatBridge {
     const globalConfig = await readGlobalConfig(configDir);
     this.autoApplyWrites = globalConfig.autoApplyWrites ?? false;
     this.expandTools = globalConfig.expandTools ?? false;
-    this.maxReadLines = globalConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES;
+    this.maxReadLines =
+      globalConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES;
 
     let services: RuntimeServices;
     try {
@@ -196,7 +198,6 @@ export class ChatBridge {
         providerId: undefined,
         activeModel: undefined,
         models: [],
-        providers: [],
         messages: [],
         notice: `Failed to start ${APP_NAME}: ${errorMessage(error)}`,
         autoApplyWrites: this.autoApplyWrites,
@@ -209,11 +210,6 @@ export class ChatBridge {
     // Apply the current read limit to the runtime.
     services.setMaxReadLines(this.maxReadLines);
 
-    const providers = services.allProviders.map((provider) => ({
-      id: provider.providerId,
-      name: provider.providerId,
-    }));
-
     // With no configured provider the session is backed by a NullProvider whose
     // model listing is empty; surface a notice instead of letting startSession
     // throw, so the user sees how to proceed rather than a blank panel.
@@ -223,10 +219,8 @@ export class ChatBridge {
         providerId: undefined,
         activeModel: undefined,
         models: [],
-        providers,
         messages: [],
-        notice:
-          `No provider is configured. Connect one with the ${APP_NAME} CLI (or set the provider env vars), then reload this view.`,
+        notice: `No provider is configured. Connect one with the ${APP_NAME} CLI (or set the provider env vars), then reload this view.`,
         autoApplyWrites: this.autoApplyWrites,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
@@ -267,7 +261,6 @@ export class ChatBridge {
         providerId: services.providerId,
         activeModel: session.activeModel,
         models: this.models.map(toWebviewModel),
-        providers,
         messages: toWebviewMessages(session.conversation),
         autoApplyWrites: this.autoApplyWrites,
         expandTools: this.expandTools,
@@ -284,7 +277,6 @@ export class ChatBridge {
         providerId: services.providerId,
         activeModel: undefined,
         models: [],
-        providers,
         messages: [],
         notice: `Could not load models for ${services.providerId}: ${errorMessage(error)}`,
         autoApplyWrites: this.autoApplyWrites,
@@ -454,8 +446,7 @@ export class ChatBridge {
     return (
       usage.inputTokens * pricing.inputPerToken +
       usage.outputTokens * pricing.outputPerToken +
-      usage.cachedTokens *
-        (pricing.cacheReadPerToken ?? pricing.inputPerToken)
+      usage.cachedTokens * (pricing.cacheReadPerToken ?? pricing.inputPerToken)
     );
   }
 
@@ -593,7 +584,9 @@ export class ChatBridge {
     if (!confirmed) return;
 
     await Promise.allSettled(
-      summaries.map((s) => services.chatSessionService.clearSession(s.sessionId))
+      summaries.map((s) =>
+        services.chatSessionService.clearSession(s.sessionId)
+      )
     );
 
     // The open session was almost certainly among those cleared; start fresh so
@@ -678,6 +671,33 @@ export class ChatBridge {
     services.providerId = providerId as ProviderId;
     // Clear the requested model so the new provider's default is resolved.
     this.activeModel = undefined;
+    await this.sendReady();
+  }
+
+  /**
+   * Drops cached services so the next chat interaction reloads providers from
+   * config. Called by the view provider after the Settings tab connects or
+   * disconnects a provider, so the live sidebar reflects the change. If the
+   * removed provider backed the open session, refresh the view immediately.
+   */
+  public async refreshProviders(): Promise<void> {
+    const previousProvider = this.services?.providerId;
+    this.services = undefined;
+
+    if (!this.conversation) return;
+
+    // The active provider may have been disconnected; reload from config and
+    // re-render. Clear the model so a now-missing provider's model isn't
+    // requested.
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    const stillConfigured = Object.keys(config.providers ?? {}).includes(
+      previousProvider ?? ''
+    );
+    if (!stillConfigured) {
+      this.conversation = undefined;
+      this.activeModel = undefined;
+    }
     await this.sendReady();
   }
 
