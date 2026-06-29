@@ -223,6 +223,7 @@ export function App(): React.JSX.Element {
         disabled={chatDisabled}
         models={state.models}
         activeModel={state.activeModel}
+        activeProviderId={state.providerId}
         usage={state.usage}
         autoApplyWrites={state.autoApplyWrites}
         expandTools={state.expandTools}

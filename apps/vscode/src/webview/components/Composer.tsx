@@ -17,6 +17,7 @@ export interface ComposerProps {
   disabled: boolean;
   models: WebviewModel[];
   activeModel: string | undefined;
+  activeProviderId: string | undefined;
   usage: WebviewUsage | undefined;
   autoApplyWrites: boolean;
   expandTools: boolean;
@@ -109,7 +110,12 @@ export function Composer(props: ComposerProps): React.JSX.Element {
               onClick={props.onOpenModelPicker}
             >
               {(() => {
-                const m = props.models.find((m) => m.id === props.activeModel);
+                const m =
+                  props.models.find(
+                    (m) =>
+                      m.id === props.activeModel &&
+                      m.providerId === props.activeProviderId
+                  ) ?? props.models.find((m) => m.id === props.activeModel);
                 if (!m) return props.activeModel ?? 'No model';
                 return `${m.providerName} · ${m.displayName}`;
               })()}
