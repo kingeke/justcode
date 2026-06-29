@@ -286,7 +286,7 @@ body {
 }
 
 .tool {
-  border: 1px solid var(--vscode-panel-border, transparent);
+  border: 1px solid var(--vscode-textLink-foreground, #3794ff);
   border-radius: 4px;
   padding: 6px 8px;
   background: var(--vscode-editorWidget-background, transparent);
@@ -322,7 +322,8 @@ body {
 
 .tool-name {
   font-size: 11px;
-  opacity: 0.6;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  font-weight: 600;
 }
 
 .tool-preview,
