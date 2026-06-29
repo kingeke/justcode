@@ -138,10 +138,20 @@ describe('createCli', () => {
     expect(resetAppStateMock).not.toHaveBeenCalled();
   });
 
-  it('prints both reset confirmation prompts to stdout', async () => {
+  it('shows the reset warning and both confirmation prompts', async () => {
     const writeSpy = vi
       .spyOn(process.stdout, 'write')
       .mockImplementation(() => true);
+    // The two confirmations are asked via readline.question, not stdout.write,
+    // so capture that spy to assert against it.
+    const questionSpy = vi
+      .fn()
+      .mockResolvedValueOnce('y')
+      .mockResolvedValueOnce('RESET');
+    createInterfaceMock.mockReturnValue({
+      question: questionSpy,
+      close: vi.fn(),
+    });
 
     const program = createCli();
 
@@ -152,8 +162,8 @@ describe('createCli', () => {
     expect(writeSpy).toHaveBeenCalledWith(
       'This will permanently reset JustCode to defaults and clear connected providers, pulled models, and sessions. This is irreversible.\n'
     );
-    expect(writeSpy).toHaveBeenCalledWith('Continue? (y/N) ');
-    expect(writeSpy).toHaveBeenCalledWith(
+    expect(questionSpy).toHaveBeenCalledWith('Continue? (y/N) ');
+    expect(questionSpy).toHaveBeenCalledWith(
       'Type RESET to confirm this irreversible action: '
     );
 

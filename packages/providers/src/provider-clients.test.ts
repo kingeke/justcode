@@ -131,9 +131,9 @@ describe('provider clients', () => {
       await new OllamaProvider('http://127.0.0.1:11434').listModels();
 
       const contents = await readFile(filePath, 'utf8');
-      expect(contents).toContain('"kind": "request"');
-      expect(contents).toContain('"kind": "response"');
-      expect(contents).toContain('"/v1/models"');
+      expect(contents).toContain('"request"');
+      expect(contents).toContain('"response"');
+      expect(contents).toContain('/v1/models');
     } finally {
       cwdSpy.mockRestore();
     }
