@@ -20,6 +20,7 @@ import {
   setDebugLogDirectory,
 } from '@core/application/debug-log';
 import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
+import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
 import {
   readGlobalConfig,
   writeGlobalConfig,
@@ -67,6 +68,8 @@ export class ChatBridge {
   private autoApplyWrites = false;
   private expandTools = false;
   private maxReadLines = DEFAULT_MAX_READ_LINES;
+  // 0 means "off" — the full conversation is sent without trimming.
+  private maxHistoryMessages = DEFAULT_MAX_HISTORY_MESSAGES;
   // Cumulative token usage across the session, mirroring the CLI's metrics
   // footer (ctx / cached / new / out / cost). Reset whenever the conversation is.
   private cumulativeUsage: Required<WebviewUsage> = {
@@ -160,6 +163,9 @@ export class ChatBridge {
       case WebviewMessageType.SetReadLimit:
         await this.setReadLimit(message.lines);
         return;
+      case WebviewMessageType.SetHistoryLimit:
+        await this.setHistoryLimit(message.count);
+        return;
     }
   }
 
@@ -188,6 +194,8 @@ export class ChatBridge {
     this.expandTools = globalConfig.expandTools ?? false;
     this.maxReadLines =
       globalConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES;
+    this.maxHistoryMessages =
+      globalConfig.cache?.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES;
 
     let services: RuntimeServices;
     try {
@@ -203,12 +211,14 @@ export class ChatBridge {
         autoApplyWrites: this.autoApplyWrites,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
+        maxHistoryMessages: this.maxHistoryMessages,
       });
       return;
     }
 
-    // Apply the current read limit to the runtime.
+    // Apply the current read and history limits to the runtime.
     services.setMaxReadLines(this.maxReadLines);
+    services.setMaxHistoryMessages(this.maxHistoryMessages);
 
     // With no configured provider the session is backed by a NullProvider whose
     // model listing is empty; surface a notice instead of letting startSession
@@ -224,6 +234,7 @@ export class ChatBridge {
         autoApplyWrites: this.autoApplyWrites,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
+        maxHistoryMessages: this.maxHistoryMessages,
       });
       return;
     }
@@ -265,6 +276,7 @@ export class ChatBridge {
         autoApplyWrites: this.autoApplyWrites,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
+        maxHistoryMessages: this.maxHistoryMessages,
         ...(session.conversation.title !== undefined
           ? { sessionTitle: session.conversation.title }
           : {}),
@@ -282,6 +294,7 @@ export class ChatBridge {
         autoApplyWrites: this.autoApplyWrites,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
+        maxHistoryMessages: this.maxHistoryMessages,
       });
     }
   }
@@ -371,6 +384,15 @@ export class ChatBridge {
           markFirstToken();
           this.post({ type: HostMessageType.Thinking, token });
         },
+        onUsage: (stepUsage) => {
+          // Accumulate each response's usage as it arrives and push a live
+          // snapshot, so the footer metrics track the turn in progress.
+          this.accumulateUsage(stepUsage);
+          this.post({
+            type: HostMessageType.UsageUpdate,
+            usage: { ...this.cumulativeUsage },
+          });
+        },
         onToolActivity: (event) => this.postToolActivity(event),
         ...(!this.autoApplyWrites && {
           requestApproval: (request) => this.requestApproval(request),
@@ -383,9 +405,7 @@ export class ChatBridge {
       const endMs = Date.now();
       this.conversation = result.conversation;
 
-      if (result.usage) {
-        this.accumulateUsage(result.usage);
-      }
+      // Usage was already folded in live via onUsage above; don't add it again.
 
       let stats: WebviewStats | undefined;
       if (firstTokenMs !== null) {
@@ -656,6 +676,21 @@ export class ChatBridge {
     await writeGlobalConfig(configDir, {
       ...config,
       cache: { ...config.cache, maxReadLines: lines },
+    });
+  }
+
+  // 0 (or less) turns trimming off — the whole conversation is sent.
+  private async setHistoryLimit(count: number): Promise<void> {
+    this.maxHistoryMessages = count;
+    const services = this.services;
+    if (services) {
+      services.setMaxHistoryMessages(count);
+    }
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      cache: { ...config.cache, maxHistoryMessages: count },
     });
   }
 

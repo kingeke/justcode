@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ChatSessionService } from '@core/application/chat-session-service';
 import { ToolRegistry } from '@core/application/tool-registry';
 import { createConversation } from '@core/domain/conversation';
+import { createMessage } from '@core/domain/message';
 import {
   ToolsUnsupportedError,
   type ChatRequest,
@@ -245,6 +246,114 @@ describe('ChatSessionService', () => {
     expect(result.conversation.messages[0]?.role).toBe('user');
     expect(result.conversation.messages[1]?.role).toBe('assistant');
     expect(repository.conversation.messages).toHaveLength(2);
+  });
+
+  it('emits per-step usage via onUsage as the turn progresses', async () => {
+    const repository = new InMemoryConversationRepository();
+    const toolRegistry = new ToolRegistry([new RecordingWriteTool()]);
+    // Returns a tool call (step 1) then a final answer (step 2); each step
+    // reports its own usage.
+    let turn = 0;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat(): Promise<ChatResult> {
+        turn += 1;
+        if (turn === 1) {
+          return {
+            content: '',
+            toolCalls: [
+              { id: 'call-1', name: 'write_file', arguments: '{}' },
+            ],
+            usage: { inputTokens: 10, outputTokens: 2, cachedTokens: 0 },
+          };
+        }
+        return {
+          content: 'All done.',
+          usage: { inputTokens: 20, outputTokens: 5, cachedTokens: 1 },
+        };
+      },
+      async listModels() {
+        return [
+          { id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai },
+        ];
+      },
+      getDefaultModel() {
+        return 'gpt';
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry,
+    });
+
+    const started = await service.startSession({ sessionId: 'session-1' });
+    const usageEvents: number[] = [];
+    const result = await service.submitMessage({
+      conversation: started.conversation,
+      model: started.activeModel,
+      content: 'Do the thing',
+      requestApproval: async () => true,
+      onUsage: (usage) => usageEvents.push(usage.inputTokens),
+    });
+
+    // One event per model response (not a single end-of-turn total).
+    expect(usageEvents).toEqual([10, 20]);
+    // The returned total still sums every step.
+    expect(result.usage).toEqual({
+      inputTokens: 30,
+      outputTokens: 7,
+      cachedTokens: 1,
+    });
+  });
+
+  it('sends only the most recent messages when a history limit is set', async () => {
+    const repository = new InMemoryConversationRepository();
+    const receivedCounts: number[] = [];
+    const provider: ProviderClient = {
+      providerId: ProviderId.Ollama,
+      async sendChat({ messages }): Promise<ChatResult> {
+        // Exclude the always-present system message from the count.
+        receivedCounts.push(messages.filter((m) => m.role !== 'system').length);
+        return { content: 'ok' };
+      },
+      async listModels() {
+        return [
+          {
+            id: 'llama3.1',
+            displayName: 'llama3.1',
+            providerId: ProviderId.Ollama,
+          },
+        ];
+      },
+      getDefaultModel() {
+        return undefined;
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      getMaxHistoryMessages: () => 3,
+    });
+
+    const started = await service.startSession({ sessionId: 'session-1' });
+    const conversation = {
+      ...started.conversation,
+      // Pre-set a title so background title generation doesn't issue its own
+      // (separate) sendChat and pollute the recorded counts.
+      title: 'Existing',
+      messages: [
+        createMessage('user', 'm1'),
+        createMessage('assistant', 'm2'),
+        createMessage('user', 'm3'),
+        createMessage('assistant', 'm4'),
+      ],
+    };
+
+    await service.submitMessage({
+      conversation,
+      model: started.activeModel,
+      content: 'm5',
+    });
+
+    // 4 prior + the new user message = 5 working messages, trimmed to the last 3.
+    expect(receivedCounts).toEqual([3]);
   });
 
   it('generates and saves a session title in the background after the first turn', async () => {

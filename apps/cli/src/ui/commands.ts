@@ -10,6 +10,7 @@ export enum CommandName {
   AutoWrites = 'auto-writes',
   ExpandTools = 'expand-tools',
   ReadLimit = 'read-limit',
+  HistoryLimit = 'history-limit',
   Config = 'config',
   Reset = 'reset',
 }
@@ -64,6 +65,11 @@ export const COMMANDS: Command[] = [
     name: CommandName.ReadLimit,
     description:
       'Set how many lines of a file the model reads at once, e.g. /read-limit 500',
+  },
+  {
+    name: CommandName.HistoryLimit,
+    description:
+      'Set how many recent messages are sent to the model, e.g. /history-limit 50',
   },
   {
     name: CommandName.Config,

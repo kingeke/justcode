@@ -1,5 +1,6 @@
 import { PromptAttachmentService } from '@core/application/prompt-attachment-service';
 import { ChatSessionService } from '@core/application/chat-session-service';
+import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
 import { ListModelsService } from '@core/application/list-models-service';
 import { ToolRegistry } from '@core/application/tool-registry';
 import { type ProviderClient } from '@core/ports/chat-model';
@@ -14,6 +15,7 @@ import { GlobTool } from '@runtime/tools/glob-tool';
 import { WebFetchTool } from '@runtime/tools/web-fetch-tool';
 import { WebSearchTool } from '@runtime/tools/web-search-tool';
 import { QuestionTool } from '@runtime/tools/question-tool';
+import { ViewHistoryTool } from '@runtime/tools/view-history-tool';
 import {
   ReadFileTool,
   DEFAULT_MAX_READ_LINES,
@@ -39,6 +41,8 @@ export interface RuntimeServices {
   createProvider: (id: ProviderId) => ProviderClient;
   /** Update, at runtime, how many lines a single file read returns. */
   setMaxReadLines: (lines: number) => void;
+  /** Update, at runtime, how many recent messages are sent to the model. */
+  setMaxHistoryMessages: (count: number) => void;
 }
 
 export interface CreateRuntimeOptions {
@@ -48,6 +52,8 @@ export interface CreateRuntimeOptions {
   allowDefaultProvider?: boolean;
   /** Initial per-read line cap; falls back to the default when unset. */
   maxReadLines?: number;
+  /** Initial cap on recent messages sent to the model; default when unset. */
+  maxHistoryMessages?: number;
   /**
    * Root the workspace tools resolve paths against. The CLI uses the process's
    * working directory; hosts that aren't anchored to a cwd (e.g. the VSCode
@@ -77,6 +83,10 @@ export async function createRuntimeServices(
   const readSettings = {
     maxReadLines: options.maxReadLines ?? DEFAULT_MAX_READ_LINES,
   };
+  const historySettings = {
+    maxHistoryMessages:
+      options.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES,
+  };
   const runtimeTools = [
     new WriteFileTool(workspaceFiles),
     new EditFileTool(workspaceFiles),
@@ -89,6 +99,7 @@ export async function createRuntimeServices(
     new WebFetchTool(),
     new WebSearchTool(),
     new QuestionTool(),
+    new ViewHistoryTool(),
   ];
   const discoverableTools: DiscoverableToolDefinition[] = runtimeTools.map(
     (tool) => ({
@@ -115,6 +126,7 @@ export async function createRuntimeServices(
       workspaceRoot,
       workspaceFiles,
       systemPrompt: config.systemPrompt,
+      getMaxHistoryMessages: () => historySettings.maxHistoryMessages,
     }),
     listModelsService: new ListModelsService(provider),
     promptAttachmentService: new PromptAttachmentService(
@@ -125,6 +137,9 @@ export async function createRuntimeServices(
     createProvider: (id: ProviderId) => registry.create(id),
     setMaxReadLines: (lines: number) => {
       readSettings.maxReadLines = lines;
+    },
+    setMaxHistoryMessages: (count: number) => {
+      historySettings.maxHistoryMessages = count;
     },
   };
 }

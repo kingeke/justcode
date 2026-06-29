@@ -4,10 +4,15 @@ import { version as appVersion } from '../../../../package.json';
 import { createInterface } from 'node:readline/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { deleteDebugLog } from '@core/application/debug-log';
+import {
+  deleteDebugLog,
+  setDebugLogDirectory,
+} from '@core/application/debug-log';
+import { cacheDirectory } from '@core/application/cache-dir';
 import type { ProviderId } from '@core/ports/provider-catalog';
 import { createRuntimeServices } from '@runtime/bootstrap/create-services';
 import { DEFAULT_MAX_READ_LINES } from '@runtime/tools/read-file-tool';
+import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
 import { loadAppConfig, parseProviderId } from '@runtime/config/app-config';
 import {
   readGlobalConfig,
@@ -29,6 +34,10 @@ interface StartupProviderSelection {
 export function createCli(): Command {
   const program = new Command();
 
+  // Keep debug.log out of whatever project the CLI is launched in: write it to
+  // the shared cache dir (~/.cache/justcode) instead of process.cwd(), matching
+  // the VSCode host. Must run before any logging or the startup cleanup below.
+  setDebugLogDirectory(cacheDirectory());
   void deleteDebugLog();
 
   program
@@ -179,6 +188,10 @@ async function runChat(options: SharedOptions): Promise<void> {
     ...(savedConfig.cache?.maxReadLines
       ? { maxReadLines: savedConfig.cache.maxReadLines }
       : {}),
+    // 0 is a valid value ("off"), so probe for presence rather than truthiness.
+    ...(savedConfig.cache?.maxHistoryMessages !== undefined
+      ? { maxHistoryMessages: savedConfig.cache.maxHistoryMessages }
+      : {}),
   });
 
   // Merge into the persisted config so each write preserves the other fields.
@@ -241,6 +254,8 @@ async function runChat(options: SharedOptions): Promise<void> {
       initialExpandTools: savedConfig.expandTools ?? true,
       initialMaxReadLines:
         savedConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES,
+      initialMaxHistoryMessages:
+        savedConfig.cache?.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES,
       ...(savedConfig.reasoningEffortByModel
         ? { initialReasoningEffortByModel: savedConfig.reasoningEffortByModel }
         : {}),
@@ -260,6 +275,12 @@ async function runChat(options: SharedOptions): Promise<void> {
         runtime.setMaxReadLines(lines);
         persistConfig({
           cache: { ...currentConfig.cache, maxReadLines: lines },
+        });
+      },
+      onMaxHistoryMessagesChange: (count: number) => {
+        runtime.setMaxHistoryMessages(count);
+        persistConfig({
+          cache: { ...currentConfig.cache, maxHistoryMessages: count },
         });
       },
       onReasoningEffortChange: (providerId, modelId, effort) => {

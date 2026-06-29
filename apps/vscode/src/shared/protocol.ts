@@ -18,6 +18,7 @@ export enum HostMessageType {
   ToolActivity = 'toolActivity',
   ApprovalRequest = 'approvalRequest',
   UserInputRequest = 'userInputRequest',
+  UsageUpdate = 'usageUpdate',
   TurnComplete = 'turnComplete',
   ModelsUpdate = 'modelsUpdate',
   Error = 'error',
@@ -36,6 +37,7 @@ export enum WebviewMessageType {
   ToggleAutoWrites = 'toggleAutoWrites',
   ToggleExpandTools = 'toggleExpandTools',
   SetReadLimit = 'setReadLimit',
+  SetHistoryLimit = 'setHistoryLimit',
   ListSessions = 'listSessions',
   OpenSession = 'openSession',
   DeleteSession = 'deleteSession',
@@ -158,6 +160,8 @@ export interface ReadyMessage {
   autoApplyWrites: boolean;
   expandTools: boolean;
   maxReadLines: number;
+  /** Recent messages sent to the model per request; 0 means "off" (send all). */
+  maxHistoryMessages: number;
   sessionTitle?: string | undefined;
 }
 
@@ -215,6 +219,16 @@ export interface UserInputRequestMessage {
   options?: string[];
 }
 
+/**
+ * Live token-usage snapshot pushed mid-turn (after each model response) so the
+ * footer metrics track an in-flight turn instead of jumping only at completion.
+ */
+export interface UsageUpdateMessage {
+  type: HostMessageType.UsageUpdate;
+  /** Cumulative token usage across every turn in the session so far. */
+  usage: WebviewUsage;
+}
+
 /** The current turn finished; carries the authoritative message list + usage. */
 export interface TurnCompleteMessage {
   type: HostMessageType.TurnComplete;
@@ -253,6 +267,7 @@ export type HostToWebview =
   | ToolActivityMessage
   | ApprovalRequestMessage
   | UserInputRequestMessage
+  | UsageUpdateMessage
   | TurnCompleteMessage
   | ErrorMessage;
 
@@ -355,6 +370,12 @@ export interface SetReadLimitMessage {
   lines: number;
 }
 
+/** The user set a new history cap; 0 means "off" (send the whole conversation). */
+export interface SetHistoryLimitMessage {
+  type: WebviewMessageType.SetHistoryLimit;
+  count: number;
+}
+
 export type WebviewToHost =
   | InitMessage
   | SubmitMessage
@@ -372,4 +393,5 @@ export type WebviewToHost =
   | OpenSettingsMessage
   | ToggleAutoWritesMessage
   | ToggleExpandToolsMessage
-  | SetReadLimitMessage;
+  | SetReadLimitMessage
+  | SetHistoryLimitMessage;

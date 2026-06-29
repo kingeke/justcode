@@ -24,6 +24,8 @@ export interface ComposerProps {
   autoApplyWrites: boolean;
   expandTools: boolean;
   maxReadLines: number;
+  /** Recent messages sent to the model per request; 0 means "off" (send all). */
+  maxHistoryMessages: number;
   onSubmit: (content: string) => void;
   onCancel: () => void;
   onNewSession: () => void;
@@ -31,6 +33,8 @@ export interface ComposerProps {
   onToggleAutoWrites: () => void;
   onToggleExpandTools: () => void;
   onSetReadLimit: (lines: number) => void;
+  /** Pass 0 to turn trimming off (send the whole conversation). */
+  onSetHistoryLimit: (count: number) => void;
 }
 
 /**
@@ -44,6 +48,8 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   const [value, setValue] = React.useState('');
   const [editingReadLimit, setEditingReadLimit] = React.useState(false);
   const [readLimitDraft, setReadLimitDraft] = React.useState('');
+  const [editingHistoryLimit, setEditingHistoryLimit] = React.useState(false);
+  const [historyLimitDraft, setHistoryLimitDraft] = React.useState('');
 
   const submit = (): void => {
     const trimmed = value.trim();
@@ -72,6 +78,28 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   ): void => {
     if (event.key === 'Enter') commitReadLimit();
     if (event.key === 'Escape') setEditingReadLimit(false);
+  };
+
+  const commitHistoryLimit = (): void => {
+    // Blank or 0 turns trimming off (send the whole conversation); any positive
+    // value caps how many recent messages are forwarded.
+    const trimmed = historyLimitDraft.trim();
+    if (trimmed === '') {
+      props.onSetHistoryLimit(0);
+    } else {
+      const parsed = parseInt(trimmed, 10);
+      if (!isNaN(parsed) && parsed >= 0) {
+        props.onSetHistoryLimit(parsed);
+      }
+    }
+    setEditingHistoryLimit(false);
+  };
+
+  const onHistoryLimitKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement>
+  ): void => {
+    if (event.key === 'Enter') commitHistoryLimit();
+    if (event.key === 'Escape') setEditingHistoryLimit(false);
   };
 
   return (
@@ -199,6 +227,38 @@ export function Composer(props: ComposerProps): React.JSX.Element {
               }}
             >
               Max File Read: {props.maxReadLines} Lines
+            </button>
+          )}
+          <span className="toolbar-divider" />
+          {editingHistoryLimit ? (
+            <input
+              className="status-read-input"
+              type="number"
+              min={0}
+              value={historyLimitDraft}
+              autoFocus
+              onChange={(e) => setHistoryLimitDraft(e.target.value)}
+              onBlur={commitHistoryLimit}
+              onKeyDown={onHistoryLimitKeyDown}
+            />
+          ) : (
+            <button
+              type="button"
+              className={`status-btn ${props.maxHistoryMessages > 0 ? '' : 'status-btn-active'}`}
+              title="Recent messages sent to the model — 0 turns trimming off"
+              onClick={() => {
+                setHistoryLimitDraft(
+                  props.maxHistoryMessages > 0
+                    ? String(props.maxHistoryMessages)
+                    : '0'
+                );
+                setEditingHistoryLimit(true);
+              }}
+            >
+              History:{' '}
+              {props.maxHistoryMessages > 0
+                ? `${props.maxHistoryMessages} Msgs`
+                : 'Off'}
             </button>
           )}
           <span className="status-spacer" />

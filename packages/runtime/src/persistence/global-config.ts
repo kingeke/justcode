@@ -26,10 +26,12 @@ export interface GlobalConfig {
   autoApplyWrites?: boolean;
   /** When true, finished tool calls render their full input/output inline. */
   expandTools?: boolean;
-  /** Tunables for how the agent reads from the workspace. */
+  /** Tunables for how much context the agent reads and sends. */
   cache?: {
     /** Max lines returned by a single file read before it is paged. */
     maxReadLines?: number;
+    /** Max recent messages forwarded to the model per request (older trimmed). */
+    maxHistoryMessages?: number;
   };
 }
 

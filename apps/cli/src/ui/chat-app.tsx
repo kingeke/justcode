@@ -55,12 +55,14 @@ import type {
   ModelReasoning,
   ProviderClient,
   ReasoningEffort,
+  TokenUsage,
 } from '@core/ports/chat-model';
 import type { GlobalConfig } from '@runtime/persistence/global-config';
 import { mergeProviderConfig } from '@runtime/persistence/global-config';
 import { resetAppState } from '@runtime/persistence/reset-app-state';
 import { renderDiff } from '@cli/ui/render-diff.js';
 import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
+import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
 import {
   COMMANDS,
   CommandName,
@@ -144,6 +146,8 @@ interface ChatAppProps {
   onExpandToolsChange?: (expand: boolean) => void;
   initialMaxReadLines?: number;
   onMaxReadLinesChange?: (lines: number) => void;
+  initialMaxHistoryMessages?: number;
+  onMaxHistoryMessagesChange?: (count: number) => void;
   initialReasoningEffortByModel?: Record<
     string,
     Record<string, ReasoningEffort | 'off' | undefined> | undefined
@@ -259,6 +263,7 @@ function commandLineContent(
     autoApplyWrites: boolean;
     expandTools: boolean;
     maxReadLines: number;
+    maxHistoryMessages: number;
     reasoning: {
       supported: boolean;
       effort: ReasoningEffort | 'off' | undefined;
@@ -295,6 +300,13 @@ function commandLineContent(
     );
   } else if (cmd.name === CommandName.ReadLimit) {
     chunks.push(tc('  '), tc(`[${state.maxReadLines} lines]`, { fg: 'green' }));
+  } else if (cmd.name === CommandName.HistoryLimit) {
+    chunks.push(
+      tc('  '),
+      state.maxHistoryMessages > 0
+        ? tc(`[${state.maxHistoryMessages} msgs]`, { fg: 'green' })
+        : tc('[off]', { fg: 'yellow' })
+    );
   } else if (cmd.name === CommandName.Reasoning) {
     chunks.push(
       tc('  '),
@@ -650,6 +662,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const [maxReadLines, setMaxReadLines] = useState(
     props.initialMaxReadLines ?? DEFAULT_MAX_READ_LINES
   );
+  const maxHistoryMessagesRef = useRef(
+    props.initialMaxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES
+  );
+  const [maxHistoryMessages, setMaxHistoryMessages] = useState(
+    props.initialMaxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES
+  );
   // Reasoning effort is chosen per model (only models that advertise reasoning
   // support), nested by provider id. The ref mirrors the map so the submit
   // closure reads fresh values.
@@ -921,11 +939,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     // The prompt stays focused even while a turn is sending so the user can type
     // ahead and queue the next message. Only the keyboard-driven browse/edit
     // modes (which steer arrows to navigation) take focus away from it.
-    if (
-      !terminalFocused ||
-      browseIndex !== null ||
-      queueEditIndex !== null
-    ) {
+    if (!terminalFocused || browseIndex !== null || queueEditIndex !== null) {
       return;
     }
 
@@ -935,7 +949,13 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     }
 
     area.focus();
-  }, [browseIndex, queueEditIndex, isSending, pendingQuestion, terminalFocused]);
+  }, [
+    browseIndex,
+    queueEditIndex,
+    isSending,
+    pendingQuestion,
+    terminalFocused,
+  ]);
 
   const configuredProviderIds = Object.keys(
     savedConfig.providers ?? {}
@@ -1546,6 +1566,38 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         return;
       }
 
+      case CommandName.HistoryLimit: {
+        const trimmed = (arg ?? '').trim();
+        const current = maxHistoryMessagesRef.current;
+        if (!trimmed) {
+          setStatus(
+            current > 0
+              ? `History limit is ${current} messages (use /history-limit <count|off> to change)`
+              : 'History limit is off — the full conversation is sent (use /history-limit <count> to cap it)'
+          );
+          return;
+        }
+        // "off" disables trimming (send the whole conversation); a positive
+        // count caps how many recent messages are forwarded.
+        const isOff = trimmed.toLowerCase() === 'off';
+        const count = isOff ? 0 : Number.parseInt(trimmed, 10);
+        if (!isOff && (!Number.isFinite(count) || count <= 0)) {
+          setError(
+            `Invalid history limit '${trimmed}'. Provide a positive number of messages or "off".`
+          );
+          return;
+        }
+        maxHistoryMessagesRef.current = count;
+        setMaxHistoryMessages(count);
+        props.onMaxHistoryMessagesChange?.(count);
+        setStatus(
+          count > 0
+            ? `History limit set to ${count} messages`
+            : 'History limit turned off — sending the full conversation'
+        );
+        return;
+      }
+
       case CommandName.AutoWrites: {
         const next = !autoApplyWritesRef.current;
         setAutoApplyWrites(next);
@@ -1718,6 +1770,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
     const baseConversation = conversation;
 
+    // Tracks whether any model response this turn reported usage. When it did,
+    // the metrics line was already updated live via onUsage, so the end-of-turn
+    // accounting must not double-count; when it didn't, we fall back to an
+    // estimate there.
+    let turnReportedUsage = false;
+
     setError(null);
     setIsSending(true);
     // Show the user's message immediately, before the model starts responding.
@@ -1861,6 +1919,29 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       );
     };
 
+    // Update the metrics line as each model response arrives, instead of waiting
+    // for the whole (possibly multi-step) turn to finish. `stepUsage` is this
+    // response's usage, not the running total, so we accumulate it.
+    const onUsage = (stepUsage: TokenUsage): void => {
+      turnReportedUsage = true;
+      const pricing = activeModelInfo?.pricing;
+      const requestCost =
+        stepUsage.cost ??
+        (pricing
+          ? stepUsage.inputTokens * pricing.inputPerToken +
+            stepUsage.outputTokens * pricing.outputPerToken +
+            stepUsage.cachedTokens *
+              (pricing.cacheReadPerToken ?? pricing.inputPerToken)
+          : 0);
+      setMetrics((prev) => ({
+        inputTokens: prev.inputTokens + stepUsage.inputTokens,
+        outputTokens: prev.outputTokens + stepUsage.outputTokens,
+        cachedTokens: prev.cachedTokens + stepUsage.cachedTokens,
+        cost: prev.cost + requestCost,
+        lastInputTokens: stepUsage.inputTokens,
+      }));
+    };
+
     try {
       const attachments =
         await props.promptAttachmentService.resolveAttachments(
@@ -1885,6 +1966,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         signal: requestController.signal,
         requestApproval,
         requestUserInput,
+        onUsage,
         onToolActivity,
         drainSteering: () => {
           const queued = queuedMessagesRef.current;
@@ -1968,12 +2050,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         thinkingSegments.map((segment) => segment.content).join('') +
           capturedContent
       );
-      const turnUsage = result.usage;
-      const turnInputTokens = turnUsage?.inputTokens;
+      // Token/cost accounting is driven live by onUsage; here we only need the
+      // output count for the TTFT/throughput stats, falling back to an estimate
+      // when the provider didn't report usage.
       const turnOutputTokens =
-        turnUsage?.outputTokens ?? estimatedTurnOutputTokens;
-      const turnCachedTokens = turnUsage?.cachedTokens;
-      const turnCost = turnUsage?.cost;
+        result.usage?.outputTokens ?? estimatedTurnOutputTokens;
       clearInterval(flushInterval);
       streamingBufferRef.current = '';
       thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
@@ -1999,9 +2080,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           > = {};
           thinkingSegments.forEach((segment, index) => {
             const target =
-              assistantMessages[
-                Math.min(index, assistantMessages.length - 1)
-              ];
+              assistantMessages[Math.min(index, assistantMessages.length - 1)];
             if (!target) return;
             const existing = anchored[target.id];
             anchored[target.id] = existing
@@ -2026,29 +2105,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             avgTokensPerSecond: average(samples),
           });
         }
-        if (turnUsage || turnInputTokens !== undefined) {
-          const u = turnUsage ?? {
-            inputTokens: turnInputTokens ?? 0,
-            outputTokens: turnOutputTokens,
-            cachedTokens: turnCachedTokens ?? 0,
-          };
-          const pricing = activeModelInfo?.pricing;
-          const requestCost =
-            turnCost ??
-            (pricing
-              ? u.inputTokens * pricing.inputPerToken +
-                u.outputTokens * pricing.outputPerToken +
-                u.cachedTokens *
-                  (pricing.cacheReadPerToken ?? pricing.inputPerToken)
-              : 0);
-          setMetrics((prev) => ({
-            inputTokens: prev.inputTokens + u.inputTokens,
-            outputTokens: prev.outputTokens + u.outputTokens,
-            cachedTokens: prev.cachedTokens + u.cachedTokens,
-            cost: prev.cost + requestCost,
-            lastInputTokens: u.inputTokens,
-          }));
-        } else {
+        // When the turn reported usage, the metrics line was already updated
+        // live via onUsage (per response), so don't add it again here. Only when
+        // no usage came back at all do we fall back to an output estimate.
+        if (!turnReportedUsage) {
           setMetrics((prev) => ({
             inputTokens: prev.inputTokens,
             outputTokens: prev.outputTokens + turnOutputTokens,
@@ -2535,6 +2595,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                       autoApplyWrites,
                       expandTools,
                       maxReadLines,
+                      maxHistoryMessages,
                       reasoning: {
                         supported: Boolean(
                           activeModelInfo?.reasoning?.effortLevels.length
@@ -2693,7 +2754,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             // A terminal forwards a paste over stdin, but pasted image data is
             // not part of it — so when a paste carries no text, check the OS
             // clipboard for an image and attach it instead of inserting nothing.
-            onPaste={(event: { bytes?: Uint8Array; preventDefault: () => void }) => {
+            onPaste={(event: {
+              bytes?: Uint8Array;
+              preventDefault: () => void;
+            }) => {
               if (event.bytes && event.bytes.length > 0) return;
               if (attachClipboardImage()) {
                 event.preventDefault();
@@ -2704,9 +2768,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             // pending (it doubles as the answer box). Only the keyboard browse/
             // edit modes steer focus away to drive their arrow navigation.
             focused={
-              terminalFocused &&
-              browseIndex === null &&
-              queueEditIndex === null
+              terminalFocused && browseIndex === null && queueEditIndex === null
             }
             onSubmit={() => {
               const text = promptAreaRef.current?.plainText ?? input;
@@ -2765,9 +2827,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
         {!isCommandMode && showSymbolSuggestions ? (
           <box marginTop={1} flexDirection="column">
-            <text fg={MUTED}>
-              methods in {activeSymbolMention?.path}:
-            </text>
+            <text fg={MUTED}>methods in {activeSymbolMention?.path}:</text>
             {symbolSuggestions.map((suggestion, index) => (
               <text
                 key={suggestion}

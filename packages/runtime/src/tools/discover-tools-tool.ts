@@ -5,6 +5,7 @@ import type {
   ToolInvocationView,
   ToolResult,
 } from '@core/ports/tool';
+import { ToolName } from '@core/domain/tool-name';
 
 export interface DiscoverableToolDefinition extends ToolDefinition {
   requiresApproval: boolean;
@@ -14,7 +15,7 @@ export class DiscoverToolsTool implements Tool {
   public readonly requiresApproval = false;
 
   public readonly definition: ToolDefinition = {
-    name: 'discover_tools',
+    name: ToolName.DiscoverTools,
     description:
       "Call this only when the user's request appears to require tools and you " +
       'need the full toolset revealed before continuing. Do not call this for ' +
@@ -33,7 +34,7 @@ export class DiscoverToolsTool implements Tool {
 
   public describe(_rawArguments: string): ToolInvocationView {
     return {
-      title: 'discover_tools',
+      title: ToolName.DiscoverTools,
       preview: 'Reveal the full toolset for the next model request.',
     };
   }

@@ -147,6 +147,11 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.SetReadLimit, lines });
   };
 
+  const setHistoryLimit = (count: number): void => {
+    dispatch({ type: LocalActionType.SetHistoryLimit, count });
+    postToHost({ type: WebviewMessageType.SetHistoryLimit, count });
+  };
+
   const chatDisabled = !state.activeModel;
 
   if (state.view === 'sessions' || state.status === ChatStatus.Loading) {
@@ -278,6 +283,7 @@ export function App(): React.JSX.Element {
         autoApplyWrites={state.autoApplyWrites}
         expandTools={state.expandTools}
         maxReadLines={state.maxReadLines}
+        maxHistoryMessages={state.maxHistoryMessages}
         onSubmit={submit}
         onCancel={cancel}
         onNewSession={newSession}
@@ -285,6 +291,7 @@ export function App(): React.JSX.Element {
         onToggleAutoWrites={toggleAutoWrites}
         onToggleExpandTools={toggleExpandTools}
         onSetReadLimit={setReadLimit}
+        onSetHistoryLimit={setHistoryLimit}
       />
     </div>
   );

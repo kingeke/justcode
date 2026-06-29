@@ -26,6 +26,7 @@ import type {
   UserQuestionRequest,
 } from '@core/ports/tool';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
+import { ToolName } from '@core/domain/tool-name';
 import {
   type AdvertisedToolDefinition,
   type ToolRegistry,
@@ -34,6 +35,11 @@ import {
   DEFAULT_SYSTEM_PROMPT,
   buildSystemPrompt,
 } from '@core/application/system-prompt';
+import {
+  DEFAULT_MAX_HISTORY_MESSAGES,
+  renderHistoryWindow,
+  selectRecentMessages,
+} from '@core/application/history-window';
 
 const SESSION_TITLE_SYSTEM_PROMPT = [
   'You generate a short title for a chat conversation.',
@@ -53,9 +59,7 @@ const MAX_SESSION_TITLE_LENGTH = 60;
  * table of X") gets answered by the title model instead of titled.
  */
 function buildSessionTitleUserMessage(userMessage: string): string {
-  return [
-    `<message>\n${userMessage}\n</message>`,
-  ].join('\n');
+  return [`<message>\n${userMessage}\n</message>`].join('\n');
 }
 
 export interface StartSessionInput {
@@ -99,6 +103,12 @@ export interface SubmitMessageInput {
   signal?: AbortSignal;
   onToken?: (token: string) => void;
   onThinkingToken?: (token: string) => void;
+  /**
+   * Fired after each model response that reports usage, with that step's usage
+   * (not the running total). Lets the UI update its token/cost metrics live as
+   * an agentic turn progresses instead of only when the whole turn returns.
+   */
+  onUsage?: (usage: TokenUsage) => void;
   /** Asked before a tool that `requiresApproval` runs. Absent → auto-approved. */
   requestApproval?: (request: ToolApprovalRequest) => Promise<boolean>;
   /** Lets a tool prompt the user for input mid-turn (e.g. the question tool). */
@@ -139,6 +149,12 @@ export interface ChatSessionOptions {
    * redundant prose listing. Defaults to false.
    */
   describeToolsInSystemPrompt?: boolean;
+  /**
+   * Returns how many of the most recent messages are forwarded to the model per
+   * request. Older history is dropped from the request (but never from what we
+   * persist) to keep input tokens down. Falls back to the default when unset.
+   */
+  getMaxHistoryMessages?: () => number;
 }
 
 export class ChatSessionService {
@@ -152,6 +168,7 @@ export class ChatSessionService {
   private readonly workspaceFiles: WorkspaceFilePort | undefined;
   private readonly systemPrompt: string;
   private readonly describeToolsInSystemPrompt: boolean;
+  private readonly getMaxHistoryMessages: () => number;
   /** Models that rejected tools once; we send their requests chat-only after. */
   private readonly toolUnsupportedModels = new Set<string>();
   /**
@@ -173,6 +190,8 @@ export class ChatSessionService {
     this.systemPrompt = options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     this.describeToolsInSystemPrompt =
       options.describeToolsInSystemPrompt ?? false;
+    this.getMaxHistoryMessages =
+      options.getMaxHistoryMessages ?? (() => DEFAULT_MAX_HISTORY_MESSAGES);
     for (const tool of this.toolRegistry?.definitions() ?? []) {
       this.advertisedToolsByName.set(tool.name, tool);
     }
@@ -262,23 +281,37 @@ export class ChatSessionService {
         working.push(createMessage('user', steering.trim()));
       }
 
+      // Cap how much prior history travels to the model to save tokens. We trim
+      // only the request — `working` (and thus what we persist below) keeps the
+      // full conversation. The system prompt is always sent in full.
+      // A limit of 0 (or less) disables trimming — the whole conversation is
+      // sent. `selectRecentMessages` treats a non-positive limit as "all".
+      const history = selectRecentMessages(
+        working,
+        Math.floor(this.getMaxHistoryMessages())
+      );
+      const omittedCount = working.length - history.length;
+
+      const systemPrompt = buildSystemPrompt(
+        this.systemPrompt,
+        this.workspaceRoot,
+        toolsEnabled && this.describeToolsInSystemPrompt ? toolDefinitions : [],
+        projectInstructions
+      );
+      // Tell the model that older turns were trimmed and how to recover them, so
+      // it can page back via `view_history` instead of assuming they're gone.
       const systemMessage = createMessage(
         'system',
-        buildSystemPrompt(
-          this.systemPrompt,
-          this.workspaceRoot,
-          toolsEnabled && this.describeToolsInSystemPrompt
-            ? toolDefinitions
-            : [],
-          projectInstructions
-        )
+        omittedCount > 0 && toolsEnabled
+          ? `${systemPrompt}\n\nNote: the ${omittedCount} oldest message(s) of this ${working.length}-message conversation were omitted from this request to save tokens. They are still available — call the \`view_history\` tool with a "start" (and optional "end") index to read any of them (index 0 = oldest message).`
+          : systemPrompt
       );
 
       let response;
       try {
         response = await this.provider.sendChat({
           model: input.model,
-          messages: [systemMessage, ...working],
+          messages: [systemMessage, ...history],
           ...(input.reasoningEffort
             ? { reasoningEffort: input.reasoningEffort }
             : {}),
@@ -304,6 +337,9 @@ export class ChatSessionService {
 
       if (response.usage) {
         usage = usage ? sumUsage(usage, response.usage) : response.usage;
+        // Surface this step's usage immediately so the UI's token/cost metrics
+        // track the turn live rather than jumping only when it finishes.
+        input.onUsage?.(response.usage);
       }
 
       const toolCalls = response.toolCalls ?? [];
@@ -323,7 +359,7 @@ export class ChatSessionService {
       );
 
       for (const call of toolCalls) {
-        const toolResult = await this.runToolCall(call, input);
+        const toolResult = await this.runToolCall(call, input, working);
         working.push(
           createMessage('tool', toolResult.content, new Date(), undefined, {
             toolCallId: call.id,
@@ -331,7 +367,7 @@ export class ChatSessionService {
           })
         );
 
-        if (call.name === 'discover_tools') {
+        if (call.name === ToolName.DiscoverTools) {
           toolDefinitions = fullToolDefinitions;
           toolsEnabled =
             toolDefinitions.length > 0 &&
@@ -373,7 +409,8 @@ export class ChatSessionService {
 
   private async runToolCall(
     call: ToolCall,
-    input: SubmitMessageInput
+    input: SubmitMessageInput,
+    history: ChatMessage[]
   ): Promise<ToolResult> {
     throwIfAborted(input.signal);
     const tool = this.toolRegistry?.get(call.name);
@@ -397,6 +434,22 @@ export class ChatSessionService {
     });
 
     let result: ToolResult;
+    // `view_history` is answered here, not by the tool: only the service holds
+    // the live message list, so it renders the requested window from `history`
+    // (which always carries the full conversation, including trimmed turns).
+    if (call.name === ToolName.ViewHistory) {
+      result = this.viewHistory(call, history);
+      input.onToolActivity?.({
+        phase: 'end',
+        toolName: effectiveToolName,
+        toolCallId: call.id,
+        arguments: call.arguments,
+        view,
+        result,
+      });
+      return result;
+    }
+
     const approved = await this.resolveApproval(
       requiresApproval,
       effectiveToolName,
@@ -442,6 +495,26 @@ export class ChatSessionService {
       result,
     });
     return result;
+  }
+
+  private viewHistory(call: ToolCall, history: ChatMessage[]): ToolResult {
+    let start = 0;
+    let end: number | undefined;
+    try {
+      const parsed = JSON.parse(call.arguments) as {
+        start?: number;
+        end?: number;
+      };
+      if (typeof parsed.start === 'number') start = parsed.start;
+      if (typeof parsed.end === 'number') end = parsed.end;
+    } catch {
+      return {
+        content: 'Invalid arguments: expected JSON with a numeric "start".',
+        isError: true,
+      };
+    }
+    const rendered = renderHistoryWindow(history, start, end);
+    return { content: rendered.content, isError: rendered.isError };
   }
 
   private async loadProjectInstructions(): Promise<string | undefined> {

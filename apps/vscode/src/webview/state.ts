@@ -54,6 +54,8 @@ export interface ChatState {
   autoApplyWrites: boolean;
   expandTools: boolean;
   maxReadLines: number;
+  /** Recent messages sent to the model per request; 0 means "off" (send all). */
+  maxHistoryMessages: number;
   sessionTitle?: string | undefined;
 }
 
@@ -71,6 +73,7 @@ export const initialState: ChatState = {
   autoApplyWrites: false,
   expandTools: false,
   maxReadLines: 200,
+  maxHistoryMessages: 50,
 };
 
 /** Local-only actions, distinct from host messages, for optimistic UI updates. */
@@ -82,6 +85,7 @@ export enum LocalActionType {
   ToggleAutoWrites = 'toggleAutoWrites',
   ToggleExpandTools = 'toggleExpandTools',
   SetReadLimit = 'setReadLimit',
+  SetHistoryLimit = 'setHistoryLimit',
   SetView = 'setView',
   SetTitle = 'setTitle',
 }
@@ -94,6 +98,7 @@ export type LocalAction =
   | { type: LocalActionType.ToggleAutoWrites }
   | { type: LocalActionType.ToggleExpandTools }
   | { type: LocalActionType.SetReadLimit; lines: number }
+  | { type: LocalActionType.SetHistoryLimit; count: number }
   | { type: LocalActionType.SetView; view: ChatView }
   | { type: LocalActionType.SetTitle; title: string };
 
@@ -129,6 +134,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         autoApplyWrites: action.autoApplyWrites,
         expandTools: action.expandTools,
         maxReadLines: action.maxReadLines,
+        maxHistoryMessages: action.maxHistoryMessages,
         sessionTitle: action.sessionTitle,
       };
 
@@ -187,6 +193,9 @@ export function reducer(state: ChatState, action: Action): ChatState {
     case LocalActionType.DismissInput:
       return { ...state, input: undefined };
 
+    case HostMessageType.UsageUpdate:
+      return { ...state, usage: action.usage };
+
     case HostMessageType.TurnComplete:
       return {
         ...state,
@@ -225,6 +234,9 @@ export function reducer(state: ChatState, action: Action): ChatState {
 
     case LocalActionType.SetReadLimit:
       return { ...state, maxReadLines: action.lines };
+
+    case LocalActionType.SetHistoryLimit:
+      return { ...state, maxHistoryMessages: action.count };
 
     case LocalActionType.SetView:
       return { ...state, view: action.view };
