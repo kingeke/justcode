@@ -258,10 +258,16 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       const authMethods = (entry as ProviderConnectionInfo).authMethods ?? [
         AuthMethod.ApiKey,
       ];
-      if (authMethods.includes(AuthMethod.OAuth) && authMethods.includes(AuthMethod.ApiKey)) {
+      if (
+        authMethods.includes(AuthMethod.OAuth) &&
+        authMethods.includes(AuthMethod.ApiKey)
+      ) {
         setAuthMethodIndex(0);
         setStep('auth-method');
-      } else if (authMethods.length === 1 && authMethods[0] === AuthMethod.OAuth) {
+      } else if (
+        authMethods.length === 1 &&
+        authMethods[0] === AuthMethod.OAuth
+      ) {
         setOauthStatus('');
         setStep('oauth-connect');
       } else {

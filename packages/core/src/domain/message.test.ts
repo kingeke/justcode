@@ -19,9 +19,15 @@ describe('renderMessageContentForModel', () => {
   });
 
   it('attaches images passed via extras', () => {
-    const message = createMessage('user', 'look at this', new Date(), undefined, {
-      images: [{ mediaType: 'image/png', data: 'AAAA' }],
-    });
+    const message = createMessage(
+      'user',
+      'look at this',
+      new Date(),
+      undefined,
+      {
+        images: [{ mediaType: 'image/png', data: 'AAAA' }],
+      }
+    );
 
     expect(message.images).toEqual([{ mediaType: 'image/png', data: 'AAAA' }]);
   });

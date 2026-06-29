@@ -12,6 +12,7 @@ import {
   type SettingsWebviewToHost,
 } from '@ext/shared/settings-protocol';
 import {
+  addCustomProvider,
   disconnectProvider,
   listProviders,
   oauthConnectProvider,
@@ -154,6 +155,20 @@ export class SettingsPanel {
         await resetAppState(cacheDirectory());
         this.onProvidersChanged();
         await this.sendProviders();
+        return;
+      }
+      case SettingsWebviewMessageType.AddCustomProvider: {
+        const result = await addCustomProvider(
+          cacheDirectory(),
+          message.name,
+          message.apiKey,
+          message.baseUrl
+        );
+        this.post({ type: SettingsHostMessageType.ConnectResult, ...result });
+        if (result.success) {
+          this.onProvidersChanged();
+          await this.sendProviders();
+        }
         return;
       }
     }

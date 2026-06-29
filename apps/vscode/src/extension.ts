@@ -39,9 +39,17 @@ function hardenNetworkForBrokenIpv6(): void {
       Agent: new (opts: { connect: { autoSelectFamily: boolean } }) => object;
     };
     let undici: UndiciShape | undefined;
-    try { undici = require('node:undici') as UndiciShape; } catch { /* noop */ }
+    try {
+      undici = require('node:undici') as UndiciShape;
+    } catch {
+      /* noop */
+    }
     if (!undici) {
-      try { undici = require('undici') as UndiciShape; } catch { /* noop */ }
+      try {
+        undici = require('undici') as UndiciShape;
+      } catch {
+        /* noop */
+      }
     }
     undici?.setGlobalDispatcher(
       new undici.Agent({ connect: { autoSelectFamily: true } })

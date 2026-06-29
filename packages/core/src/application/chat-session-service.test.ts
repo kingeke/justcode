@@ -261,9 +261,7 @@ describe('ChatSessionService', () => {
         if (turn === 1) {
           return {
             content: '',
-            toolCalls: [
-              { id: 'call-1', name: 'write_file', arguments: '{}' },
-            ],
+            toolCalls: [{ id: 'call-1', name: 'write_file', arguments: '{}' }],
             usage: { inputTokens: 10, outputTokens: 2, cachedTokens: 0 },
           };
         }
@@ -638,7 +636,9 @@ describe('ChatSessionService', () => {
         return { content: 'All done.' };
       },
       async listModels() {
-        return [{ id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai }];
+        return [
+          { id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai },
+        ];
       },
       getDefaultModel() {
         return 'gpt';

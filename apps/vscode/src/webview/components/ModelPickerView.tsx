@@ -15,20 +15,27 @@ const SORT_MODES: SortMode[] = [
   'context-window',
 ];
 const SORT_LABELS: Record<SortMode, string> = {
-  'provider': 'Provider',
+  provider: 'Provider',
   'input-cost': 'Input cost',
   'output-cost': 'Output cost',
   'context-window': 'Context',
 };
 
-function nextSort(mode: SortMode, dir: SortDir): { mode: SortMode; dir: SortDir } {
+function nextSort(
+  mode: SortMode,
+  dir: SortDir
+): { mode: SortMode; dir: SortDir } {
   if (dir === 'asc') return { mode, dir: 'desc' };
   const idx = SORT_MODES.indexOf(mode);
   const nextMode = SORT_MODES[(idx + 1) % SORT_MODES.length]!;
   return { mode: nextMode, dir: 'asc' };
 }
 
-function sortModels(models: WebviewModel[], mode: SortMode, dir: SortDir): WebviewModel[] {
+function sortModels(
+  models: WebviewModel[],
+  mode: SortMode,
+  dir: SortDir
+): WebviewModel[] {
   return [...models].sort((a, b) => {
     if (mode === 'provider') {
       const cmp = a.providerName.localeCompare(b.providerName);
@@ -68,7 +75,10 @@ function modelMeta(m: WebviewModel): string {
     if (m.inputCostPerM === 0 && m.outputCostPerM === 0) {
       parts.push('free');
     } else {
-      parts.push(`${fmtCost(m.inputCostPerM)} in`, `${fmtCost(m.outputCostPerM)} out`);
+      parts.push(
+        `${fmtCost(m.inputCostPerM)} in`,
+        `${fmtCost(m.outputCostPerM)} out`
+      );
     }
   }
   if (m.contextWindow != null) parts.push(`${fmtCtx(m.contextWindow)} ctx`);
@@ -118,7 +128,11 @@ export function ModelPickerView({
 
   // Group only when sorting by provider.
   const byProvider = sortMode === 'provider';
-  const groups: { providerId: string; providerName: string; models: WebviewModel[] }[] = [];
+  const groups: {
+    providerId: string;
+    providerName: string;
+    models: WebviewModel[];
+  }[] = [];
   if (byProvider) {
     for (const model of sorted) {
       const existing = groups.find((g) => g.providerId === model.providerId);

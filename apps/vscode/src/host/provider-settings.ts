@@ -11,6 +11,8 @@ import {
   AuthMethod,
   isCustomProviderId,
   CUSTOM_PROVIDER_PREFIX,
+  customProviderId,
+  createCustomProviderEntry,
   type ProviderCatalogEntry,
   type ProviderConfig,
 } from '@core/ports/provider-catalog';
@@ -40,7 +42,10 @@ function providerKind(
       : WebviewProviderKind.ApiKey;
   }
   const methods = entry.authMethods ?? [AuthMethod.ApiKey];
-  if (!methods.includes(AuthMethod.ApiKey) && methods.includes(AuthMethod.OAuth)) {
+  if (
+    !methods.includes(AuthMethod.ApiKey) &&
+    methods.includes(AuthMethod.OAuth)
+  ) {
     return WebviewProviderKind.OAuth;
   }
   return WebviewProviderKind.ApiKey;
@@ -138,7 +143,11 @@ export async function testAndConnectProvider(
     }
 
     const config = await readGlobalConfig(configDir);
-    const next = mergeProviderConfig(config, providerId as ProviderId, providerConfig);
+    const next = mergeProviderConfig(
+      config,
+      providerId as ProviderId,
+      providerConfig
+    );
     await writeGlobalConfig(configDir, next);
 
     return { success: true };
@@ -146,6 +155,59 @@ export async function testAndConnectProvider(
     return {
       success: false,
       error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Creates and validates a new custom (OpenAI-compatible) provider, then saves
+ * it to the global config. Mirrors the CLI's name → api-key → base-url flow.
+ */
+export async function addCustomProvider(
+  configDir: string,
+  name: string,
+  apiKey?: string,
+  baseUrl?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const id = customProviderId(name);
+    const resolvedBaseUrl = baseUrl?.trim() ?? '';
+    const resolvedApiKey = apiKey?.trim() || undefined;
+
+    const entry = createCustomProviderEntry(id, {
+      name,
+      baseUrl: resolvedBaseUrl,
+      apiKey: resolvedApiKey,
+    });
+
+    const client = entry.create({
+      apiKey: resolvedApiKey,
+      baseUrl: resolvedBaseUrl,
+    });
+    const models = await client.listModels();
+
+    if (!models.length) {
+      return {
+        success: false,
+        error: `No models are available for "${name}". Check the base URL and API key.`,
+      };
+    }
+
+    const providerConfig: ProviderConfig = {
+      name,
+      baseUrl: resolvedBaseUrl,
+      ...(resolvedApiKey ? { apiKey: resolvedApiKey } : {}),
+    };
+
+    const config = await readGlobalConfig(configDir);
+    const next = mergeProviderConfig(config, id, providerConfig);
+    await writeGlobalConfig(configDir, next);
+
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      error: describeError(err),
     };
   }
 }
@@ -208,7 +270,11 @@ export async function oauthConnectProvider(
       oauth: oauthCreds,
     };
     const config = await readGlobalConfig(configDir);
-    const next = mergeProviderConfig(config, providerId as ProviderId, providerConfig);
+    const next = mergeProviderConfig(
+      config,
+      providerId as ProviderId,
+      providerConfig
+    );
     await writeGlobalConfig(configDir, next);
 
     return { success: true };

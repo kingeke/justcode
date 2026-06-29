@@ -38,6 +38,7 @@ export enum SettingsWebviewMessageType {
   CancelOAuth = 'cancelOAuth',
   DisconnectProvider = 'disconnectProvider',
   ResetApp = 'resetApp',
+  AddCustomProvider = 'addCustomProvider',
 }
 
 /** Static product details rendered on the About tab. */
@@ -151,6 +152,13 @@ export interface SettingsResetAppMessage {
   type: SettingsWebviewMessageType.ResetApp;
 }
 
+export interface SettingsAddCustomProviderMessage {
+  type: SettingsWebviewMessageType.AddCustomProvider;
+  name: string;
+  apiKey?: string | undefined;
+  baseUrl: string;
+}
+
 export type SettingsWebviewToHost =
   | SettingsInitMessage
   | SettingsListProvidersMessage
@@ -160,4 +168,5 @@ export type SettingsWebviewToHost =
   | SettingsOAuthInputMessage
   | SettingsCancelOAuthMessage
   | SettingsDisconnectProviderMessage
-  | SettingsResetAppMessage;
+  | SettingsResetAppMessage
+  | SettingsAddCustomProviderMessage;

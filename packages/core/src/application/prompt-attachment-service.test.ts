@@ -210,7 +210,9 @@ describe('prompt mention helpers', () => {
   });
 
   it('stops file completion once the user starts naming a symbol', () => {
-    expect(hasActiveMentionTrigger('look at @reports.repository.ts')).toBe(true);
+    expect(hasActiveMentionTrigger('look at @reports.repository.ts')).toBe(
+      true
+    );
     expect(
       hasActiveMentionTrigger('look at @reports.repository.ts::find')
     ).toBe(false);
@@ -228,7 +230,9 @@ describe('prompt mention helpers', () => {
       path: 'reports.repository.ts',
       query: '',
     });
-    expect(getActiveSymbolMention('look at @reports.repository.ts')).toBeUndefined();
+    expect(
+      getActiveSymbolMention('look at @reports.repository.ts')
+    ).toBeUndefined();
   });
 
   it('filters symbols by the partial query, prefix-first', () => {
@@ -249,5 +253,4 @@ describe('prompt mention helpers', () => {
       )
     ).toBe('look at @reports.repository.ts::findMultipleBoq');
   });
-
 });

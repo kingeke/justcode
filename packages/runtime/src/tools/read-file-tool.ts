@@ -50,7 +50,7 @@ export class ReadFileTool implements Tool {
       'and "limit" (maximum lines to return) to page through large files; the ' +
       'result reports the line range shown, the total line count, and whether ' +
       'more lines remain (pass the next offset to continue). Pass "method" to ' +
-      'read just a single method/function/symbol\'s block (with the file\'s ' +
+      "read just a single method/function/symbol's block (with the file's " +
       'real line numbers) instead of the whole file; if the method is not ' +
       'found, the result lists the symbols declared in the file. Symbol ' +
       'detection is heuristic — omit "method" to read the file if a symbol ' +

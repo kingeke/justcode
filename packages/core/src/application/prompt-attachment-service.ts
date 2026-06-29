@@ -208,10 +208,7 @@ export function filterSymbolSuggestions(
 }
 
 /** Replaces the partial `::query` at the end of the prompt with `::symbol`. */
-export function applySymbolSuggestion(
-  content: string,
-  symbol: string
-): string {
+export function applySymbolSuggestion(content: string, symbol: string): string {
   return content.replace(
     /(@[^\s@]*?::)[^\s@:]*$/,
     `$1${symbol.replaceAll('$', '$$$$')}`

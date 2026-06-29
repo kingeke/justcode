@@ -32,11 +32,7 @@ export function ApprovalPrompt({
         >
           Approve
         </button>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => onRespond(false)}
-        >
+        <button type="button" className="btn" onClick={() => onRespond(false)}>
           Reject
         </button>
       </div>

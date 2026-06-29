@@ -30,6 +30,7 @@ up the new binary automatically:
 npm run update:local    # recompile the binary
 npm run uninstall:local # remove the symlink
 ```
+
 ## Setup
 
 1. Install dependencies with `npm install`.

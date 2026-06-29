@@ -18,11 +18,9 @@ import { assetName, bunTarget } from './lib/platform.mjs';
 // (the binary needs a self-contained worker for markdown highlighting to work;
 // see build-tree-sitter-worker.mjs). Done before compile so the file is embedded.
 const here = dirname(fileURLToPath(import.meta.url));
-const worker = spawnSync(
-  'node',
-  [join(here, 'build-tree-sitter-worker.mjs')],
-  { stdio: 'inherit' }
-);
+const worker = spawnSync('node', [join(here, 'build-tree-sitter-worker.mjs')], {
+  stdio: 'inherit',
+});
 if (worker.status !== 0) process.exit(worker.status ?? 1);
 
 const outDir = 'dist-bin';

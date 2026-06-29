@@ -53,15 +53,15 @@ describe('chat app method autocomplete', () => {
 
   it('loads the referenced file symbols for a @path::method mention', () => {
     expect(source).toContain('getActiveSymbolMention(input)');
-    expect(source).toContain(
-      'props.promptAttachmentService.listSymbols(path)'
-    );
+    expect(source).toContain('props.promptAttachmentService.listSymbols(path)');
   });
 
   it('navigates and applies the symbol suggestions like file mentions', () => {
     expect(source).toContain('showSymbolSuggestions');
     expect(source).toContain('applySymbolSuggestion(content, suggestion)');
-    expect(source).toContain('applyActiveSuggestion(input, selectedSuggestion)');
+    expect(source).toContain(
+      'applyActiveSuggestion(input, selectedSuggestion)'
+    );
   });
 });
 
@@ -79,6 +79,8 @@ describe('chat app markdown rendering', () => {
   });
 
   it('normalises committed content but leaves the live block alone', () => {
-    expect(source).toContain('const prepared = live ? content : prepareMarkdown(content)');
+    expect(source).toContain(
+      'const prepared = live ? content : prepareMarkdown(content)'
+    );
   });
 });

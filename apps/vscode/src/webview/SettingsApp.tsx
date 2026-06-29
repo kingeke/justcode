@@ -125,6 +125,21 @@ export function SettingsApp(): React.JSX.Element {
     postSettingsToHost({ type: SettingsWebviewMessageType.CancelOAuth });
   };
 
+  const addCustom = (
+    name: string,
+    apiKey: string | undefined,
+    baseUrl: string,
+    onResult: (result: ConnectResult) => void
+  ): void => {
+    connectResultRef.current = onResult;
+    postSettingsToHost({
+      type: SettingsWebviewMessageType.AddCustomProvider,
+      name,
+      apiKey,
+      baseUrl,
+    });
+  };
+
   const testConnect = (
     providerId: string,
     apiKey: string | undefined,
@@ -183,6 +198,7 @@ export function SettingsApp(): React.JSX.Element {
               }}
               onTestConnect={testConnect}
               onDisconnect={disconnect}
+              onAddCustom={addCustom}
             />
           ) : (
             <AboutTab appInfo={appInfo} />
@@ -198,6 +214,7 @@ function ProvidersTab({
   oauth,
   onTestConnect,
   onDisconnect,
+  onAddCustom,
 }: {
   providers: WebviewProvider[];
   oauth: OAuthControls;
@@ -208,9 +225,16 @@ function ProvidersTab({
     onResult: (result: ConnectResult) => void
   ) => void;
   onDisconnect: (providerId: string) => void;
+  onAddCustom: (
+    name: string,
+    apiKey: string | undefined,
+    baseUrl: string,
+    onResult: (result: ConnectResult) => void
+  ) => void;
 }): React.JSX.Element {
   const [search, setSearch] = React.useState('');
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
+  const [showCustomForm, setShowCustomForm] = React.useState(false);
 
   const connected = providers.filter(
     (p) => p.connected && matchesSearch(p, search)
@@ -220,7 +244,9 @@ function ProvidersTab({
   );
 
   const hasOAuthOnly = available.some(
-    (p) => p.kind === WebviewProviderKind.OAuth && !p.authMethods.includes(AuthMethod.ApiKey)
+    (p) =>
+      p.kind === WebviewProviderKind.OAuth &&
+      !p.authMethods.includes(AuthMethod.ApiKey)
   );
 
   return (
@@ -278,9 +304,7 @@ function ProvidersTab({
                 provider={provider}
                 expanded={expandedId === provider.id}
                 onExpand={() =>
-                  setExpandedId(
-                    expandedId === provider.id ? null : provider.id
-                  )
+                  setExpandedId(expandedId === provider.id ? null : provider.id)
                 }
                 oauth={oauth}
                 onTestConnect={onTestConnect}
@@ -302,6 +326,38 @@ function ProvidersTab({
           the OAuth flow, then connect automatically.
         </p>
       ) : null}
+
+      <div className="provider-list">
+        <div className="provider-row-wrap">
+          <div className="provider-row">
+            <div className="provider-row-main">
+              <span className="provider-name">Add custom provider</span>
+              <span className="provider-desc">
+                Connect any OpenAI-compatible endpoint
+              </span>
+            </div>
+            <button
+              type="button"
+              className="provider-action"
+              onClick={() => setShowCustomForm((prev) => !prev)}
+            >
+              {showCustomForm ? (
+                'Cancel'
+              ) : (
+                <>
+                  <PlusIcon size={13} /> Add
+                </>
+              )}
+            </button>
+          </div>
+          {showCustomForm ? (
+            <CustomProviderForm
+              onAddCustom={onAddCustom}
+              onDone={() => setShowCustomForm(false)}
+            />
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -334,10 +390,20 @@ function ProviderRow({
         <button
           type="button"
           className="provider-action"
-          title={expanded ? `Cancel connecting ${provider.name}` : `Connect ${provider.name}`}
+          title={
+            expanded
+              ? `Cancel connecting ${provider.name}`
+              : `Connect ${provider.name}`
+          }
           onClick={onExpand}
         >
-          {expanded ? 'Cancel' : <><PlusIcon size={13} /> Connect</>}
+          {expanded ? (
+            'Cancel'
+          ) : (
+            <>
+              <PlusIcon size={13} /> Connect
+            </>
+          )}
         </button>
       </div>
 
@@ -373,7 +439,10 @@ enum AuthChoice {
 
 function initialStep(provider: WebviewProvider): WizardStep {
   // Providers that support both OAuth AND API key offer an auth-method picker.
-  if (provider.authMethods.includes(AuthMethod.OAuth) && provider.authMethods.includes(AuthMethod.ApiKey)) {
+  if (
+    provider.authMethods.includes(AuthMethod.OAuth) &&
+    provider.authMethods.includes(AuthMethod.ApiKey)
+  ) {
     return WizardStep.AuthMethod;
   }
   // OAuth-only providers (e.g. GitHub Copilot) go straight to the sign-in step.
@@ -555,16 +624,17 @@ function ConnectWizard({
             </button>
           </div>
           <div className="provider-connect-actions">
-            <button type="button" className="provider-action" onClick={stepBack}>
+            <button
+              type="button"
+              className="provider-action"
+              onClick={stepBack}
+            >
               {backLabel}
             </button>
           </div>
         </div>
       ) : step === WizardStep.ApiKey ? (
-        <form
-          className="provider-connect-step"
-          onSubmit={handleApiKeySubmit}
-        >
+        <form className="provider-connect-step" onSubmit={handleApiKeySubmit}>
           <p className="provider-connect-hint">
             {provider.apiKeyRequired
               ? 'Enter the API key for this provider.'
@@ -611,10 +681,7 @@ function ConnectWizard({
           </div>
         </form>
       ) : step === WizardStep.BaseUrl ? (
-        <form
-          className="provider-connect-step"
-          onSubmit={handleBaseUrlSubmit}
-        >
+        <form className="provider-connect-step" onSubmit={handleBaseUrlSubmit}>
           <p className="provider-connect-hint">
             Confirm or edit the base URL for {provider.name}.
           </p>
@@ -658,10 +725,7 @@ function ConnectWizard({
       ) : step === WizardStep.OAuth ? (
         <div className="provider-connect-step">
           {oauthPrompt ? (
-            <form
-              className="provider-connect-step"
-              onSubmit={submitOAuthInput}
-            >
+            <form className="provider-connect-step" onSubmit={submitOAuthInput}>
               <p className="provider-connect-hint">{oauthPrompt}</p>
               <div className="provider-connect-field">
                 <input
@@ -741,6 +805,170 @@ function ConnectWizard({
           </span>
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Custom provider form — name → api key (optional) → base url → connecting
+// ---------------------------------------------------------------------------
+
+enum CustomProviderStep {
+  Fields = 'fields',
+  Connecting = 'connecting',
+}
+
+function CustomProviderForm({
+  onAddCustom,
+  onDone,
+}: {
+  onAddCustom: (
+    name: string,
+    apiKey: string | undefined,
+    baseUrl: string,
+    onResult: (result: ConnectResult) => void
+  ) => void;
+  onDone: () => void;
+}): React.JSX.Element {
+  const [step, setStep] = React.useState<CustomProviderStep>(
+    CustomProviderStep.Fields
+  );
+  const [name, setName] = React.useState('');
+  const [apiKey, setApiKey] = React.useState('');
+  const [baseUrl, setBaseUrl] = React.useState('');
+  const [error, setError] = React.useState<string | null>(null);
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>): void => {
+    e.preventDefault();
+    const trimmedName = name.trim();
+    const trimmedBaseUrl = baseUrl.trim();
+
+    if (!trimmedName) {
+      setError('A provider name is required.');
+      return;
+    }
+    if (!trimmedBaseUrl) {
+      setError('A base URL is required.');
+      return;
+    }
+
+    setError(null);
+    setStep(CustomProviderStep.Connecting);
+
+    onAddCustom(
+      trimmedName,
+      apiKey.trim() || undefined,
+      trimmedBaseUrl,
+      (result) => {
+        if (result.success) {
+          onDone();
+        } else {
+          setError(result.error ?? 'Connection failed.');
+          setStep(CustomProviderStep.Fields);
+        }
+      }
+    );
+  };
+
+  if (step === CustomProviderStep.Connecting) {
+    return (
+      <div className="provider-connect-wizard">
+        <div className="provider-connect-step provider-connect-connecting">
+          <span className="provider-connect-spinner" aria-hidden="true" />
+          <span className="provider-connect-hint">
+            Connecting and fetching models…
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="provider-connect-wizard">
+      <form className="provider-connect-step" onSubmit={handleSubmit}>
+        <p className="provider-connect-hint">
+          Enter the details for your custom OpenAI-compatible provider.
+        </p>
+
+        <div className="provider-connect-field">
+          <label
+            className="provider-connect-label"
+            htmlFor="custom-provider-name"
+          >
+            Name
+          </label>
+          <input
+            id="custom-provider-name"
+            className="provider-connect-input"
+            type="text"
+            placeholder="My Provider"
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              setError(null);
+            }}
+            // eslint-disable-next-line jsx-a11y/no-autofocus
+            autoFocus
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
+
+        <div className="provider-connect-field">
+          <label
+            className="provider-connect-label"
+            htmlFor="custom-provider-apikey"
+          >
+            API Key <span style={{ opacity: 0.6 }}>(optional)</span>
+          </label>
+          <input
+            id="custom-provider-apikey"
+            className="provider-connect-input"
+            type="password"
+            placeholder="Paste API key…"
+            value={apiKey}
+            onChange={(e) => {
+              setApiKey(e.target.value);
+              setError(null);
+            }}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
+
+        <div className="provider-connect-field">
+          <label
+            className="provider-connect-label"
+            htmlFor="custom-provider-baseurl"
+          >
+            Base URL
+          </label>
+          <input
+            id="custom-provider-baseurl"
+            className="provider-connect-input"
+            type="url"
+            placeholder="https://my-provider.example.com/v1"
+            value={baseUrl}
+            onChange={(e) => {
+              setBaseUrl(e.target.value);
+              setError(null);
+            }}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
+
+        {error ? <p className="provider-connect-error">{error}</p> : null}
+
+        <div className="provider-connect-actions">
+          <button
+            type="submit"
+            className="provider-action provider-action-primary"
+          >
+            Connect
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
