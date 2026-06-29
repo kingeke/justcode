@@ -6,7 +6,6 @@ import {
   WebviewRole,
   type WebviewModel,
 } from '@ext/shared/protocol';
-import { CogIcon } from '@ext/webview/components/Icons';
 import { onHostMessage, postToHost } from '@ext/webview/vscode-api';
 import {
   ChatStatus,
@@ -151,6 +150,25 @@ export function App(): React.JSX.Element {
   const chatDisabled = !state.activeModel;
 
   if (state.view === 'sessions' || state.status === ChatStatus.Loading) {
+    if (!state.hasConnectedProvider && state.status !== ChatStatus.Loading) {
+      return (
+        <div className="no-provider-screen">
+          <div className="no-provider-content">
+            <p className="no-provider-title">No providers connected</p>
+            <p className="no-provider-desc">
+              Connect a provider to start chatting.
+            </p>
+            <button
+              type="button"
+              className="no-provider-btn"
+              onClick={openSettings}
+            >
+              Connect Providers
+            </button>
+          </div>
+        </div>
+      );
+    }
     return (
       <SessionsView
         loading={state.status === ChatStatus.Loading}
@@ -191,15 +209,6 @@ export function App(): React.JSX.Element {
           ← Back
         </button>
         <span className="chat-title">{state.sessionTitle ?? 'New chat'}</span>
-        <button
-          type="button"
-          className="icon-btn chat-settings-btn"
-          title="Settings"
-          aria-label="Settings"
-          onClick={openSettings}
-        >
-          <CogIcon size={15} />
-        </button>
       </div>
 
       <div

@@ -609,22 +609,12 @@ textarea:focus {
 }
 
 .chat-title {
-  flex: 1;
   font-size: 12px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   opacity: 0.85;
-}
-
-.chat-settings-btn {
-  flex-shrink: 0;
-  opacity: 0.65;
-}
-
-.chat-settings-btn:hover {
-  opacity: 1;
 }
 
 /* --- Model picker --------------------------------------------------------- */
@@ -1490,4 +1480,144 @@ textarea:focus {
   width: 16px;
   height: 16px;
   border-radius: 4px;
+}
+
+/* --- No-provider splash --------------------------------------------------- */
+
+.no-provider-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+}
+
+.no-provider-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  max-width: 260px;
+}
+
+.no-provider-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.no-provider-desc {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.no-provider-btn {
+  margin-top: 6px;
+  padding: 6px 16px;
+  font-size: 13px;
+  border-radius: 4px;
+  cursor: pointer;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: none;
+}
+
+.no-provider-btn:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+/* --- Danger Zone / Reset -------------------------------------------------- */
+
+.about-card-danger {
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100);
+}
+
+.about-card-title-danger {
+  color: var(--vscode-editorError-foreground, #f14c4c);
+}
+
+.reset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.reset-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reset-row-label {
+  font-size: 13px;
+}
+
+.reset-row-desc {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.reset-trigger-btn {
+  flex-shrink: 0;
+  color: var(--vscode-editorError-foreground, #f14c4c) !important;
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100) !important;
+}
+
+.reset-trigger-btn:hover {
+  background: color-mix(
+    in srgb,
+    var(--vscode-editorError-foreground, #f14c4c) 12%,
+    transparent
+  ) !important;
+}
+
+.reset-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.reset-confirm-warning {
+  margin: 0;
+  font-weight: 600;
+  color: var(--vscode-editorError-foreground, #f14c4c);
+}
+
+.reset-confirm-label {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.reset-confirm-list {
+  margin: 0 0 4px 16px;
+  padding: 0;
+  font-size: 12px;
+  opacity: 0.85;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.reset-confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.reset-confirm-btn {
+  color: var(--vscode-editorError-foreground, #f14c4c) !important;
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100) !important;
+}
+
+.reset-confirm-btn:hover {
+  background: color-mix(
+    in srgb,
+    var(--vscode-editorError-foreground, #f14c4c) 12%,
+    transparent
+  ) !important;
 }

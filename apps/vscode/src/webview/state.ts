@@ -34,6 +34,7 @@ export interface ChatState {
   status: ChatStatus;
   view: ChatView;
   sessions: WebviewSessionSummary[];
+  hasConnectedProvider: boolean;
   // The fields below are cleared back to `undefined` on session resets, so they
   // carry an explicit `| undefined` (required under exactOptionalPropertyTypes).
   providerId?: string | undefined;
@@ -60,6 +61,7 @@ export const initialState: ChatState = {
   status: ChatStatus.Loading,
   view: 'sessions',
   sessions: [],
+  hasConnectedProvider: false,
   models: [],
   messages: [],
   busy: false,
@@ -139,6 +141,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         status: ChatStatus.Ready,
         view: 'sessions',
         sessions: action.sessions,
+        hasConnectedProvider: action.hasConnectedProvider,
         busy: false,
         approval: undefined,
         input: undefined,

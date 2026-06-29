@@ -16,6 +16,7 @@ import {
   listProviders,
   testAndConnectProvider,
 } from '@ext/host/provider-settings';
+import { resetAppState } from '@runtime/persistence/reset-app-state';
 
 const APP_INFO: SettingsAppInfo = {
   name: APP_NAME,
@@ -123,6 +124,12 @@ export class SettingsPanel {
           message.providerId
         );
         if (removed) this.onProvidersChanged();
+        await this.sendProviders();
+        return;
+      }
+      case SettingsWebviewMessageType.ResetApp: {
+        await resetAppState(cacheDirectory());
+        this.onProvidersChanged();
         await this.sendProviders();
         return;
       }

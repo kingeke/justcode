@@ -23,11 +23,14 @@ const KIND_LABELS: Record<WebviewProviderKind, string> = {
   custom: 'Custom',
 };
 
-type Tab = 'providers' | 'about';
+enum Tab {
+  Providers = 'providers',
+  About = 'about',
+}
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'providers', label: 'Providers' },
-  { id: 'about', label: 'About JustCode' },
+  { id: Tab.Providers, label: 'Providers' },
+  { id: Tab.About, label: 'About JustCode' },
 ];
 
 function matchesSearch(provider: WebviewProvider, query: string): boolean {
@@ -40,7 +43,7 @@ function matchesSearch(provider: WebviewProvider, query: string): boolean {
 }
 
 export function SettingsApp(): React.JSX.Element {
-  const [tab, setTab] = React.useState<Tab>('providers');
+  const [tab, setTab] = React.useState<Tab>(Tab.Providers);
   const [providers, setProviders] = React.useState<WebviewProvider[]>([]);
   const [appInfo, setAppInfo] = React.useState<SettingsAppInfo | undefined>();
 
@@ -122,7 +125,7 @@ export function SettingsApp(): React.JSX.Element {
         </nav>
 
         <div className="settings-content">
-          {tab === 'providers' ? (
+          {tab === Tab.Providers ? (
             <ProvidersTab
               providers={providers}
               onConnectViaCli={connectViaCli}
@@ -306,16 +309,26 @@ function ProviderRow({
 // Connect wizard — mirrors the CLI's api-key → base-url → connecting steps
 // ---------------------------------------------------------------------------
 
-type WizardStep = 'auth-method' | 'api-key' | 'base-url' | 'connecting';
+enum WizardStep {
+  AuthMethod = 'auth-method',
+  ApiKey = 'api-key',
+  BaseUrl = 'base-url',
+  Connecting = 'connecting',
+}
+
+enum AuthChoice {
+  OAuth = 'oauth',
+  ApiKey = 'apiKey',
+}
 
 function initialStep(provider: WebviewProvider): WizardStep {
   // Providers that support both OAuth AND API key offer an auth-method picker.
   if (provider.authMethods.includes('oauth') && provider.authMethods.includes('apiKey')) {
-    return 'auth-method';
+    return WizardStep.AuthMethod;
   }
   // All providers (including local ones) go through the API key step — it's
   // just optional for providers where apiKeyRequired is false.
-  return 'api-key';
+  return WizardStep.ApiKey;
 }
 
 function ConnectWizard({
@@ -343,8 +356,8 @@ function ConnectWizard({
   // "Cancel" on the first step (nothing to go back to), "Back" on later steps.
   const backLabel = step === first ? 'Cancel' : 'Back';
 
-  const handleAuthMethod = (method: 'oauth' | 'apiKey'): void => {
-    if (method === 'oauth') {
+  const handleAuthMethod = (method: AuthChoice): void => {
+    if (method === AuthChoice.OAuth) {
       onCancel();
       // Slight delay so the form closes before the CLI opens.
       setTimeout(
@@ -355,21 +368,21 @@ function ConnectWizard({
         50
       );
     } else {
-      setStep('api-key');
+      setStep(WizardStep.ApiKey);
     }
   };
 
-  const handleApiKeySubmit = (e: React.FormEvent): void => {
+  const handleApiKeySubmit = (e: React.FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
     if (provider.apiKeyRequired && !apiKey.trim()) {
       setError('An API key is required for this provider.');
       return;
     }
     setError(null);
-    setStep('base-url');
+    setStep(WizardStep.BaseUrl);
   };
 
-  const handleBaseUrlSubmit = (e: React.FormEvent): void => {
+  const handleBaseUrlSubmit = (e: React.FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
     const url = baseUrl.trim();
     if (!url) {
@@ -377,7 +390,7 @@ function ConnectWizard({
       return;
     }
     setError(null);
-    setStep('connecting');
+    setStep(WizardStep.Connecting);
     onTestConnect(
       provider.id,
       apiKey.trim() || undefined,
@@ -387,7 +400,7 @@ function ConnectWizard({
           onDone();
         } else {
           setError(result.error ?? 'Connection failed.');
-          setStep('base-url');
+          setStep(WizardStep.BaseUrl);
         }
       }
     );
@@ -397,10 +410,10 @@ function ConnectWizard({
     setError(null);
     if (step === first) {
       onCancel();
-    } else if (step === 'api-key') {
-      setStep('auth-method');
-    } else if (step === 'base-url') {
-      setStep('api-key');
+    } else if (step === WizardStep.ApiKey) {
+      setStep(WizardStep.AuthMethod);
+    } else if (step === WizardStep.BaseUrl) {
+      setStep(WizardStep.ApiKey);
     } else {
       onCancel();
     }
@@ -408,7 +421,7 @@ function ConnectWizard({
 
   return (
     <div className="provider-connect-wizard">
-      {step === 'auth-method' ? (
+      {step === WizardStep.AuthMethod ? (
         <div className="provider-connect-step">
           <p className="provider-connect-hint">
             How do you want to connect {provider.name}?
@@ -417,7 +430,7 @@ function ConnectWizard({
             <button
               type="button"
               className="provider-auth-option"
-              onClick={() => handleAuthMethod('apiKey')}
+              onClick={() => handleAuthMethod(AuthChoice.ApiKey)}
             >
               <span className="provider-auth-option-label">Use API key</span>
               <span className="provider-auth-option-desc">
@@ -427,7 +440,7 @@ function ConnectWizard({
             <button
               type="button"
               className="provider-auth-option"
-              onClick={() => handleAuthMethod('oauth')}
+              onClick={() => handleAuthMethod(AuthChoice.OAuth)}
             >
               <span className="provider-auth-option-label">Sign in</span>
               <span className="provider-auth-option-desc">
@@ -441,7 +454,7 @@ function ConnectWizard({
             </button>
           </div>
         </div>
-      ) : step === 'api-key' ? (
+      ) : step === WizardStep.ApiKey ? (
         <form
           className="provider-connect-step"
           onSubmit={handleApiKeySubmit}
@@ -491,7 +504,7 @@ function ConnectWizard({
             </button>
           </div>
         </form>
-      ) : step === 'base-url' ? (
+      ) : step === WizardStep.BaseUrl ? (
         <form
           className="provider-connect-step"
           onSubmit={handleBaseUrlSubmit}
@@ -554,6 +567,13 @@ function AboutTab({
   appInfo: SettingsAppInfo | undefined;
 }): React.JSX.Element {
   const name = appInfo?.name ?? 'JustCode';
+  const [confirming, setConfirming] = React.useState(false);
+
+  const handleReset = (): void => {
+    postSettingsToHost({ type: SettingsWebviewMessageType.ResetApp });
+    setConfirming(false);
+  };
+
   return (
     <div className="settings-section about-section">
       <h2 className="settings-section-title">About {name}</h2>
@@ -591,6 +611,59 @@ function AboutTab({
             </a>
           ) : null}
         </div>
+      </section>
+
+      <section className="about-card about-card-danger">
+        <h3 className="about-card-title about-card-title-danger">
+          Danger Zone
+        </h3>
+
+        {confirming ? (
+          <div className="reset-confirm">
+            <p className="reset-confirm-warning">
+              This action is irreversible.
+            </p>
+            <p className="reset-confirm-label">Resetting {name} will:</p>
+            <ul className="reset-confirm-list">
+              <li>restore config to defaults</li>
+              <li>remove all connected providers</li>
+              <li>remove all pulled models</li>
+              <li>remove all saved sessions</li>
+            </ul>
+            <div className="reset-confirm-actions">
+              <button
+                type="button"
+                className="provider-action"
+                onClick={() => setConfirming(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="provider-action reset-confirm-btn"
+                onClick={handleReset}
+              >
+                Reset everything
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="reset-row">
+            <div className="reset-row-text">
+              <span className="reset-row-label">Reset {name}</span>
+              <span className="reset-row-desc">
+                Restore defaults and remove all providers, models, and sessions.
+              </span>
+            </div>
+            <button
+              type="button"
+              className="provider-action reset-trigger-btn"
+              onClick={() => setConfirming(true)}
+            >
+              Reset…
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );

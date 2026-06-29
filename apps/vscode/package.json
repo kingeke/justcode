@@ -38,12 +38,17 @@
     "commands": [
       {
         "command": "justcode.openChat",
-        "title": "JustCode: Open Chat"
+        "title": "Open Chat"
       },
       {
         "command": "justcode.newSession",
-        "title": "JustCode: New Session",
+        "title": "New Session",
         "icon": "$(add)"
+      },
+      {
+        "command": "justcode.openSettings",
+        "title": "Settings",
+        "icon": "$(gear)"
       }
     ],
     "menus": {
@@ -51,7 +56,12 @@
         {
           "command": "justcode.newSession",
           "when": "view == justcode.chatView",
-          "group": "navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "justcode.openSettings",
+          "when": "view == justcode.chatView",
+          "group": "navigation@2"
         }
       ]
     }

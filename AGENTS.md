@@ -13,6 +13,7 @@ Always:
 - All imports must use absolute path and not relative path
 - All new changes and new files must have a test case along with it to confirm it works properly
 - Prioritize reusing enums instead of raw strings
+- Always use ENUMS instead of strings
 
 Treat full repository reads as a last resort.
 

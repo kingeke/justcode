@@ -51,6 +51,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('justcode.newSession', () => {
       provider.newSession();
+    }),
+    vscode.commands.registerCommand('justcode.openSettings', () => {
+      provider.openSettings();
     })
   );
 }

@@ -25,6 +25,7 @@ export enum SettingsWebviewMessageType {
   ConnectProvider = 'connectProvider',
   TestConnectProvider = 'testConnectProvider',
   DisconnectProvider = 'disconnectProvider',
+  ResetApp = 'resetApp',
 }
 
 /** Static product details rendered on the About tab. */
@@ -91,9 +92,14 @@ export interface SettingsDisconnectProviderMessage {
   providerId: string;
 }
 
+export interface SettingsResetAppMessage {
+  type: SettingsWebviewMessageType.ResetApp;
+}
+
 export type SettingsWebviewToHost =
   | SettingsInitMessage
   | SettingsListProvidersMessage
   | SettingsConnectProviderMessage
   | SettingsTestConnectMessage
-  | SettingsDisconnectProviderMessage;
+  | SettingsDisconnectProviderMessage
+  | SettingsResetAppMessage;

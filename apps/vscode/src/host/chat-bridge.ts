@@ -515,11 +515,13 @@ export class ChatBridge {
           updatedAt: s.updatedAt,
           messageCount: s.messageCount,
         })),
+        hasConnectedProvider: services.allProviders.length > 0,
       });
     } catch (error) {
       this.post({
         type: HostMessageType.SessionsList,
         sessions: [],
+        hasConnectedProvider: false,
       });
     }
   }

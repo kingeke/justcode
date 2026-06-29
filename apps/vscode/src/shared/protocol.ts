@@ -165,6 +165,8 @@ export interface ReadyMessage {
 export interface SessionsListMessage {
   type: HostMessageType.SessionsList;
   sessions: WebviewSessionSummary[];
+  /** True when at least one provider has credentials saved. */
+  hasConnectedProvider: boolean;
 }
 
 /** The session title was generated; updates the chat header live. */

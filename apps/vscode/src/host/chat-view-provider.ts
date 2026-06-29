@@ -74,6 +74,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     void this.bridge?.handle({ type: WebviewMessageType.NewSession });
   }
 
+  /** Reveals the Settings editor tab. */
+  public openSettings(): void {
+    this.settings.reveal();
+  }
+
   private renderHtml(webview: vscode.Webview, mediaUri: vscode.Uri): string {
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(mediaUri, 'webview.js')
