@@ -250,10 +250,16 @@ export class ChatSessionService {
     const fullToolDefinitions =
       this.toolRegistry?.list().map((tool) => tool.definition) ?? [];
     const projectInstructions = await this.loadProjectInstructions();
+    // `discover_tools` is a one-way gate per session: once the model has called
+    // it, the full tool set stays unlocked for every later turn instead of
+    // collapsing back to the discovery gateway and forcing it to re-discover.
+    const toolsDiscovered = hasDiscoveredTools(input.conversation.messages);
     // Models known not to support tools are sent chat-only from the start; the
     // tool section is also dropped from the system prompt so we don't advertise
     // tools the model can't call.
-    let toolDefinitions = initialToolDefinitions;
+    let toolDefinitions = toolsDiscovered
+      ? fullToolDefinitions
+      : initialToolDefinitions;
     let toolsEnabled =
       toolDefinitions.length > 0 &&
       !this.toolUnsupportedModels.has(input.model);
@@ -645,6 +651,19 @@ export class ChatSessionService {
       `No models are available for provider '${this.provider.providerId}'.`
     );
   }
+}
+
+/**
+ * Whether the model has already called `discover_tools` in this conversation.
+ * The call is recorded on the assistant message that requested it, so its
+ * presence anywhere in history means tools were unlocked and should stay so.
+ */
+function hasDiscoveredTools(messages: ChatMessage[]): boolean {
+  return messages.some(
+    (message) =>
+      message.role === 'assistant' &&
+      message.toolCalls?.some((call) => call.name === ToolName.DiscoverTools)
+  );
 }
 
 export async function describeTool(

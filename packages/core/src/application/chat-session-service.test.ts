@@ -907,4 +907,73 @@ describe('ChatSessionService', () => {
     expect(delegatedTool.executed).toEqual(['{"path":"a.txt","content":"hi"}']);
     expect(result.reply).toBe('All done.');
   });
+
+  it('keeps the full tool set on later turns once discover_tools has run', async () => {
+    const repository = new InMemoryConversationRepository();
+    const delegatedTool = new RecordingWriteTool();
+    const discoverTool = new DiscoverToolsTool([
+      {
+        ...delegatedTool.definition,
+        requiresApproval: delegatedTool.requiresApproval,
+      },
+    ]);
+    const seenRequests: Array<ChatRequest['tools']> = [];
+    let turn = 0;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat(request: ChatRequest): Promise<ChatResult> {
+        seenRequests.push(request.tools);
+        turn += 1;
+        // First turn discovers, every later turn just replies.
+        if (turn === 1) {
+          return {
+            content: '',
+            toolCalls: [
+              { id: 'call-discover', name: 'discover_tools', arguments: '{}' },
+            ],
+          };
+        }
+        return { content: 'Done.' };
+      },
+      async listModels() {
+        return [
+          { id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai },
+        ];
+      },
+      getDefaultModel() {
+        return 'gpt';
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry: new ToolRegistry(
+        [discoverTool, delegatedTool],
+        [
+          {
+            ...discoverTool.definition,
+            requiresApproval: discoverTool.requiresApproval,
+          },
+        ]
+      ),
+    });
+
+    const first = await service.submitMessage({
+      conversation: createConversation('session-1'),
+      model: 'gpt',
+      content: 'discover',
+    });
+
+    // Reusing the same conversation, the next turn must advertise the full set
+    // up front instead of falling back to the discovery gateway.
+    await service.submitMessage({
+      conversation: first.conversation,
+      model: 'gpt',
+      content: 'now write',
+    });
+
+    const followUpRequest = seenRequests[seenRequests.length - 1];
+    expect(followUpRequest?.map((tool) => tool.name)).toEqual([
+      'discover_tools',
+      'write_file',
+    ]);
+  });
 });
