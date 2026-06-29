@@ -3,6 +3,7 @@ import * as net from 'node:net';
 
 import * as vscode from 'vscode';
 
+import { setDebugLoggingEnabled } from '@core/application/debug-log';
 import { ChatViewProvider } from '@ext/host/chat-view-provider';
 
 /**
@@ -29,6 +30,13 @@ function hardenNetworkForBrokenIpv6(): void {
 
 export function activate(context: vscode.ExtensionContext): void {
   hardenNetworkForBrokenIpv6();
+
+  // Only write the request/response debug log (which includes auth headers) when
+  // running from source in the Extension Development Host. A packaged/installed
+  // build runs in Production mode and must never log to the user's machine.
+  setDebugLoggingEnabled(
+    context.extensionMode === vscode.ExtensionMode.Development
+  );
 
   const provider = new ChatViewProvider(context.extensionUri);
 

@@ -28,6 +28,21 @@ const DEFAULT_FILE_NAME = 'debug.log';
 // directory) must override this so logs land somewhere the user can find them.
 let baseDirectory: string | undefined;
 
+// Master switch for on-disk logging. Defaults to enabled so the CLI keeps its
+// current behavior; hosts that must not write to the user's machine in shipped
+// builds (e.g. the VSCode extension outside Development mode) turn it off. When
+// disabled, both writing and deleting are no-ops so we never touch user files.
+let loggingEnabled = true;
+
+/**
+ * Enable or disable all on-disk debug logging. The request/response logger
+ * records full auth headers, so production hosts should disable it to avoid
+ * writing secrets to the user's disk.
+ */
+export function setDebugLoggingEnabled(enabled: boolean): void {
+  loggingEnabled = enabled;
+}
+
 /** Override the directory the default `debug.log` is written to. */
 export function setDebugLogDirectory(directory: string): void {
   baseDirectory = directory;
@@ -41,6 +56,7 @@ export async function logDebug(
   value: unknown,
   options: DebugLogOptions = {}
 ): Promise<void> {
+  if (!loggingEnabled) return;
   try {
     const filePath = options.filePath ?? defaultFilePath();
     await mkdir(dirname(filePath), { recursive: true });
@@ -61,6 +77,7 @@ export async function logDebug(
 export async function deleteDebugLog(
   options: DebugLogOptions = {}
 ): Promise<void> {
+  if (!loggingEnabled) return;
   try {
     const filePath = options.filePath ?? defaultFilePath();
     await unlink(filePath);
