@@ -1,6 +1,7 @@
 import { type ProviderClient } from '@core/ports/chat-model';
 import {
   ProviderId,
+  AuthMethod,
   resolveProviderEntry,
   type OAuthCredentials,
   type ProviderCredentials,
@@ -56,7 +57,7 @@ export class ProviderRegistry {
     const existing = stored.providers?.[providerId] ?? {};
     const merged = mergeProviderConfig(stored, providerId, {
       ...existing,
-      authType: 'oauth',
+      authType: AuthMethod.OAuth,
       oauth,
     });
     await writeGlobalConfig(this.config.configDirectory, merged);

@@ -80,11 +80,22 @@ export interface WebviewModel {
   local?: boolean | undefined;
 }
 
+/** Auth methods a provider accepts; mirrors @core AuthMethod enum values. */
+export enum AuthMethod {
+  ApiKey = 'apiKey',
+  OAuth = 'oauth',
+}
+
 /**
  * How a provider authenticates, used to label it in the settings list with a
  * short badge ("API Key", "Sign-in", "Local", "Custom").
  */
-export type WebviewProviderKind = 'apiKey' | 'oauth' | 'local' | 'custom';
+export enum WebviewProviderKind {
+  ApiKey = 'apiKey',
+  OAuth = 'oauth',
+  Local = 'local',
+  Custom = 'custom',
+}
 
 /** A provider shown in the settings list, flattened from the catalog + config. */
 export interface WebviewProvider {
@@ -103,7 +114,7 @@ export interface WebviewProvider {
   /** True for providers that run locally (Ollama, LM Studio). */
   local?: boolean | undefined;
   /** Auth methods accepted; determines whether inline connect is possible. */
-  authMethods: ('apiKey' | 'oauth')[];
+  authMethods: AuthMethod[];
 }
 
 /** Before/after text for a file a tool is about to change. */

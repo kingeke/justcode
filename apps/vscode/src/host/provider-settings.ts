@@ -8,6 +8,7 @@ import {
   PROVIDERS,
   PROVIDER_BY_ID,
   ProviderId,
+  AuthMethod,
   isCustomProviderId,
   CUSTOM_PROVIDER_PREFIX,
   type ProviderCatalogEntry,
@@ -18,18 +19,31 @@ import {
   writeGlobalConfig,
   mergeProviderConfig,
 } from '@runtime/persistence/global-config';
+import { getOAuthFlow } from '@runtime/auth/oauth-flows';
+import type { OAuthLoginContext } from '@runtime/auth/oauth-flow';
 
-import type {
-  WebviewProvider,
+import {
   WebviewProviderKind,
+  type WebviewProvider,
 } from '@ext/shared/protocol';
 
-/** Maps a catalog entry's auth method to the badge kind the webview renders. */
-function providerKind(entry: ProviderCatalogEntry): WebviewProviderKind {
-  if (entry.local) return 'local';
-  const methods = entry.authMethods ?? ['apiKey'];
-  if (!methods.includes('apiKey') && methods.includes('oauth')) return 'oauth';
-  return 'apiKey';
+/** Maps a catalog entry + optional saved config to the badge the webview shows. */
+function providerKind(
+  entry: ProviderCatalogEntry,
+  saved?: ProviderConfig
+): WebviewProviderKind {
+  if (entry.local) return WebviewProviderKind.Local;
+  // For connected providers, show the method they actually used, not what's available.
+  if (saved) {
+    return saved.authType === AuthMethod.OAuth
+      ? WebviewProviderKind.OAuth
+      : WebviewProviderKind.ApiKey;
+  }
+  const methods = entry.authMethods ?? [AuthMethod.ApiKey];
+  if (!methods.includes(AuthMethod.ApiKey) && methods.includes(AuthMethod.OAuth)) {
+    return WebviewProviderKind.OAuth;
+  }
+  return WebviewProviderKind.ApiKey;
 }
 
 /**
@@ -45,17 +59,20 @@ export async function listProviders(
 
   const result: WebviewProvider[] = (
     PROVIDERS as readonly ProviderCatalogEntry[]
-  ).map((entry) => ({
-    id: entry.id,
-    name: entry.name,
-    description: entry.description,
-    connected: configured.has(entry.id),
-    kind: providerKind(entry),
-    apiKeyRequired: entry.apiKeyRequired,
-    defaultBaseUrl: entry.baseUrl,
-    local: entry.local,
-    authMethods: (entry.authMethods ?? ['apiKey']) as ('apiKey' | 'oauth')[],
-  }));
+  ).map((entry) => {
+    const saved = config.providers?.[entry.id as ProviderId];
+    return {
+      id: entry.id,
+      name: entry.name,
+      description: entry.description,
+      connected: configured.has(entry.id),
+      kind: providerKind(entry, saved),
+      apiKeyRequired: entry.apiKeyRequired,
+      defaultBaseUrl: entry.baseUrl,
+      local: entry.local,
+      authMethods: entry.authMethods ?? [AuthMethod.ApiKey],
+    };
+  });
 
   // Custom (user-added) providers aren't in the static catalog; surface each as
   // a connected entry so the user can see and disconnect it.
@@ -67,9 +84,9 @@ export async function listProviders(
       name: saved?.name ?? id.slice(CUSTOM_PROVIDER_PREFIX.length),
       description: 'Custom OpenAI-compatible provider',
       connected: true,
-      kind: 'custom',
+      kind: WebviewProviderKind.Custom,
       apiKeyRequired: false,
-      authMethods: ['apiKey'],
+      authMethods: [AuthMethod.ApiKey] as AuthMethod[],
     });
   }
 
@@ -131,6 +148,101 @@ export async function testAndConnectProvider(
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+/**
+ * Runs a provider's OAuth sign-in flow entirely inside the extension host: it
+ * opens the browser (or shows a device code), captures the redirect/code via the
+ * shared runtime flows, validates the minted token with listModels(), and
+ * persists the credentials with `authType: 'oauth'`. The interactive parts are
+ * driven through {@link context}, which the settings panel wires to the webview
+ * (browser open + status/prompt messages). Mirrors the CLI's connect-picker
+ * OAuth path so both surfaces produce identical config.
+ */
+export async function oauthConnectProvider(
+  configDir: string,
+  providerId: string,
+  context: OAuthLoginContext
+): Promise<{ success: boolean; error?: string }> {
+  const entry = PROVIDER_BY_ID[providerId as ProviderId];
+  if (!entry) {
+    return { success: false, error: `Unknown provider: ${providerId}` };
+  }
+
+  const flow = getOAuthFlow(providerId as ProviderId);
+  if (!flow) {
+    return {
+      success: false,
+      error: `OAuth sign-in is not supported for ${entry.name}.`,
+    };
+  }
+
+  try {
+    const oauthCreds = await flow.login(context);
+    if (context.signal?.aborted) {
+      return { success: false, error: 'Sign-in cancelled.' };
+    }
+
+    context.notify('Fetching available models…');
+    const client = entry.create({
+      baseUrl: oauthCreds.extra?.['endpoint'] ?? entry.baseUrl ?? '',
+      oauth: oauthCreds,
+      // At connect time return the freshly-minted token directly; the
+      // ProviderRegistry wires up the full refresh logic on subsequent starts.
+      getAccessToken: async () => oauthCreds.accessToken,
+    });
+
+    const models = await client.listModels();
+    if (context.signal?.aborted) {
+      return { success: false, error: 'Sign-in cancelled.' };
+    }
+    if (!models.length) {
+      return {
+        success: false,
+        error: `No models are available for ${entry.name}.`,
+      };
+    }
+
+    const providerConfig: ProviderConfig = {
+      authType: AuthMethod.OAuth,
+      oauth: oauthCreds,
+    };
+    const config = await readGlobalConfig(configDir);
+    const next = mergeProviderConfig(config, providerId as ProviderId, providerConfig);
+    await writeGlobalConfig(configDir, next);
+
+    return { success: true };
+  } catch (err) {
+    if (context.signal?.aborted) {
+      return { success: false, error: 'Sign-in cancelled.' };
+    }
+    return { success: false, error: describeError(err) };
+  }
+}
+
+/**
+ * Builds a user-facing message from a thrown error. Node's global fetch reports
+ * network failures as a bare "fetch failed" and tucks the real reason (DNS,
+ * TLS, proxy, refused connection) into `cause` — which the extension host hits
+ * far more than the CLI. Walk the cause chain so the surfaced message is
+ * actionable instead of opaque.
+ */
+function describeError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+
+  const parts: string[] = [err.message];
+  let cause: unknown = (err as { cause?: unknown }).cause;
+  const seen = new Set<unknown>([err]);
+  while (cause instanceof Error && !seen.has(cause)) {
+    seen.add(cause);
+    const code = (cause as { code?: string }).code;
+    parts.push(code ? `${cause.message} (${code})` : cause.message);
+    cause = (cause as { cause?: unknown }).cause;
+  }
+
+  // Drop duplicate links (fetch often wraps the same text) and join.
+  const message = [...new Set(parts)].join(': ');
+  return message || 'Sign-in failed.';
 }
 
 /**

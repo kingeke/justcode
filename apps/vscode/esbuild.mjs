@@ -38,7 +38,10 @@ const hostBuild = {
   platform: 'node',
   format: 'cjs',
   target: 'node18',
-  external: ['vscode'],
+  // `undici` / `node:undici` are left external so the bundle resolves to the
+  // version embedded in VS Code's Electron/Node runtime — required to call
+  // setGlobalDispatcher. node:undici is the reliable path on Node 18+.
+  external: ['vscode', 'undici', 'node:undici'],
 };
 
 // The webview runs in a browser context; bundle React + the UI to an IIFE and

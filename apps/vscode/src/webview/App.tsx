@@ -123,7 +123,9 @@ export function App(): React.JSX.Element {
   };
 
   const connectProvider = (): void => {
-    postToHost({ type: WebviewMessageType.ConnectProvider });
+    // Connecting (including OAuth sign-in) happens inline in the Settings tab;
+    // reveal it rather than shelling out to the CLI in a terminal.
+    postToHost({ type: WebviewMessageType.OpenSettings });
   };
 
   const openSettings = (): void => {

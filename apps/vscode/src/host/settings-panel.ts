@@ -14,6 +14,7 @@ import {
 import {
   disconnectProvider,
   listProviders,
+  oauthConnectProvider,
   testAndConnectProvider,
 } from '@ext/host/provider-settings';
 import { resetAppState } from '@runtime/persistence/reset-app-state';
@@ -34,6 +35,10 @@ const APP_INFO: SettingsAppInfo = {
  */
 export class SettingsPanel {
   private panel: vscode.WebviewPanel | undefined;
+  /** Aborts the in-progress OAuth sign-in, if any. */
+  private oauthAbort: AbortController | undefined;
+  /** Resolves the OAuth flow's pending promptInput() with the user's reply. */
+  private oauthInputResolve: ((value: string) => void) | undefined;
 
   public constructor(
     private readonly extensionUri: vscode.Uri,
@@ -75,6 +80,11 @@ export class SettingsPanel {
     });
 
     panel.onDidDispose(() => {
+      // Closing the tab orphans any running sign-in (its prompts/status have
+      // nowhere to go), so abort it.
+      this.oauthAbort?.abort();
+      this.oauthAbort = undefined;
+      this.oauthInputResolve = undefined;
       if (this.panel === panel) this.panel = undefined;
     });
 
@@ -82,6 +92,9 @@ export class SettingsPanel {
   }
 
   public dispose(): void {
+    this.oauthAbort?.abort();
+    this.oauthAbort = undefined;
+    this.oauthInputResolve = undefined;
     this.panel?.dispose();
     this.panel = undefined;
   }
@@ -118,6 +131,16 @@ export class SettingsPanel {
         }
         return;
       }
+      case SettingsWebviewMessageType.OAuthConnectProvider:
+        await this.runOAuthConnect(message.providerId);
+        return;
+      case SettingsWebviewMessageType.OAuthInput:
+        this.oauthInputResolve?.(message.value);
+        this.oauthInputResolve = undefined;
+        return;
+      case SettingsWebviewMessageType.CancelOAuth:
+        this.oauthAbort?.abort();
+        return;
       case SettingsWebviewMessageType.DisconnectProvider: {
         const removed = await disconnectProvider(
           cacheDirectory(),
@@ -133,6 +156,44 @@ export class SettingsPanel {
         await this.sendProviders();
         return;
       }
+    }
+  }
+
+  /**
+   * Drives a provider's OAuth sign-in to completion inside the extension. The
+   * runtime flow opens the browser (via {@link vscode.env.openExternal}) and
+   * captures the redirect or device code itself; we relay its status lines and
+   * any "paste this value" prompts to the webview and feed the user's reply
+   * back. Only one sign-in runs at a time — a new request aborts the previous.
+   */
+  private async runOAuthConnect(providerId: string): Promise<void> {
+    this.oauthAbort?.abort();
+    const abort = new AbortController();
+    this.oauthAbort = abort;
+    this.oauthInputResolve = undefined;
+
+    const result = await oauthConnectProvider(cacheDirectory(), providerId, {
+      openUrl: (url) =>
+        Promise.resolve(vscode.env.openExternal(vscode.Uri.parse(url))),
+      notify: (message) =>
+        this.post({ type: SettingsHostMessageType.OAuthStatus, message }),
+      promptInput: (label) =>
+        new Promise<string>((resolve) => {
+          this.oauthInputResolve = resolve;
+          this.post({ type: SettingsHostMessageType.OAuthPrompt, label });
+        }),
+      signal: abort.signal,
+    });
+
+    if (this.oauthAbort === abort) {
+      this.oauthAbort = undefined;
+      this.oauthInputResolve = undefined;
+    }
+
+    this.post({ type: SettingsHostMessageType.OAuthResult, ...result });
+    if (result.success) {
+      this.onProvidersChanged();
+      await this.sendProviders();
     }
   }
 

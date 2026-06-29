@@ -23,7 +23,10 @@ const COPILOT_HEADERS: Record<string, string> = {
 };
 
 /** How a provider can be authenticated: a pasted API key, or an OAuth sign-in. */
-export type AuthMethod = 'apiKey' | 'oauth';
+export enum AuthMethod {
+  ApiKey = 'apiKey',
+  OAuth = 'oauth',
+}
 
 /**
  * Tokens obtained from an OAuth sign-in (subscription login). Persisted next to
@@ -109,7 +112,7 @@ export const PROVIDERS = [
     apiKeyEnvVar: 'OPENAI_API_KEY',
     baseUrl: 'https://api.openai.com/v1',
     baseUrlEnvVar: 'OPENAI_BASE_URL',
-    authMethods: ['apiKey', 'oauth'],
+    authMethods: [AuthMethod.ApiKey, AuthMethod.OAuth],
     credentialsFromConfig: (config) => ({
       apiKey: config.openai.apiKey,
       // ChatGPT sign-in routes to the Codex backend (stored in oauth.extra);
@@ -150,7 +153,7 @@ export const PROVIDERS = [
     // with Claude Code") and may restrict the account. The OAuth flow code is
     // kept in @runtime/auth/anthropic-oauth in case the policy changes; to
     // re-enable, restore 'oauth' here.
-    authMethods: ['apiKey'],
+    authMethods: [AuthMethod.ApiKey],
     credentialsFromConfig: (config) => ({
       apiKey: config.anthropic.apiKey,
       baseUrl: config.anthropic.baseUrl,
@@ -171,7 +174,7 @@ export const PROVIDERS = [
     description: 'Models via a GitHub Copilot subscription (sign-in)',
     apiKeyRequired: false,
     baseUrl: 'https://api.githubcopilot.com',
-    authMethods: ['oauth'],
+    authMethods: [AuthMethod.OAuth],
     credentialsFromConfig: (config) => ({
       baseUrl: config.copilot.oauth?.extra?.endpoint ?? config.copilot.baseUrl,
       oauth: config.copilot.oauth,

@@ -1,8 +1,9 @@
 import * as React from 'react';
 
-import type {
-  WebviewProvider,
+import {
+  AuthMethod,
   WebviewProviderKind,
+  type WebviewProvider,
 } from '@ext/shared/protocol';
 import {
   SettingsHostMessageType,
@@ -17,11 +18,31 @@ import {
 import { PlusIcon } from '@ext/webview/components/Icons';
 
 const KIND_LABELS: Record<WebviewProviderKind, string> = {
-  apiKey: 'API Key',
-  oauth: 'Sign-in',
-  local: 'Local',
-  custom: 'Custom',
+  [WebviewProviderKind.ApiKey]: 'API Key',
+  [WebviewProviderKind.OAuth]: 'Sign-in',
+  [WebviewProviderKind.Local]: 'Local',
+  [WebviewProviderKind.Custom]: 'Custom',
 };
+
+/** Result shape shared by the inline connect and OAuth flows. */
+interface ConnectResult {
+  success: boolean;
+  error?: string | undefined;
+}
+
+/** Host-streamed OAuth events the active wizard listens for. */
+interface OAuthHandlers {
+  onStatus: (message: string) => void;
+  onPrompt: (label: string) => void;
+  onResult: (result: ConnectResult) => void;
+}
+
+/** OAuth controls handed down to the wizard to drive an in-extension sign-in. */
+interface OAuthControls {
+  start: (providerId: string, handlers: OAuthHandlers) => void;
+  sendInput: (value: string) => void;
+  cancel: () => void;
+}
 
 enum Tab {
   Providers = 'providers',
@@ -53,6 +74,10 @@ export function SettingsApp(): React.JSX.Element {
     ((result: { success: boolean; error?: string | undefined }) => void) | null
   >(null);
 
+  // Callbacks set by the wizard running an OAuth sign-in, so the host's
+  // streamed status/prompt/result messages reach the right form.
+  const oauthHandlersRef = React.useRef<OAuthHandlers | null>(null);
+
   React.useEffect(() => {
     const unsubscribe = onSettingsMessage((message) => {
       switch (message.type) {
@@ -67,14 +92,37 @@ export function SettingsApp(): React.JSX.Element {
           connectResultRef.current?.(message);
           connectResultRef.current = null;
           break;
+        case SettingsHostMessageType.OAuthStatus:
+          oauthHandlersRef.current?.onStatus(message.message);
+          break;
+        case SettingsHostMessageType.OAuthPrompt:
+          oauthHandlersRef.current?.onPrompt(message.label);
+          break;
+        case SettingsHostMessageType.OAuthResult:
+          oauthHandlersRef.current?.onResult(message);
+          oauthHandlersRef.current = null;
+          break;
       }
     });
     postSettingsToHost({ type: SettingsWebviewMessageType.Init });
     return unsubscribe;
   }, []);
 
-  const connectViaCli = (): void => {
-    postSettingsToHost({ type: SettingsWebviewMessageType.ConnectProvider });
+  const startOAuth = (providerId: string, handlers: OAuthHandlers): void => {
+    oauthHandlersRef.current = handlers;
+    postSettingsToHost({
+      type: SettingsWebviewMessageType.OAuthConnectProvider,
+      providerId,
+    });
+  };
+
+  const sendOAuthInput = (value: string): void => {
+    postSettingsToHost({ type: SettingsWebviewMessageType.OAuthInput, value });
+  };
+
+  const cancelOAuth = (): void => {
+    oauthHandlersRef.current = null;
+    postSettingsToHost({ type: SettingsWebviewMessageType.CancelOAuth });
   };
 
   const testConnect = (
@@ -128,7 +176,11 @@ export function SettingsApp(): React.JSX.Element {
           {tab === Tab.Providers ? (
             <ProvidersTab
               providers={providers}
-              onConnectViaCli={connectViaCli}
+              oauth={{
+                start: startOAuth,
+                sendInput: sendOAuthInput,
+                cancel: cancelOAuth,
+              }}
               onTestConnect={testConnect}
               onDisconnect={disconnect}
             />
@@ -143,17 +195,17 @@ export function SettingsApp(): React.JSX.Element {
 
 function ProvidersTab({
   providers,
-  onConnectViaCli,
+  oauth,
   onTestConnect,
   onDisconnect,
 }: {
   providers: WebviewProvider[];
-  onConnectViaCli: () => void;
+  oauth: OAuthControls;
   onTestConnect: (
     providerId: string,
     apiKey: string | undefined,
     baseUrl: string | undefined,
-    onResult: (result: { success: boolean; error?: string | undefined }) => void
+    onResult: (result: ConnectResult) => void
   ) => void;
   onDisconnect: (providerId: string) => void;
 }): React.JSX.Element {
@@ -168,7 +220,7 @@ function ProvidersTab({
   );
 
   const hasOAuthOnly = available.some(
-    (p) => p.kind === 'oauth' && !p.authMethods.includes('apiKey')
+    (p) => p.kind === WebviewProviderKind.OAuth && !p.authMethods.includes(AuthMethod.ApiKey)
   );
 
   return (
@@ -230,7 +282,7 @@ function ProvidersTab({
                     expandedId === provider.id ? null : provider.id
                   )
                 }
-                onConnectViaCli={onConnectViaCli}
+                oauth={oauth}
                 onTestConnect={onTestConnect}
               />
             ))}
@@ -246,8 +298,8 @@ function ProvidersTab({
 
       {hasOAuthOnly ? (
         <p className="settings-hint">
-          Sign-in providers (e.g. GitHub Copilot) open the JustCode CLI in a
-          terminal to complete the OAuth flow.
+          Sign-in providers (e.g. GitHub Copilot) open your browser to complete
+          the OAuth flow, then connect automatically.
         </p>
       ) : null}
     </div>
@@ -258,24 +310,20 @@ function ProviderRow({
   provider,
   expanded,
   onExpand,
-  onConnectViaCli,
+  oauth,
   onTestConnect,
 }: {
   provider: WebviewProvider;
   expanded: boolean;
   onExpand: () => void;
-  onConnectViaCli: () => void;
+  oauth: OAuthControls;
   onTestConnect: (
     providerId: string,
     apiKey: string | undefined,
     baseUrl: string | undefined,
-    onResult: (result: { success: boolean; error?: string | undefined }) => void
+    onResult: (result: ConnectResult) => void
   ) => void;
 }): React.JSX.Element {
-  // OAuth-only providers can't be connected inline (need browser flow).
-  const canInline =
-    provider.kind !== 'oauth' || provider.authMethods.includes('apiKey');
-
   return (
     <div className="provider-row-wrap">
       <div className="provider-row">
@@ -287,15 +335,16 @@ function ProviderRow({
           type="button"
           className="provider-action"
           title={expanded ? `Cancel connecting ${provider.name}` : `Connect ${provider.name}`}
-          onClick={canInline ? onExpand : onConnectViaCli}
+          onClick={onExpand}
         >
           {expanded ? 'Cancel' : <><PlusIcon size={13} /> Connect</>}
         </button>
       </div>
 
-      {expanded && canInline ? (
+      {expanded ? (
         <ConnectWizard
           provider={provider}
+          oauth={oauth}
           onTestConnect={onTestConnect}
           onDone={onExpand}
           onCancel={onExpand}
@@ -314,6 +363,7 @@ enum WizardStep {
   ApiKey = 'api-key',
   BaseUrl = 'base-url',
   Connecting = 'connecting',
+  OAuth = 'oauth',
 }
 
 enum AuthChoice {
@@ -323,8 +373,12 @@ enum AuthChoice {
 
 function initialStep(provider: WebviewProvider): WizardStep {
   // Providers that support both OAuth AND API key offer an auth-method picker.
-  if (provider.authMethods.includes('oauth') && provider.authMethods.includes('apiKey')) {
+  if (provider.authMethods.includes(AuthMethod.OAuth) && provider.authMethods.includes(AuthMethod.ApiKey)) {
     return WizardStep.AuthMethod;
+  }
+  // OAuth-only providers (e.g. GitHub Copilot) go straight to the sign-in step.
+  if (provider.authMethods.includes(AuthMethod.OAuth)) {
+    return WizardStep.OAuth;
   }
   // All providers (including local ones) go through the API key step — it's
   // just optional for providers where apiKeyRequired is false.
@@ -333,16 +387,18 @@ function initialStep(provider: WebviewProvider): WizardStep {
 
 function ConnectWizard({
   provider,
+  oauth,
   onTestConnect,
   onDone,
   onCancel,
 }: {
   provider: WebviewProvider;
+  oauth: OAuthControls;
   onTestConnect: (
     providerId: string,
     apiKey: string | undefined,
     baseUrl: string | undefined,
-    onResult: (result: { success: boolean; error?: string | undefined }) => void
+    onResult: (result: ConnectResult) => void
   ) => void;
   onDone: () => void;
   onCancel: () => void;
@@ -352,25 +408,73 @@ function ConnectWizard({
   const [apiKey, setApiKey] = React.useState('');
   const [baseUrl, setBaseUrl] = React.useState(provider.defaultBaseUrl ?? '');
   const [error, setError] = React.useState<string | null>(null);
+  // OAuth-step UI state: the host's latest status line and, when the flow needs
+  // the user to paste something, the prompt label + input value.
+  const [oauthStatus, setOauthStatus] = React.useState('');
+  const [oauthPrompt, setOauthPrompt] = React.useState<string | null>(null);
+  const [oauthInput, setOauthInput] = React.useState('');
 
   // "Cancel" on the first step (nothing to go back to), "Back" on later steps.
   const backLabel = step === first ? 'Cancel' : 'Back';
 
+  const startOAuth = (): void => {
+    setError(null);
+    setOauthStatus('Opening your browser to sign in…');
+    setOauthPrompt(null);
+    setOauthInput('');
+    setStep(WizardStep.OAuth);
+    oauth.start(provider.id, {
+      onStatus: (message) => setOauthStatus(message),
+      onPrompt: (label) => {
+        setOauthPrompt(label);
+        setOauthInput('');
+      },
+      onResult: (result) => {
+        if (result.success) {
+          onDone();
+        } else {
+          // Stay on the sign-in step and surface the error with a retry; the
+          // user can Cancel to fall back to the auth picker if there is one.
+          setError(result.error ?? 'Sign-in failed.');
+          setOauthPrompt(null);
+          setStep(WizardStep.OAuth);
+        }
+      },
+    });
+  };
+
   const handleAuthMethod = (method: AuthChoice): void => {
     if (method === AuthChoice.OAuth) {
-      onCancel();
-      // Slight delay so the form closes before the CLI opens.
-      setTimeout(
-        () =>
-          postSettingsToHost({
-            type: SettingsWebviewMessageType.ConnectProvider,
-          }),
-        50
-      );
+      startOAuth();
     } else {
       setStep(WizardStep.ApiKey);
     }
   };
+
+  const submitOAuthInput = (e: React.FormEvent<HTMLFormElement>): void => {
+    e.preventDefault();
+    if (!oauthInput.trim()) return;
+    oauth.sendInput(oauthInput.trim());
+    setOauthPrompt(null);
+    setOauthStatus('Completing sign-in…');
+  };
+
+  const cancelOAuth = (): void => {
+    oauth.cancel();
+    onCancel();
+  };
+
+  // OAuth-only providers open straight into the sign-in step; kick the flow off
+  // once on mount. The ref guard keeps StrictMode's double-invoked effect (dev)
+  // from starting two sign-ins, which would clash on the loopback redirect port.
+  const oauthStartedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (first === WizardStep.OAuth && !oauthStartedRef.current) {
+      oauthStartedRef.current = true;
+      startOAuth();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleApiKeySubmit = (e: React.FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
@@ -408,7 +512,9 @@ function ConnectWizard({
 
   const stepBack = (): void => {
     setError(null);
-    if (step === first) {
+    if (step === WizardStep.OAuth) {
+      cancelOAuth();
+    } else if (step === first) {
       onCancel();
     } else if (step === WizardStep.ApiKey) {
       setStep(WizardStep.AuthMethod);
@@ -444,7 +550,7 @@ function ConnectWizard({
             >
               <span className="provider-auth-option-label">Sign in</span>
               <span className="provider-auth-option-desc">
-                Use your subscription (opens CLI)
+                Use your subscription (opens browser)
               </span>
             </button>
           </div>
@@ -549,6 +655,84 @@ function ConnectWizard({
             </button>
           </div>
         </form>
+      ) : step === WizardStep.OAuth ? (
+        <div className="provider-connect-step">
+          {oauthPrompt ? (
+            <form
+              className="provider-connect-step"
+              onSubmit={submitOAuthInput}
+            >
+              <p className="provider-connect-hint">{oauthPrompt}</p>
+              <div className="provider-connect-field">
+                <input
+                  className="provider-connect-input"
+                  type="text"
+                  placeholder="Paste value…"
+                  value={oauthInput}
+                  onChange={(e) => setOauthInput(e.target.value)}
+                  // eslint-disable-next-line jsx-a11y/no-autofocus
+                  autoFocus
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
+              {error ? <p className="provider-connect-error">{error}</p> : null}
+              <div className="provider-connect-actions">
+                <button
+                  type="submit"
+                  className="provider-action provider-action-primary"
+                >
+                  Submit
+                </button>
+                <button
+                  type="button"
+                  className="provider-action"
+                  onClick={cancelOAuth}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : error ? (
+            <>
+              <p className="provider-connect-error">{error}</p>
+              <div className="provider-connect-actions">
+                <button
+                  type="button"
+                  className="provider-action provider-action-primary"
+                  onClick={startOAuth}
+                >
+                  Try again
+                </button>
+                <button
+                  type="button"
+                  className="provider-action"
+                  onClick={cancelOAuth}
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="provider-connect-connecting">
+                <span className="provider-connect-spinner" aria-hidden="true" />
+                <span className="provider-connect-hint">
+                  {oauthStatus || 'Waiting for sign-in…'}
+                </span>
+              </div>
+              <div className="provider-connect-actions">
+                <button
+                  type="button"
+                  className="provider-action"
+                  onClick={cancelOAuth}
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       ) : (
         <div className="provider-connect-step provider-connect-connecting">
           <span className="provider-connect-spinner" aria-hidden="true" />

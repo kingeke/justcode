@@ -10,7 +10,7 @@ import { KeyName, printableInput } from '@cli/ui/key-name.js';
 import { useKeyboard } from '@opentui/react';
 
 import { type ModelInfo, type ProviderClient } from '@core/ports/chat-model';
-import { ProviderId } from '@core/ports/provider-catalog';
+import { AuthMethod, ProviderId } from '@core/ports/provider-catalog';
 import {
   PROVIDERS,
   createCustomProviderEntry,
@@ -51,8 +51,8 @@ const AUTH_METHOD_OPTIONS = [
 function authMethodLabel(entry: ProviderConnectionInfo): string {
   const methods = (entry as ProviderConnectionInfo).authMethods;
   if (!methods) return 'api key';
-  const hasApiKey = methods.includes('apiKey');
-  const hasOAuth = methods.includes('oauth');
+  const hasApiKey = methods.includes(AuthMethod.ApiKey);
+  const hasOAuth = methods.includes(AuthMethod.OAuth);
   if (hasApiKey && hasOAuth) return 'api key · subscription';
   if (hasOAuth) return 'subscription';
   return 'api key';
@@ -256,12 +256,12 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       setError(null);
 
       const authMethods = (entry as ProviderConnectionInfo).authMethods ?? [
-        'apiKey',
+        AuthMethod.ApiKey,
       ];
-      if (authMethods.includes('oauth') && authMethods.includes('apiKey')) {
+      if (authMethods.includes(AuthMethod.OAuth) && authMethods.includes(AuthMethod.ApiKey)) {
         setAuthMethodIndex(0);
         setStep('auth-method');
-      } else if (authMethods.length === 1 && authMethods[0] === 'oauth') {
+      } else if (authMethods.length === 1 && authMethods[0] === AuthMethod.OAuth) {
         setOauthStatus('');
         setStep('oauth-connect');
       } else {
@@ -719,7 +719,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       const selectedModel = models.find((m) => m.id === modelId) ?? firstModel;
 
       const config: ProviderConfig = {
-        authType: 'oauth',
+        authType: AuthMethod.OAuth,
         oauth: oauthCreds,
       };
 

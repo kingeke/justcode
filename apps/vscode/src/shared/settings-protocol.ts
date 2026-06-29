@@ -16,6 +16,12 @@ export enum SettingsHostMessageType {
   ProvidersUpdate = 'providersUpdate',
   /** Result of a TestConnectProvider attempt. */
   ConnectResult = 'connectResult',
+  /** A progress/instruction line emitted while an OAuth sign-in is running. */
+  OAuthStatus = 'oauthStatus',
+  /** The OAuth flow needs the user to paste a value (e.g. an auth code). */
+  OAuthPrompt = 'oauthPrompt',
+  /** Final result of an OAuthConnectProvider attempt. */
+  OAuthResult = 'oauthResult',
 }
 
 /** Discriminator for messages sent from the settings webview to the host. */
@@ -24,6 +30,12 @@ export enum SettingsWebviewMessageType {
   ListProviders = 'listProviders',
   ConnectProvider = 'connectProvider',
   TestConnectProvider = 'testConnectProvider',
+  /** Run an OAuth sign-in for a provider entirely inside the extension. */
+  OAuthConnectProvider = 'oauthConnectProvider',
+  /** The user's reply to a preceding OAuthPrompt. */
+  OAuthInput = 'oauthInput',
+  /** Abort an in-progress OAuth sign-in. */
+  CancelOAuth = 'cancelOAuth',
   DisconnectProvider = 'disconnectProvider',
   ResetApp = 'resetApp',
 }
@@ -57,10 +69,32 @@ export interface SettingsConnectResultMessage {
   error?: string | undefined;
 }
 
+/** A status/instruction line shown while an OAuth sign-in is in progress. */
+export interface SettingsOAuthStatusMessage {
+  type: SettingsHostMessageType.OAuthStatus;
+  message: string;
+}
+
+/** Asks the webview to collect a value the OAuth flow needs (e.g. a code). */
+export interface SettingsOAuthPromptMessage {
+  type: SettingsHostMessageType.OAuthPrompt;
+  label: string;
+}
+
+/** Sent after OAuthConnectProvider — carries success/failure back to the UI. */
+export interface SettingsOAuthResultMessage {
+  type: SettingsHostMessageType.OAuthResult;
+  success: boolean;
+  error?: string | undefined;
+}
+
 export type SettingsHostToWebview =
   | SettingsSnapshotMessage
   | SettingsProvidersUpdateMessage
-  | SettingsConnectResultMessage;
+  | SettingsConnectResultMessage
+  | SettingsOAuthStatusMessage
+  | SettingsOAuthPromptMessage
+  | SettingsOAuthResultMessage;
 
 // --- Webview -> Host -------------------------------------------------------
 
@@ -87,6 +121,27 @@ export interface SettingsTestConnectMessage {
   baseUrl?: string | undefined;
 }
 
+/**
+ * Ask the host to run the provider's OAuth sign-in flow end-to-end (open the
+ * browser, capture the redirect/device code, mint and persist credentials). The
+ * host streams OAuthStatus/OAuthPrompt updates and finishes with OAuthResult.
+ */
+export interface SettingsOAuthConnectMessage {
+  type: SettingsWebviewMessageType.OAuthConnectProvider;
+  providerId: string;
+}
+
+/** The user's reply to a preceding OAuthPrompt. */
+export interface SettingsOAuthInputMessage {
+  type: SettingsWebviewMessageType.OAuthInput;
+  value: string;
+}
+
+/** Abort an in-progress OAuth sign-in (e.g. the user cancelled). */
+export interface SettingsCancelOAuthMessage {
+  type: SettingsWebviewMessageType.CancelOAuth;
+}
+
 export interface SettingsDisconnectProviderMessage {
   type: SettingsWebviewMessageType.DisconnectProvider;
   providerId: string;
@@ -101,5 +156,8 @@ export type SettingsWebviewToHost =
   | SettingsListProvidersMessage
   | SettingsConnectProviderMessage
   | SettingsTestConnectMessage
+  | SettingsOAuthConnectMessage
+  | SettingsOAuthInputMessage
+  | SettingsCancelOAuthMessage
   | SettingsDisconnectProviderMessage
   | SettingsResetAppMessage;

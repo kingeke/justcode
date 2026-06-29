@@ -26,6 +26,30 @@ function hardenNetworkForBrokenIpv6(): void {
   } catch {
     // Best-effort: not available on every Node version the host might ship.
   }
+  // Configure undici's global agent (which backs the built-in `fetch`) with
+  // Happy Eyeballs. net.setDefaultAutoSelectFamily() doesn't reach undici's
+  // internal connection pool, so this is the only reliable way to make
+  // `fetch()` calls — including OAuth flows and provider credential checks —
+  // fall back to IPv4 when IPv6 is advertised but has no working route.
+  // Node 18+ exposes undici under the `node:` prefix; try that first and fall
+  // back to the bare specifier so the import survives across Electron builds.
+  try {
+    type UndiciShape = {
+      setGlobalDispatcher: (d: object) => void;
+      Agent: new (opts: { connect: { autoSelectFamily: boolean } }) => object;
+    };
+    let undici: UndiciShape | undefined;
+    try { undici = require('node:undici') as UndiciShape; } catch { /* noop */ }
+    if (!undici) {
+      try { undici = require('undici') as UndiciShape; } catch { /* noop */ }
+    }
+    undici?.setGlobalDispatcher(
+      new undici.Agent({ connect: { autoSelectFamily: true } })
+    );
+  } catch {
+    // undici may not be importable in all Electron/Node runtime versions;
+    // dns.setDefaultResultOrder is the baseline fallback.
+  }
 }
 
 export function activate(context: vscode.ExtensionContext): void {
