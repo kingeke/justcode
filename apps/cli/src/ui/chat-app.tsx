@@ -538,6 +538,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     streamingBufferRef.current = '';
     contentFlushRef.current = { length: 0, atMs: 0 };
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
+    thinkingSegmentsRef.current = [];
     responseTimingRef.current = { startMs: 0, firstTokenMs: null };
     tokensPerSecondSamplesRef.current = [];
   };
@@ -590,6 +591,39 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const [messageThinking, setMessageThinking] = useState<
     Record<string, { content: string; durationMs: number }>
   >({});
+  // Completed thinking segments for the in-flight turn, in order. Each segment is
+  // committed inline (as an optimistic assistant message) the moment it ends —
+  // when a tool starts or the answer begins — so reasoning flows in place with
+  // tools and prose instead of piling into one ever-growing block at the bottom.
+  const thinkingSegmentsRef = useRef<
+    Array<{ content: string; durationMs: number }>
+  >([]);
+  // Commit the current thinking buffer as an inline block and reset it, so the
+  // next round of thinking starts fresh rather than re-rendering everything that
+  // came before. Mirrors flushStreamedText, for reasoning.
+  const flushStreamedThinking = useCallback((): void => {
+    const t = thinkingRef.current;
+    const text = t.buffer;
+    const durationMs = t.durationMs ?? (t.startMs ? Date.now() - t.startMs : 0);
+    thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
+    setStreamingThinking('');
+    setThinkingDuration(null);
+    if (!text.trim()) return;
+    thinkingSegmentsRef.current.push({ content: text, durationMs });
+    setConversation((prev) =>
+      prev
+        ? {
+            ...prev,
+            messages: [
+              ...prev.messages,
+              createMessage('assistant', '', new Date(), undefined, {
+                thinking: { content: text, durationMs },
+              }),
+            ],
+          }
+        : prev
+    );
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
   // Symbols of the file referenced by an active `@path::` mention, cached by
@@ -1705,6 +1739,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     streamingBufferRef.current = '';
     contentFlushRef.current = { length: 0, atMs: 0 };
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
+    thinkingSegmentsRef.current = [];
     responseTimingRef.current = { startMs: Date.now(), firstTokenMs: null };
     setLastStats(null);
     setInput('');
@@ -1754,10 +1789,17 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
     const onToolActivity = (event: ToolActivityEvent): void => {
       if (event.phase === 'start') {
-        // Preserve transcript order: commit the prose that streamed before this
-        // tool as an inline message, and stop the live thinking indicator.
+        // A tool call is the model's first output for turns that act before they
+        // speak (no streamed prose/thinking). Mark first-token here too, so TTFT
+        // settles instead of climbing like a stopwatch for the whole turn.
+        if (responseTimingRef.current.firstTokenMs === null) {
+          responseTimingRef.current.firstTokenMs = Date.now();
+        }
+        // Preserve transcript order: commit the reasoning and prose that
+        // streamed before this tool as inline blocks (thinking → prose → tool),
+        // so they keep their place instead of trailing the tool.
+        flushStreamedThinking();
         flushStreamedText();
-        setStreamingThinking('');
 
         const callId = event.toolCallId;
         // Stash the rendered diff (file tools) so it shows inline in place.
@@ -1874,12 +1916,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           if (responseTimingRef.current.firstTokenMs === null) {
             responseTimingRef.current.firstTokenMs = Date.now();
           }
-          if (
-            thinkingRef.current.startMs &&
-            thinkingRef.current.durationMs === null
-          ) {
-            thinkingRef.current.durationMs =
-              Date.now() - thinkingRef.current.startMs;
+          // First answer token after a thinking segment: commit that segment
+          // inline so it settles above the streaming answer instead of growing
+          // at the bottom alongside it.
+          if (thinkingRef.current.buffer) {
+            flushStreamedThinking();
           }
           streamingBufferRef.current += token;
         },
@@ -1896,28 +1937,36 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
       const endMs = Date.now();
       const timing = responseTimingRef.current;
-      // Attach the turn's thinking to the FIRST assistant message it produced,
-      // not the last: the reasoning precedes any tool calls, so anchoring it
-      // here keeps the transcript order thinking → tool use → answer.
+      // Commit any thinking still buffered (e.g. the turn ended on reasoning with
+      // no following answer token) so every segment is accounted for, then anchor
+      // each segment to the assistant message it preceded — segment i → the i-th
+      // assistant message of the turn — keeping the order thinking → tool use /
+      // answer for each round rather than dumping it all on the first message.
+      if (thinkingRef.current.buffer.trim()) {
+        thinkingSegmentsRef.current.push({
+          content: thinkingRef.current.buffer,
+          durationMs:
+            thinkingRef.current.durationMs ??
+            (thinkingRef.current.startMs
+              ? Date.now() - thinkingRef.current.startMs
+              : 0),
+        });
+      }
+      const thinkingSegments = thinkingSegmentsRef.current;
       const newMessages = result.conversation.messages.slice(
         baseConversation.messages.length
       );
-      const thinkingAnchor = newMessages.find(
+      const assistantMessages = newMessages.filter(
         (message) => message.role === 'assistant'
       );
-      const capturedThinking = thinkingRef.current.buffer;
       const capturedContent = streamingBufferRef.current;
-      const capturedDuration =
-        thinkingRef.current.durationMs ??
-        (thinkingRef.current.startMs
-          ? Date.now() - thinkingRef.current.startMs
-          : 0);
       const capturedGenerationMs = Math.max(
         endMs - (timing.firstTokenMs ?? endMs),
         0
       );
       const estimatedTurnOutputTokens = estimateTokenCount(
-        capturedThinking + capturedContent
+        thinkingSegments.map((segment) => segment.content).join('') +
+          capturedContent
       );
       const turnUsage = result.usage;
       const turnInputTokens = turnUsage?.inputTokens;
@@ -1928,6 +1977,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       clearInterval(flushInterval);
       streamingBufferRef.current = '';
       thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
+      thinkingSegmentsRef.current = [];
 
       startTransition(() => {
         setStreamingContent('');
@@ -1942,14 +1992,26 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             : { ...result.conversation, title: prev.title }
         );
         setStatus('Ready');
-        if (thinkingAnchor && capturedThinking) {
-          setMessageThinking((prev) => ({
-            ...prev,
-            [thinkingAnchor.id]: {
-              content: capturedThinking,
-              durationMs: capturedDuration,
-            },
-          }));
+        if (assistantMessages.length && thinkingSegments.length) {
+          const anchored: Record<
+            string,
+            { content: string; durationMs: number }
+          > = {};
+          thinkingSegments.forEach((segment, index) => {
+            const target =
+              assistantMessages[
+                Math.min(index, assistantMessages.length - 1)
+              ];
+            if (!target) return;
+            const existing = anchored[target.id];
+            anchored[target.id] = existing
+              ? {
+                  content: `${existing.content}\n\n${segment.content}`,
+                  durationMs: existing.durationMs + segment.durationMs,
+                }
+              : segment;
+          });
+          setMessageThinking((prev) => ({ ...prev, ...anchored }));
         }
         if (timing.firstTokenMs !== null) {
           const ttftMs = timing.firstTokenMs - timing.startMs;

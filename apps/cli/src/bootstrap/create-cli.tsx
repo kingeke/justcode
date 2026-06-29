@@ -188,6 +188,14 @@ async function runChat(options: SharedOptions): Promise<void> {
     void writeGlobalConfig(appConfig.configDirectory, currentConfig);
   };
 
+  // Point OpenTUI at our embedded, self-contained tree-sitter worker before it
+  // ever spawns one, so markdown highlights in the compiled binary (see
+  // configure-tree-sitter.ts). Must run before the first <markdown> renders.
+  const { configureTreeSitterWorker } = await import(
+    '@cli/bootstrap/configure-tree-sitter'
+  );
+  configureTreeSitterWorker();
+
   // Lazily load the OpenTUI renderer + UI so the `models` command (and unit tests
   // that import createCli) never pull the native FFI renderer into their module graph.
   const { createCliRenderer } = await import('@opentui/core');

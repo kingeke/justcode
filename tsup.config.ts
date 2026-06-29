@@ -22,7 +22,11 @@ export default defineConfig({
   // esbuild rewrites their extensionless `react-reconciler/constants` imports
   // (Node's strict ESM loader rejects extensionless specifiers; bun tolerates
   // them, which is why `npm run dev` works but the built binary did not).
-  external: ['@opentui/core'],
+  // The embedded tree-sitter worker is imported with `with { type: 'file' }`, a
+  // bun-only loader esbuild can't parse. The distributed binary is built by `bun
+  // build --compile` (build:binary), not tsup, so keep this import external here;
+  // tsup's dist/ output is not the shipped artifact.
+  external: ['@opentui/core', '@cli/generated/tree-sitter-worker.js'],
   // react / react-reconciler are CJS and use `require("react")` internally;
   // bundling them together (with @opentui/react) keeps a single React instance
   // and avoids "Dynamic require of react is not supported" in the ESM output.
