@@ -702,15 +702,8 @@ export class ChatBridge {
   }
 
   private async resetSession(): Promise<void> {
-    const services = this.services;
-    if (services && this.conversation) {
-      try {
-        await services.chatSessionService.clearSession(this.sessionId);
-      } catch {
-        // A fresh session id sidesteps a clear failure; the old file is orphaned
-        // but never read again.
-      }
-    }
+    // Start a new session without touching the existing one — it's already
+    // persisted and should remain visible in the sessions list.
     this.sessionId = randomUUID();
     this.conversation = undefined;
     this.resetMetrics();

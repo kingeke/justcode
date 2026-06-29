@@ -6,14 +6,17 @@
 
 import {
   PROVIDERS,
+  PROVIDER_BY_ID,
   ProviderId,
   isCustomProviderId,
   CUSTOM_PROVIDER_PREFIX,
   type ProviderCatalogEntry,
+  type ProviderConfig,
 } from '@core/ports/provider-catalog';
 import {
   readGlobalConfig,
   writeGlobalConfig,
+  mergeProviderConfig,
 } from '@runtime/persistence/global-config';
 
 import type {
@@ -40,12 +43,18 @@ export async function listProviders(
   const config = await readGlobalConfig(configDir);
   const configured = new Set(Object.keys(config.providers ?? {}));
 
-  const result: WebviewProvider[] = PROVIDERS.map((entry) => ({
+  const result: WebviewProvider[] = (
+    PROVIDERS as readonly ProviderCatalogEntry[]
+  ).map((entry) => ({
     id: entry.id,
     name: entry.name,
     description: entry.description,
     connected: configured.has(entry.id),
     kind: providerKind(entry),
+    apiKeyRequired: entry.apiKeyRequired,
+    defaultBaseUrl: entry.baseUrl,
+    local: entry.local,
+    authMethods: (entry.authMethods ?? ['apiKey']) as ('apiKey' | 'oauth')[],
   }));
 
   // Custom (user-added) providers aren't in the static catalog; surface each as
@@ -59,10 +68,69 @@ export async function listProviders(
       description: 'Custom OpenAI-compatible provider',
       connected: true,
       kind: 'custom',
+      apiKeyRequired: false,
+      authMethods: ['apiKey'],
     });
   }
 
   return result;
+}
+
+/**
+ * Validates credentials by instantiating the provider client and calling
+ * listModels(). If the call succeeds, persists the credentials to config and
+ * returns { success: true }. On any failure returns { success: false, error }.
+ *
+ * Mirrors the CLI's connect flow: api-key → base-url → connecting step.
+ */
+export async function testAndConnectProvider(
+  configDir: string,
+  providerId: string,
+  apiKey?: string,
+  baseUrl?: string
+): Promise<{ success: boolean; error?: string }> {
+  const entry = PROVIDER_BY_ID[providerId as ProviderId];
+  if (!entry) {
+    return { success: false, error: `Unknown provider: ${providerId}` };
+  }
+
+  const resolvedBaseUrl = baseUrl?.trim() || entry.baseUrl || '';
+
+  try {
+    const client = entry.create({
+      apiKey: apiKey?.trim() || undefined,
+      baseUrl: resolvedBaseUrl,
+    });
+
+    const models = await client.listModels();
+    if (!models.length) {
+      return {
+        success: false,
+        error: `No models are available for ${entry.name}.`,
+      };
+    }
+
+    // Persist using the same logic as the CLI: only save fields the provider
+    // actually has env-var slots for, so we don't pollute the config.
+    const providerConfig: ProviderConfig = {};
+    if (apiKey?.trim() && entry.apiKeyEnvVar) {
+      providerConfig.apiKey = apiKey.trim();
+    }
+    if (entry.baseUrlEnvVar) {
+      providerConfig.baseUrl = resolvedBaseUrl;
+    }
+
+    const config = await readGlobalConfig(configDir);
+    const next = mergeProviderConfig(config, providerId as ProviderId, providerConfig);
+    await writeGlobalConfig(configDir, next);
+
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 /**

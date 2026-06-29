@@ -11,7 +11,11 @@ import {
   type SettingsHostToWebview,
   type SettingsWebviewToHost,
 } from '@ext/shared/settings-protocol';
-import { disconnectProvider, listProviders } from '@ext/host/provider-settings';
+import {
+  disconnectProvider,
+  listProviders,
+  testAndConnectProvider,
+} from '@ext/host/provider-settings';
 
 const APP_INFO: SettingsAppInfo = {
   name: APP_NAME,
@@ -32,7 +36,7 @@ export class SettingsPanel {
 
   public constructor(
     private readonly extensionUri: vscode.Uri,
-    /** Opens the connect flow (terminal); shared with the sidebar's button. */
+    /** Opens the connect flow (terminal); used for OAuth-only providers. */
     private readonly onConnectProvider: () => void,
     /** Notifies the host that the provider set changed (connect/disconnect). */
     private readonly onProvidersChanged: () => void
@@ -96,6 +100,23 @@ export class SettingsPanel {
       case SettingsWebviewMessageType.ConnectProvider:
         this.onConnectProvider();
         return;
+      case SettingsWebviewMessageType.TestConnectProvider: {
+        const result = await testAndConnectProvider(
+          cacheDirectory(),
+          message.providerId,
+          message.apiKey,
+          message.baseUrl
+        );
+        this.post({
+          type: SettingsHostMessageType.ConnectResult,
+          ...result,
+        });
+        if (result.success) {
+          this.onProvidersChanged();
+          await this.sendProviders();
+        }
+        return;
+      }
       case SettingsWebviewMessageType.DisconnectProvider: {
         const removed = await disconnectProvider(
           cacheDirectory(),

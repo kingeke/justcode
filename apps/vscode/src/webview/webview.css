@@ -609,12 +609,22 @@ textarea:focus {
 }
 
 .chat-title {
+  flex: 1;
   font-size: 12px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   opacity: 0.85;
+}
+
+.chat-settings-btn {
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+
+.chat-settings-btn:hover {
+  opacity: 1;
 }
 
 /* --- Model picker --------------------------------------------------------- */
@@ -1251,6 +1261,174 @@ textarea:focus {
 .settings-hint a {
   color: var(--vscode-textLink-foreground, #3794ff);
   text-decoration: none;
+}
+
+/* --- Provider search ------------------------------------------------------- */
+
+.provider-search-wrap {
+  padding: 8px 12px 4px;
+}
+
+.provider-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 4px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.provider-search-input:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+/* --- Connect wizard -------------------------------------------------------- */
+
+.provider-row-wrap {
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.18));
+}
+
+.provider-row-wrap .provider-row {
+  border-bottom: none;
+}
+
+.provider-connect-wizard {
+  background: var(--vscode-editorWidget-background, rgba(127, 127, 127, 0.04));
+  border-top: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.12));
+}
+
+.provider-connect-step {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 12px 14px;
+}
+
+.provider-connect-hint {
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.7;
+  line-height: 1.4;
+}
+
+.provider-connect-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.provider-connect-label {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.provider-connect-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 4px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.provider-connect-input:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.provider-connect-error {
+  margin: 0;
+  font-size: 11px;
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.provider-connect-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Auth-method picker */
+
+.provider-auth-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.provider-auth-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.25));
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.provider-auth-option:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.1));
+}
+
+.provider-auth-option-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.provider-auth-option-desc {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+/* Connecting spinner */
+
+.provider-connect-connecting {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+}
+
+.provider-connect-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--vscode-foreground, #ccc);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Primary button */
+
+.provider-action-primary {
+  color: var(--vscode-button-foreground, #fff);
+  background: var(--vscode-button-background, #0e639c);
+  border-color: var(--vscode-button-border, transparent);
+}
+
+.provider-action-primary:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+.provider-action-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* --- About tab ------------------------------------------------------------ */

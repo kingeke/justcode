@@ -122,7 +122,6 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                 return `${m.providerName} · ${m.displayName}`;
               })()}
             </button>
-
           </div>
 
           <div className="toolbar-right">
@@ -206,62 +205,52 @@ export function Composer(props: ComposerProps): React.JSX.Element {
           {busy ? <span className="spinner" aria-label="Working" /> : null}
         </div>
 
-        {props.usage || props.stats ? (
-          <div className="statusbar-metrics">
-            {props.usage ? (
-              <span className="status-usage" title="Token usage this session">
-                <span className="metric-label">ctx </span>
+        <div className="statusbar-metrics">
+          <span className="status-usage" title="Token usage this session">
+            <span className="metric-label">ctx </span>
+            <span className="metric-value">
+              {(props?.usage?.inputTokens || 0).toLocaleString()}
+            </span>
+            <span className="metric-label"> cached </span>
+            <span className="metric-value">
+              {(props?.usage?.cachedTokens || 0).toLocaleString()}
+            </span>
+            <span className="metric-label"> new </span>
+            <span className="metric-value">
+              {Math.max(
+                (props?.usage?.inputTokens || 0) -
+                  (props?.usage?.cachedTokens || 0),
+                0
+              ).toLocaleString()}
+            </span>
+            <span className="metric-label"> out </span>
+            <span className="metric-value">
+              {(props?.usage?.outputTokens || 0).toLocaleString()}
+            </span>
+            {props?.usage && props?.usage.cost !== undefined ? (
+              <>
+                <span className="metric-label"> · $</span>
                 <span className="metric-value">
-                  {props.usage.inputTokens.toLocaleString()}
+                  {props.usage.cost.toFixed(4)}
                 </span>
-                <span className="metric-label"> cached </span>
-                <span className="metric-value">
-                  {props.usage.cachedTokens.toLocaleString()}
-                </span>
-                <span className="metric-label"> new </span>
-                <span className="metric-value">
-                  {Math.max(
-                    props.usage.inputTokens - props.usage.cachedTokens,
-                    0
-                  ).toLocaleString()}
-                </span>
-                <span className="metric-label"> out </span>
-                <span className="metric-value">
-                  {props.usage.outputTokens.toLocaleString()}
-                </span>
-                {props.usage.cost !== undefined ? (
-                  <>
-                    <span className="metric-label"> · $</span>
-                    <span className="metric-value">
-                      {props.usage.cost.toFixed(4)}
-                    </span>
-                  </>
-                ) : null}
-              </span>
-            ) : (
-              <span />
-            )}
-            {props.stats ? (
-              <span
-                className="status-stats"
-                title="Latency and throughput"
-              >
-                <span className="metric-label">TTFT </span>
-                <span className="metric-value">
-                  {formatDuration(props.stats.ttftMs)}
-                </span>
-                <span className="metric-label"> · </span>
-                <span className="metric-value">
-                  {props.stats.tokensPerSecond.toFixed(1)}
-                </span>
-                <span className="metric-label"> tok/s · AVG </span>
-                <span className="metric-value">
-                  {props.stats.avgTokensPerSecond.toFixed(1)}
-                </span>
-              </span>
+              </>
             ) : null}
-          </div>
-        ) : null}
+          </span>
+          <span className="status-stats" title="Latency and throughput">
+            <span className="metric-label">TTFT </span>
+            <span className="metric-value">
+              {formatDuration(props?.stats?.ttftMs || 0)}
+            </span>
+            <span className="metric-label"> · </span>
+            <span className="metric-value">
+              {(props?.stats?.tokensPerSecond || 0).toFixed(1)}
+            </span>
+            <span className="metric-label"> tok/s · AVG </span>
+            <span className="metric-value">
+              {(props?.stats?.avgTokensPerSecond || 0).toFixed(1)}
+            </span>
+          </span>
+        </div>
       </div>
     </div>
   );

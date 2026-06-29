@@ -14,6 +14,8 @@ export enum SettingsHostMessageType {
   Snapshot = 'snapshot',
   /** Just the provider list, after a connect/disconnect. */
   ProvidersUpdate = 'providersUpdate',
+  /** Result of a TestConnectProvider attempt. */
+  ConnectResult = 'connectResult',
 }
 
 /** Discriminator for messages sent from the settings webview to the host. */
@@ -21,6 +23,7 @@ export enum SettingsWebviewMessageType {
   Init = 'init',
   ListProviders = 'listProviders',
   ConnectProvider = 'connectProvider',
+  TestConnectProvider = 'testConnectProvider',
   DisconnectProvider = 'disconnectProvider',
 }
 
@@ -46,9 +49,17 @@ export interface SettingsProvidersUpdateMessage {
   providers: WebviewProvider[];
 }
 
+/** Sent after TestConnectProvider — carries success/failure back to the form. */
+export interface SettingsConnectResultMessage {
+  type: SettingsHostMessageType.ConnectResult;
+  success: boolean;
+  error?: string | undefined;
+}
+
 export type SettingsHostToWebview =
   | SettingsSnapshotMessage
-  | SettingsProvidersUpdateMessage;
+  | SettingsProvidersUpdateMessage
+  | SettingsConnectResultMessage;
 
 // --- Webview -> Host -------------------------------------------------------
 
@@ -64,6 +75,17 @@ export interface SettingsConnectProviderMessage {
   type: SettingsWebviewMessageType.ConnectProvider;
 }
 
+/**
+ * Ask the host to validate credentials by calling listModels(), then persist
+ * them if the connection succeeds. The host replies with ConnectResult.
+ */
+export interface SettingsTestConnectMessage {
+  type: SettingsWebviewMessageType.TestConnectProvider;
+  providerId: string;
+  apiKey?: string | undefined;
+  baseUrl?: string | undefined;
+}
+
 export interface SettingsDisconnectProviderMessage {
   type: SettingsWebviewMessageType.DisconnectProvider;
   providerId: string;
@@ -73,4 +95,5 @@ export type SettingsWebviewToHost =
   | SettingsInitMessage
   | SettingsListProvidersMessage
   | SettingsConnectProviderMessage
+  | SettingsTestConnectMessage
   | SettingsDisconnectProviderMessage;

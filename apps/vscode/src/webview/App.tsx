@@ -6,6 +6,7 @@ import {
   WebviewRole,
   type WebviewModel,
 } from '@ext/shared/protocol';
+import { CogIcon } from '@ext/webview/components/Icons';
 import { onHostMessage, postToHost } from '@ext/webview/vscode-api';
 import {
   ChatStatus,
@@ -158,7 +159,6 @@ export function App(): React.JSX.Element {
         onDelete={deleteSession}
         onClearAll={clearAllSessions}
         onNewSession={newSession}
-        onOpenSettings={openSettings}
       />
     );
   }
@@ -191,6 +191,15 @@ export function App(): React.JSX.Element {
           ← Back
         </button>
         <span className="chat-title">{state.sessionTitle ?? 'New chat'}</span>
+        <button
+          type="button"
+          className="icon-btn chat-settings-btn"
+          title="Settings"
+          aria-label="Settings"
+          onClick={openSettings}
+        >
+          <CogIcon size={15} />
+        </button>
       </div>
 
       <div

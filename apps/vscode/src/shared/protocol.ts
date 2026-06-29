@@ -94,6 +94,14 @@ export interface WebviewProvider {
   connected: boolean;
   /** Auth method, drives the badge shown next to the name. */
   kind: WebviewProviderKind;
+  /** Whether an API key is required to connect (vs optional or not needed). */
+  apiKeyRequired: boolean;
+  /** Default base URL from the catalog; pre-fills the inline connect form. */
+  defaultBaseUrl?: string | undefined;
+  /** True for providers that run locally (Ollama, LM Studio). */
+  local?: boolean | undefined;
+  /** Auth methods accepted; determines whether inline connect is possible. */
+  authMethods: ('apiKey' | 'oauth')[];
 }
 
 /** Before/after text for a file a tool is about to change. */
