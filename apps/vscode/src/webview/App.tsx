@@ -258,7 +258,7 @@ export function App(): React.JSX.Element {
                   busy={false}
                 />
               ))}
-              <MessageView message={message} />
+              <MessageView message={message} expandTools={state.expandTools} />
             </React.Fragment>
           );
         })}
@@ -284,6 +284,7 @@ export function App(): React.JSX.Element {
                     role: WebviewRole.Assistant,
                     content: item.content,
                   }}
+                  expandTools={state.expandTools}
                 />
               );
             case LiveTurnItemKind.Tool: {
@@ -317,6 +318,7 @@ export function App(): React.JSX.Element {
               role: WebviewRole.Assistant,
               content: state.streaming,
             }}
+            expandTools={state.expandTools}
           />
         ) : null}
 

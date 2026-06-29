@@ -5,8 +5,10 @@ import { renderMarkdown } from '@ext/webview/markdown';
 
 export function MessageView({
   message,
+  expandTools = false,
 }: {
   message: WebviewMessage;
+  expandTools?: boolean;
 }): React.JSX.Element {
   if (message.role === WebviewRole.Tool) {
     return (
@@ -19,7 +21,9 @@ export function MessageView({
               <span className="tool-name">{message.toolName}</span>
             ) : null}
           </div>
-          <pre className="tool-result">{message.content}</pre>
+          {expandTools ? (
+            <pre className="tool-result">{message.content}</pre>
+          ) : null}
         </div>
       </div>
     );
