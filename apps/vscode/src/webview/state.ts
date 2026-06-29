@@ -23,6 +23,40 @@ export interface ToolActivity {
   resultPreview?: string;
 }
 
+export enum LiveTurnItemKind {
+  Thinking = 'thinking',
+  Tool = 'tool',
+  Message = 'message',
+}
+
+export interface LiveThinkingItem {
+  kind: LiveTurnItemKind.Thinking;
+  id: string;
+  content: string;
+  durationMs: number;
+}
+
+export interface LiveToolItem {
+  kind: LiveTurnItemKind.Tool;
+  id: string;
+  toolCallId: string;
+}
+
+export interface LiveMessageItem {
+  kind: LiveTurnItemKind.Message;
+  id: string;
+  content: string;
+}
+
+export type LiveTurnItem = LiveThinkingItem | LiveToolItem | LiveMessageItem;
+
+let nextLiveItemId = 0;
+
+function createLiveItemId(): string {
+  nextLiveItemId += 1;
+  return `live-${nextLiveItemId}`;
+}
+
 export enum ChatStatus {
   Loading = 'loading',
   Ready = 'ready',
@@ -55,6 +89,10 @@ export interface ChatState {
   usage?: WebviewUsage | undefined;
   stats?: WebviewStats | undefined;
   error?: string | undefined;
+  /** Completed in-flight turn chunks, in the order they streamed. */
+  liveTurnItems: LiveTurnItem[];
+  /** Thinking segments from the just-completed turn, kept visible after commit. */
+  completedThinkingItems: LiveThinkingItem[];
   autoApplyWrites: boolean;
   expandTools: boolean;
   maxReadLines: number;
@@ -78,6 +116,8 @@ export const initialState: ChatState = {
   thinkingStartedAt: 0,
   streaming: '',
   tools: [],
+  liveTurnItems: [],
+  completedThinkingItems: [],
   autoApplyWrites: false,
   expandTools: false,
   maxReadLines: 200,
@@ -139,6 +179,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
         tools: [],
         approval: undefined,
         input: undefined,
+        liveTurnItems: [],
+        completedThinkingItems: [],
         error: undefined,
         usage: undefined,
         stats: undefined,
@@ -183,19 +225,20 @@ export function reducer(state: ChatState, action: Action): ChatState {
         thinkingStartedAt: 0,
         streaming: '',
         tools: [],
+        liveTurnItems: [],
+        completedThinkingItems: [],
         error: undefined,
       };
 
-    case HostMessageType.Token:
-      // First regular token after thinking — stop the thinking timer.
+    case HostMessageType.Token: {
+      // First answer token after thinking: commit that thinking segment inline so
+      // it settles above the streaming answer instead of growing in one block.
+      const nextState = flushThinking(state);
       return {
-        ...state,
-        streaming: state.streaming + action.token,
-        thinkingDurationMs:
-          state.thinkingStartedAt > 0 && state.thinkingDurationMs === 0
-            ? Date.now() - state.thinkingStartedAt
-            : state.thinkingDurationMs,
+        ...nextState,
+        streaming: nextState.streaming + action.token,
       };
+    }
 
     case HostMessageType.Thinking:
       return {
@@ -205,8 +248,21 @@ export function reducer(state: ChatState, action: Action): ChatState {
           state.thinkingStartedAt === 0 ? Date.now() : state.thinkingStartedAt,
       };
 
-    case HostMessageType.ToolActivity:
-      return { ...state, tools: applyToolActivity(state.tools, action) };
+    case HostMessageType.ToolActivity: {
+      const flushedState =
+        action.phase === ToolPhase.Start
+          ? flushStreaming(flushThinking(state))
+          : state;
+      const tools = applyToolActivity(flushedState.tools, action);
+      return {
+        ...flushedState,
+        tools,
+        liveTurnItems:
+          action.phase === ToolPhase.Start
+            ? appendToolItem(flushedState.liveTurnItems, action.toolCallId)
+            : flushedState.liveTurnItems,
+      };
+    }
 
     case HostMessageType.ApprovalRequest:
       return { ...state, approval: action };
@@ -223,19 +279,30 @@ export function reducer(state: ChatState, action: Action): ChatState {
     case HostMessageType.UsageUpdate:
       return { ...state, usage: action.usage };
 
-    case HostMessageType.TurnComplete:
+    case HostMessageType.TurnComplete: {
+      const completedState = flushThinking(state);
       return {
-        ...state,
+        ...completedState,
         messages: action.messages,
         usage: action.usage ?? state.usage,
         stats: action.stats ?? state.stats,
         busy: false,
-        // Keep thinking content visible after the turn; cleared on next submit.
+        completedThinkingItems: completedState.liveTurnItems.filter(
+          (item): item is LiveThinkingItem =>
+            item.kind === LiveTurnItemKind.Thinking
+        ),
+        // The authoritative message/tool transcript comes from the host after
+        // commit; keep only completed thinking visible until the next submit.
+        thinking: '',
+        thinkingDurationMs: 0,
+        thinkingStartedAt: 0,
         streaming: '',
         tools: [],
+        liveTurnItems: [],
         approval: undefined,
         input: undefined,
       };
+    }
 
     case HostMessageType.Error:
       return {
@@ -280,6 +347,60 @@ export function reducer(state: ChatState, action: Action): ChatState {
     default:
       return state;
   }
+}
+
+function flushThinking(state: ChatState): ChatState {
+  if (!state.thinking.trim()) return state;
+
+  const durationMs =
+    state.thinkingDurationMs > 0
+      ? state.thinkingDurationMs
+      : state.thinkingStartedAt > 0
+        ? Date.now() - state.thinkingStartedAt
+        : 0;
+
+  return {
+    ...state,
+    liveTurnItems: [
+      ...state.liveTurnItems,
+      {
+        kind: LiveTurnItemKind.Thinking,
+        id: createLiveItemId(),
+        content: state.thinking,
+        durationMs,
+      },
+    ],
+    thinking: '',
+    thinkingDurationMs: 0,
+    thinkingStartedAt: 0,
+  };
+}
+
+function flushStreaming(state: ChatState): ChatState {
+  if (!state.streaming.trim()) return state;
+
+  return {
+    ...state,
+    liveTurnItems: [
+      ...state.liveTurnItems,
+      {
+        kind: LiveTurnItemKind.Message,
+        id: createLiveItemId(),
+        content: state.streaming,
+      },
+    ],
+    streaming: '',
+  };
+}
+
+function appendToolItem(
+  items: LiveTurnItem[],
+  toolCallId: string
+): LiveTurnItem[] {
+  return [
+    ...items,
+    { kind: LiveTurnItemKind.Tool, id: createLiveItemId(), toolCallId },
+  ];
 }
 
 function applyToolActivity(

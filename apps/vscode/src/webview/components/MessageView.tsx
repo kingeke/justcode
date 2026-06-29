@@ -10,8 +10,17 @@ export function MessageView({
 }): React.JSX.Element {
   if (message.role === WebviewRole.Tool) {
     return (
-      <div className="msg msg-tool">
-        <pre className="msg-content">{message.content}</pre>
+      <div className="tools tools-history">
+        <div className="tool tool-done">
+          <div className="tool-head">
+            <span className="tool-status">✓</span>
+            <span className="tool-title">Tool result</span>
+            {message.toolName ? (
+              <span className="tool-name">{message.toolName}</span>
+            ) : null}
+          </div>
+          <pre className="tool-result">{message.content}</pre>
+        </div>
       </div>
     );
   }

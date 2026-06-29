@@ -804,7 +804,13 @@ function toWebviewMessages(conversation: Conversation): WebviewMessage[] {
   const result: WebviewMessage[] = [];
   for (const message of conversation.messages) {
     if (message.role === 'system') continue;
-    if (message.role === 'assistant' && !message.content.trim()) continue;
+    if (
+      message.role === 'assistant' &&
+      !message.content.trim() &&
+      !message.thinking
+    ) {
+      continue;
+    }
     result.push({
       id: message.id,
       role: toWebviewRole(message.role),
@@ -812,6 +818,7 @@ function toWebviewMessages(conversation: Conversation): WebviewMessage[] {
       ...(message.role === 'tool' && message.name
         ? { toolName: message.name }
         : {}),
+      ...(message.thinking ? { thinking: message.thinking } : {}),
     });
   }
   return result;

@@ -139,6 +139,11 @@ export interface WebviewMessage {
   content: string;
   /** Present on tool messages, names the tool that produced the result. */
   toolName?: string;
+  /** Persisted assistant reasoning/thinking, when the provider streamed it. */
+  thinking?: {
+    content: string;
+    durationMs: number;
+  };
 }
 
 export interface WebviewUsage {

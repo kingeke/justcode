@@ -248,6 +248,46 @@ describe('ChatSessionService', () => {
     expect(repository.conversation.messages).toHaveLength(2);
   });
 
+  it('persists assistant thinking with the assistant message', async () => {
+    const repository = new InMemoryConversationRepository();
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat({ onThinkingToken }): Promise<ChatResult> {
+        onThinkingToken?.('Thinking');
+        onThinkingToken?.(' hard');
+        return { content: 'Final answer.' };
+      },
+      async listModels() {
+        return [
+          { id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai },
+        ];
+      },
+      getDefaultModel() {
+        return 'gpt';
+      },
+    };
+    const service = new ChatSessionService(repository, provider);
+
+    const startedSession = await service.startSession({
+      sessionId: 'session-1',
+    });
+    const streamedThinking: string[] = [];
+    const result = await service.submitMessage({
+      conversation: startedSession.conversation,
+      model: startedSession.activeModel,
+      content: 'Hello',
+      onThinkingToken: (token) => streamedThinking.push(token),
+    });
+
+    expect(streamedThinking).toEqual(['Thinking', ' hard']);
+    expect(result.conversation.messages[1]?.thinking?.content).toBe(
+      'Thinking hard'
+    );
+    expect(repository.conversation.messages[1]?.thinking?.content).toBe(
+      'Thinking hard'
+    );
+  });
+
   it('emits per-step usage via onUsage as the turn progresses', async () => {
     const repository = new InMemoryConversationRepository();
     const toolRegistry = new ToolRegistry([new RecordingWriteTool()]);

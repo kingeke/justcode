@@ -9,6 +9,7 @@ import {
 import { onHostMessage, postToHost } from '@ext/webview/vscode-api';
 import {
   ChatStatus,
+  LiveTurnItemKind,
   LocalActionType,
   initialState,
   reducer,
@@ -234,19 +235,70 @@ export function App(): React.JSX.Element {
           const isLastMsg = index === state.messages.length - 1;
           const isLastAssistant =
             !state.busy && isLastMsg && message.role === WebviewRole.Assistant;
+          const thinkingItems =
+            message.role === WebviewRole.Assistant && message.thinking
+              ? [
+                  {
+                    id: `${message.id}-thinking`,
+                    content: message.thinking.content,
+                    durationMs: message.thinking.durationMs,
+                  },
+                ]
+              : isLastAssistant
+                ? state.completedThinkingItems
+                : [];
           return (
             <React.Fragment key={message.id}>
-              {isLastAssistant && state.thinking ? (
+              {thinkingItems.map((item) => (
                 <ThinkingBlock
-                  thinking={state.thinking}
-                  durationMs={state.thinkingDurationMs}
+                  key={item.id}
+                  thinking={item.content}
+                  durationMs={item.durationMs}
                   collapsed={state.thinkingCollapsed}
                   busy={false}
                 />
-              ) : null}
+              ))}
               <MessageView message={message} />
             </React.Fragment>
           );
+        })}
+
+        {state.liveTurnItems.map((item) => {
+          switch (item.kind) {
+            case LiveTurnItemKind.Thinking:
+              return (
+                <ThinkingBlock
+                  key={item.id}
+                  thinking={item.content}
+                  durationMs={item.durationMs}
+                  collapsed={state.thinkingCollapsed}
+                  busy={false}
+                />
+              );
+            case LiveTurnItemKind.Message:
+              return (
+                <MessageView
+                  key={item.id}
+                  message={{
+                    id: item.id,
+                    role: WebviewRole.Assistant,
+                    content: item.content,
+                  }}
+                />
+              );
+            case LiveTurnItemKind.Tool: {
+              const tool = state.tools.find(
+                (entry) => entry.toolCallId === item.toolCallId
+              );
+              return tool ? (
+                <ToolActivityView
+                  key={item.id}
+                  tools={[tool]}
+                  expandTools={state.expandTools}
+                />
+              ) : null;
+            }
+          }
         })}
 
         {state.busy && state.thinking ? (
@@ -257,8 +309,6 @@ export function App(): React.JSX.Element {
             busy={true}
           />
         ) : null}
-
-        <ToolActivityView tools={state.tools} expandTools={state.expandTools} />
 
         {state.busy && state.streaming ? (
           <MessageView

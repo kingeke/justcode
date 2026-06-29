@@ -12,6 +12,7 @@ export default defineConfig({
       '@core': resolve(rootDir, 'packages/core/src'),
       '@providers': resolve(rootDir, 'packages/providers/src'),
       '@runtime': resolve(rootDir, 'packages/runtime/src'),
+      '@ext': resolve(rootDir, 'apps/vscode/src'),
     },
   },
   test: {

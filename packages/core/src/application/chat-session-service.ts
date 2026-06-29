@@ -308,6 +308,14 @@ export class ChatSessionService {
       );
 
       let response;
+      let thinkingContent = '';
+      let thinkingStartedAt = 0;
+      const onThinkingToken = (token: string): void => {
+        if (thinkingStartedAt === 0) thinkingStartedAt = Date.now();
+        thinkingContent += token;
+        input.onThinkingToken?.(token);
+      };
+
       try {
         response = await this.provider.sendChat({
           model: input.model,
@@ -317,9 +325,7 @@ export class ChatSessionService {
             : {}),
           ...(toolsEnabled ? { tools: toolDefinitions } : {}),
           ...(input.onToken ? { onToken: input.onToken } : {}),
-          ...(input.onThinkingToken
-            ? { onThinkingToken: input.onThinkingToken }
-            : {}),
+          onThinkingToken,
           ...(input.signal ? { signal: input.signal } : {}),
         });
       } catch (error) {
@@ -335,6 +341,14 @@ export class ChatSessionService {
 
       throwIfAborted(input.signal);
 
+      const thinking = thinkingContent.trim()
+        ? {
+            content: thinkingContent,
+            durationMs:
+              thinkingStartedAt > 0 ? Date.now() - thinkingStartedAt : 0,
+          }
+        : undefined;
+
       if (response.usage) {
         usage = usage ? sumUsage(usage, response.usage) : response.usage;
         // Surface this step's usage immediately so the UI's token/cost metrics
@@ -348,13 +362,18 @@ export class ChatSessionService {
       }
 
       if (toolCalls.length === 0) {
-        working.push(createMessage('assistant', response.content));
+        working.push(
+          createMessage('assistant', response.content, new Date(), undefined, {
+            ...(thinking ? { thinking } : {}),
+          })
+        );
         break;
       }
 
       working.push(
         createMessage('assistant', response.content, new Date(), undefined, {
           toolCalls,
+          ...(thinking ? { thinking } : {}),
         })
       );
 
