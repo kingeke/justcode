@@ -70,6 +70,7 @@ export class ChatBridge {
   private maxReadLines = DEFAULT_MAX_READ_LINES;
   // 0 means "off" — the full conversation is sent without trimming.
   private maxHistoryMessages = DEFAULT_MAX_HISTORY_MESSAGES;
+  private thinkingCollapsed = false;
   // Cumulative token usage across the session, mirroring the CLI's metrics
   // footer (ctx / cached / new / out / cost). Reset whenever the conversation is.
   private cumulativeUsage: Required<WebviewUsage> = {
@@ -166,6 +167,9 @@ export class ChatBridge {
       case WebviewMessageType.SetHistoryLimit:
         await this.setHistoryLimit(message.count);
         return;
+      case WebviewMessageType.ToggleThinkingCollapsed:
+        await this.toggleThinkingCollapsed();
+        return;
     }
   }
 
@@ -196,6 +200,7 @@ export class ChatBridge {
       globalConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES;
     this.maxHistoryMessages =
       globalConfig.cache?.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES;
+    this.thinkingCollapsed = globalConfig.thinkingCollapsed ?? false;
 
     let services: RuntimeServices;
     try {
@@ -212,6 +217,7 @@ export class ChatBridge {
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
+        thinkingCollapsed: this.thinkingCollapsed,
       });
       return;
     }
@@ -235,6 +241,7 @@ export class ChatBridge {
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
+        thinkingCollapsed: this.thinkingCollapsed,
       });
       return;
     }
@@ -277,6 +284,7 @@ export class ChatBridge {
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
+        thinkingCollapsed: this.thinkingCollapsed,
         ...(session.conversation.title !== undefined
           ? { sessionTitle: session.conversation.title }
           : {}),
@@ -295,6 +303,7 @@ export class ChatBridge {
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
+        thinkingCollapsed: this.thinkingCollapsed,
       });
     }
   }
@@ -691,6 +700,16 @@ export class ChatBridge {
     await writeGlobalConfig(configDir, {
       ...config,
       cache: { ...config.cache, maxHistoryMessages: count },
+    });
+  }
+
+  private async toggleThinkingCollapsed(): Promise<void> {
+    this.thinkingCollapsed = !this.thinkingCollapsed;
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      thinkingCollapsed: this.thinkingCollapsed,
     });
   }
 

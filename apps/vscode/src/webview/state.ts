@@ -44,6 +44,10 @@ export interface ChatState {
   messages: WebviewMessage[];
   busy: boolean;
   thinking: string;
+  /** Milliseconds the model spent thinking; 0 while thinking is in progress or unknown. */
+  thinkingDurationMs: number;
+  /** Timestamp (Date.now()) when the first thinking token arrived this turn. */
+  thinkingStartedAt: number;
   streaming: string;
   tools: ToolActivity[];
   approval?: ApprovalRequestMessage | undefined;
@@ -56,6 +60,8 @@ export interface ChatState {
   maxReadLines: number;
   /** Recent messages sent to the model per request; 0 means "off" (send all). */
   maxHistoryMessages: number;
+  /** When true, thinking blocks start collapsed (user must click to expand). */
+  thinkingCollapsed: boolean;
   sessionTitle?: string | undefined;
 }
 
@@ -68,12 +74,15 @@ export const initialState: ChatState = {
   messages: [],
   busy: false,
   thinking: '',
+  thinkingDurationMs: 0,
+  thinkingStartedAt: 0,
   streaming: '',
   tools: [],
   autoApplyWrites: false,
   expandTools: false,
   maxReadLines: 200,
   maxHistoryMessages: 50,
+  thinkingCollapsed: false,
 };
 
 /** Local-only actions, distinct from host messages, for optimistic UI updates. */
@@ -84,6 +93,7 @@ export enum LocalActionType {
   SelectModel = 'selectModel',
   ToggleAutoWrites = 'toggleAutoWrites',
   ToggleExpandTools = 'toggleExpandTools',
+  ToggleThinkingCollapsed = 'toggleThinkingCollapsed',
   SetReadLimit = 'setReadLimit',
   SetHistoryLimit = 'setHistoryLimit',
   SetView = 'setView',
@@ -97,6 +107,7 @@ export type LocalAction =
   | { type: LocalActionType.SelectModel; modelId: string; providerId: string }
   | { type: LocalActionType.ToggleAutoWrites }
   | { type: LocalActionType.ToggleExpandTools }
+  | { type: LocalActionType.ToggleThinkingCollapsed }
   | { type: LocalActionType.SetReadLimit; lines: number }
   | { type: LocalActionType.SetHistoryLimit; count: number }
   | { type: LocalActionType.SetView; view: ChatView }
@@ -135,6 +146,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         expandTools: action.expandTools,
         maxReadLines: action.maxReadLines,
         maxHistoryMessages: action.maxHistoryMessages,
+        thinkingCollapsed: action.thinkingCollapsed,
         sessionTitle: action.sessionTitle,
       };
 
@@ -167,16 +179,31 @@ export function reducer(state: ChatState, action: Action): ChatState {
         ],
         busy: true,
         thinking: '',
+        thinkingDurationMs: 0,
+        thinkingStartedAt: 0,
         streaming: '',
         tools: [],
         error: undefined,
       };
 
     case HostMessageType.Token:
-      return { ...state, streaming: state.streaming + action.token };
+      // First regular token after thinking — stop the thinking timer.
+      return {
+        ...state,
+        streaming: state.streaming + action.token,
+        thinkingDurationMs:
+          state.thinkingStartedAt > 0 && state.thinkingDurationMs === 0
+            ? Date.now() - state.thinkingStartedAt
+            : state.thinkingDurationMs,
+      };
 
     case HostMessageType.Thinking:
-      return { ...state, thinking: state.thinking + action.token };
+      return {
+        ...state,
+        thinking: state.thinking + action.token,
+        thinkingStartedAt:
+          state.thinkingStartedAt === 0 ? Date.now() : state.thinkingStartedAt,
+      };
 
     case HostMessageType.ToolActivity:
       return { ...state, tools: applyToolActivity(state.tools, action) };
@@ -203,7 +230,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         usage: action.usage ?? state.usage,
         stats: action.stats ?? state.stats,
         busy: false,
-        thinking: '',
+        // Keep thinking content visible after the turn; cleared on next submit.
         streaming: '',
         tools: [],
         approval: undefined,
@@ -231,6 +258,9 @@ export function reducer(state: ChatState, action: Action): ChatState {
 
     case LocalActionType.ToggleExpandTools:
       return { ...state, expandTools: !state.expandTools };
+
+    case LocalActionType.ToggleThinkingCollapsed:
+      return { ...state, thinkingCollapsed: !state.thinkingCollapsed };
 
     case LocalActionType.SetReadLimit:
       return { ...state, maxReadLines: action.lines };

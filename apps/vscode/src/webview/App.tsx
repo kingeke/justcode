@@ -144,6 +144,11 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.ToggleExpandTools });
   };
 
+  const toggleThinkingCollapsed = (): void => {
+    dispatch({ type: LocalActionType.ToggleThinkingCollapsed });
+    postToHost({ type: WebviewMessageType.ToggleThinkingCollapsed });
+  };
+
   const setReadLimit = (lines: number): void => {
     dispatch({ type: LocalActionType.SetReadLimit, lines });
     postToHost({ type: WebviewMessageType.SetReadLimit, lines });
@@ -225,15 +230,32 @@ export function App(): React.JSX.Element {
       >
         {state.notice ? <div className="notice">{state.notice}</div> : null}
 
-        {state.messages.map((message) => (
-          <MessageView key={message.id} message={message} />
-        ))}
+        {state.messages.map((message, index) => {
+          const isLastMsg = index === state.messages.length - 1;
+          const isLastAssistant =
+            !state.busy && isLastMsg && message.role === WebviewRole.Assistant;
+          return (
+            <React.Fragment key={message.id}>
+              {isLastAssistant && state.thinking ? (
+                <ThinkingBlock
+                  thinking={state.thinking}
+                  durationMs={state.thinkingDurationMs}
+                  collapsed={state.thinkingCollapsed}
+                  busy={false}
+                />
+              ) : null}
+              <MessageView message={message} />
+            </React.Fragment>
+          );
+        })}
 
         {state.busy && state.thinking ? (
-          <div className="thinking">
-            <div className="thinking-label">Thinking</div>
-            <pre className="thinking-content">{state.thinking}</pre>
-          </div>
+          <ThinkingBlock
+            thinking={state.thinking}
+            durationMs={state.thinkingDurationMs}
+            collapsed={false}
+            busy={true}
+          />
         ) : null}
 
         <ToolActivityView tools={state.tools} expandTools={state.expandTools} />
@@ -290,11 +312,54 @@ export function App(): React.JSX.Element {
         onCancel={cancel}
         onNewSession={newSession}
         onOpenModelPicker={openModelPicker}
+        thinkingCollapsed={state.thinkingCollapsed}
         onToggleAutoWrites={toggleAutoWrites}
         onToggleExpandTools={toggleExpandTools}
+        onToggleThinkingCollapsed={toggleThinkingCollapsed}
         onSetReadLimit={setReadLimit}
         onSetHistoryLimit={setHistoryLimit}
       />
     </div>
   );
+}
+
+function ThinkingBlock({
+  thinking,
+  durationMs,
+  collapsed,
+  busy,
+}: {
+  thinking: string;
+  durationMs: number;
+  collapsed: boolean;
+  busy: boolean;
+}): React.JSX.Element {
+  const label = busy
+    ? 'Thinking…'
+    : durationMs > 0
+      ? `Thought for ${formatDuration(durationMs)}`
+      : 'Thought';
+
+  if (busy) {
+    return (
+      <div className="thinking">
+        <div className="thinking-label">{label}</div>
+        <pre className="thinking-content">{thinking}</pre>
+      </div>
+    );
+  }
+
+  return (
+    <details className="thinking thinking-done" open={!collapsed}>
+      <summary className="thinking-label">{label}</summary>
+      <pre className="thinking-content">{thinking}</pre>
+    </details>
+  );
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${Math.round(s * 10) / 10}s`;
+  return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
 }

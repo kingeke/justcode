@@ -38,6 +38,7 @@ export enum WebviewMessageType {
   ToggleExpandTools = 'toggleExpandTools',
   SetReadLimit = 'setReadLimit',
   SetHistoryLimit = 'setHistoryLimit',
+  ToggleThinkingCollapsed = 'toggleThinkingCollapsed',
   ListSessions = 'listSessions',
   OpenSession = 'openSession',
   DeleteSession = 'deleteSession',
@@ -173,6 +174,8 @@ export interface ReadyMessage {
   maxReadLines: number;
   /** Recent messages sent to the model per request; 0 means "off" (send all). */
   maxHistoryMessages: number;
+  /** When true, thinking blocks start collapsed so the user has to click to expand. */
+  thinkingCollapsed: boolean;
   sessionTitle?: string | undefined;
 }
 
@@ -387,6 +390,11 @@ export interface SetHistoryLimitMessage {
   count: number;
 }
 
+/** The user toggled whether thinking blocks start collapsed. */
+export interface ToggleThinkingCollapsedMessage {
+  type: WebviewMessageType.ToggleThinkingCollapsed;
+}
+
 export type WebviewToHost =
   | InitMessage
   | SubmitMessage
@@ -405,4 +413,5 @@ export type WebviewToHost =
   | ToggleAutoWritesMessage
   | ToggleExpandToolsMessage
   | SetReadLimitMessage
-  | SetHistoryLimitMessage;
+  | SetHistoryLimitMessage
+  | ToggleThinkingCollapsedMessage;

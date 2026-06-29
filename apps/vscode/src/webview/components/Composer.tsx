@@ -7,9 +7,9 @@ import type {
   WebviewUsage,
 } from '@ext/shared/protocol';
 import {
-  CodeIcon,
   PlusIcon,
   SendIcon,
+  SlidersIcon,
   StopIcon,
 } from '@ext/webview/components/Icons';
 
@@ -35,6 +35,9 @@ export interface ComposerProps {
   onSetReadLimit: (lines: number) => void;
   /** Pass 0 to turn trimming off (send the whole conversation). */
   onSetHistoryLimit: (count: number) => void;
+  /** When true, thinking blocks start collapsed. */
+  thinkingCollapsed: boolean;
+  onToggleThinkingCollapsed: () => void;
 }
 
 /**
@@ -46,10 +49,27 @@ export interface ComposerProps {
 export function Composer(props: ComposerProps): React.JSX.Element {
   const { busy, disabled } = props;
   const [value, setValue] = React.useState('');
-  const [editingReadLimit, setEditingReadLimit] = React.useState(false);
+  const [showSettings, setShowSettings] = React.useState(false);
   const [readLimitDraft, setReadLimitDraft] = React.useState('');
-  const [editingHistoryLimit, setEditingHistoryLimit] = React.useState(false);
+  const [editingReadLimit, setEditingReadLimit] = React.useState(false);
   const [historyLimitDraft, setHistoryLimitDraft] = React.useState('');
+  const [editingHistoryLimit, setEditingHistoryLimit] = React.useState(false);
+  const settingsRef = React.useRef<HTMLDivElement>(null);
+
+  // Close the settings popup when clicking outside it.
+  React.useEffect(() => {
+    if (!showSettings) return;
+    const onPointerDown = (e: PointerEvent): void => {
+      if (
+        settingsRef.current &&
+        !settingsRef.current.contains(e.target as Node)
+      ) {
+        setShowSettings(false);
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [showSettings]);
 
   const submit = (): void => {
     const trimmed = value.trim();
@@ -153,6 +173,132 @@ export function Composer(props: ComposerProps): React.JSX.Element {
           </div>
 
           <div className="toolbar-right">
+            <div className="settings-popup-anchor" ref={settingsRef}>
+              {showSettings ? (
+                <div className="settings-popup">
+                  <div className="settings-popup-row">
+                    <span className="settings-popup-label">Show thinking</span>
+                    <button
+                      type="button"
+                      className={`toggle-btn ${!props.thinkingCollapsed ? 'toggle-on' : ''}`}
+                      title={
+                        props.thinkingCollapsed
+                          ? 'Collapsed — click to expand by default'
+                          : 'Expanded — click to collapse by default'
+                      }
+                      onClick={props.onToggleThinkingCollapsed}
+                      aria-pressed={!props.thinkingCollapsed}
+                    >
+                      <span className="toggle-knob" />
+                    </button>
+                  </div>
+                  <div className="settings-popup-row">
+                    <span className="settings-popup-label">Auto writes</span>
+                    <button
+                      type="button"
+                      className={`toggle-btn ${props.autoApplyWrites ? 'toggle-on' : ''}`}
+                      title={
+                        props.autoApplyWrites
+                          ? 'On — click to disable'
+                          : 'Off — click to enable'
+                      }
+                      onClick={props.onToggleAutoWrites}
+                      aria-pressed={props.autoApplyWrites}
+                    >
+                      <span className="toggle-knob" />
+                    </button>
+                  </div>
+                  <div className="settings-popup-row">
+                    <span className="settings-popup-label">
+                      Expand tool details
+                    </span>
+                    <button
+                      type="button"
+                      className={`toggle-btn ${props.expandTools ? 'toggle-on' : ''}`}
+                      title={
+                        props.expandTools
+                          ? 'On — click to collapse'
+                          : 'Off — click to expand'
+                      }
+                      onClick={props.onToggleExpandTools}
+                      aria-pressed={props.expandTools}
+                    >
+                      <span className="toggle-knob" />
+                    </button>
+                  </div>
+                  <div className="settings-popup-row">
+                    <span className="settings-popup-label">Max file read</span>
+                    {editingReadLimit ? (
+                      <input
+                        className="settings-popup-input"
+                        type="number"
+                        min={1}
+                        value={readLimitDraft}
+                        // eslint-disable-next-line jsx-a11y/no-autofocus
+                        autoFocus
+                        onChange={(e) => setReadLimitDraft(e.target.value)}
+                        onBlur={commitReadLimit}
+                        onKeyDown={onReadLimitKeyDown}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="settings-popup-value-btn"
+                        onClick={() => {
+                          setReadLimitDraft(String(props.maxReadLines));
+                          setEditingReadLimit(true);
+                        }}
+                      >
+                        {props.maxReadLines} lines
+                      </button>
+                    )}
+                  </div>
+                  <div className="settings-popup-row">
+                    <span className="settings-popup-label">History</span>
+                    {editingHistoryLimit ? (
+                      <input
+                        className="settings-popup-input"
+                        type="number"
+                        min={0}
+                        value={historyLimitDraft}
+                        // eslint-disable-next-line jsx-a11y/no-autofocus
+                        autoFocus
+                        onChange={(e) => setHistoryLimitDraft(e.target.value)}
+                        onBlur={commitHistoryLimit}
+                        onKeyDown={onHistoryLimitKeyDown}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="settings-popup-value-btn"
+                        title="Recent messages sent to model — 0 means send all"
+                        onClick={() => {
+                          setHistoryLimitDraft(
+                            props.maxHistoryMessages > 0
+                              ? String(props.maxHistoryMessages)
+                              : '0'
+                          );
+                          setEditingHistoryLimit(true);
+                        }}
+                      >
+                        {props.maxHistoryMessages > 0
+                          ? `${props.maxHistoryMessages} msgs`
+                          : 'All'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className={`icon-btn ${showSettings ? 'icon-btn-active' : ''}`}
+                title="Chat settings"
+                onClick={() => setShowSettings((s) => !s)}
+              >
+                <SlidersIcon size={14} />
+              </button>
+            </div>
+
             {busy ? (
               <button
                 type="button"
@@ -178,93 +324,6 @@ export function Composer(props: ComposerProps): React.JSX.Element {
       </div>
 
       <div className="statusbar">
-        <div className="statusbar-controls">
-          <button
-            type="button"
-            className={`status-btn ${props.autoApplyWrites ? 'status-btn-active' : ''}`}
-            title={
-              props.autoApplyWrites
-                ? 'Auto writes on — click to require approval'
-                : 'Auto writes off — click to skip approval prompts'
-            }
-            onClick={props.onToggleAutoWrites}
-          >
-            Auto writes: {props.autoApplyWrites ? 'On' : 'Off'}
-          </button>
-          <span className="toolbar-divider" />
-          <button
-            type="button"
-            className={`status-btn ${props.expandTools ? 'status-btn-active' : ''}`}
-            title={
-              props.expandTools
-                ? 'Tool details expanded — click to collapse'
-                : 'Tool details collapsed — click to expand'
-            }
-            onClick={props.onToggleExpandTools}
-          >
-            Expand: {props.expandTools ? 'On' : 'Off'}
-          </button>
-          <span className="toolbar-divider" />
-          {editingReadLimit ? (
-            <input
-              className="status-read-input"
-              type="number"
-              min={1}
-              value={readLimitDraft}
-              autoFocus
-              onChange={(e) => setReadLimitDraft(e.target.value)}
-              onBlur={commitReadLimit}
-              onKeyDown={onReadLimitKeyDown}
-            />
-          ) : (
-            <button
-              type="button"
-              className="status-btn"
-              title="Max lines per file read — click to change"
-              onClick={() => {
-                setReadLimitDraft(String(props.maxReadLines));
-                setEditingReadLimit(true);
-              }}
-            >
-              Max File Read: {props.maxReadLines} Lines
-            </button>
-          )}
-          <span className="toolbar-divider" />
-          {editingHistoryLimit ? (
-            <input
-              className="status-read-input"
-              type="number"
-              min={0}
-              value={historyLimitDraft}
-              autoFocus
-              onChange={(e) => setHistoryLimitDraft(e.target.value)}
-              onBlur={commitHistoryLimit}
-              onKeyDown={onHistoryLimitKeyDown}
-            />
-          ) : (
-            <button
-              type="button"
-              className={`status-btn ${props.maxHistoryMessages > 0 ? '' : 'status-btn-active'}`}
-              title="Recent messages sent to the model — 0 turns trimming off"
-              onClick={() => {
-                setHistoryLimitDraft(
-                  props.maxHistoryMessages > 0
-                    ? String(props.maxHistoryMessages)
-                    : '0'
-                );
-                setEditingHistoryLimit(true);
-              }}
-            >
-              History:{' '}
-              {props.maxHistoryMessages > 0
-                ? `${props.maxHistoryMessages} Msgs`
-                : 'Off'}
-            </button>
-          )}
-          <span className="status-spacer" />
-          {busy ? <span className="spinner" aria-label="Working" /> : null}
-        </div>
-
         <div className="statusbar-metrics">
           <span className="status-usage" title="Token usage this session">
             <span className="metric-label">ctx </span>
