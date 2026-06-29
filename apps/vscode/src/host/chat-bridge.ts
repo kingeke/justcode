@@ -79,10 +79,12 @@ export class ChatBridge {
       title: string
     ) => Promise<boolean>
   ) {
-    // The extension host's cwd isn't the workspace, so anchor the debug log to
-    // the workspace root (where the CLI writes it) and clear stale entries from
-    // a previous run, mirroring the CLI's startup behaviour.
-    setDebugLogDirectory(workspaceRoot);
+    // The extension host's cwd isn't the workspace, and anchoring to the
+    // workspace root would scatter a debug.log into every project (and force the
+    // user to hunt for the right window's copy). Write to the cache dir instead,
+    // a single predictable home alongside config.json/sessions/models.json.
+    // Clear stale entries from a previous run, mirroring the CLI's startup.
+    setDebugLogDirectory(cacheDirectory());
     void deleteDebugLog();
   }
 
