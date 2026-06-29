@@ -23,6 +23,11 @@ import { ModelPickerView } from '@ext/webview/components/ModelPickerView';
 export function App(): React.JSX.Element {
   const [state, dispatch] = React.useReducer(reducer, initialState);
   const transcriptRef = React.useRef<HTMLDivElement>(null);
+  // Whether new content should auto-scroll. True while the user is parked at the
+  // bottom; flips to false the moment they scroll up to read earlier output, so
+  // streaming tokens don't yank them back down. Re-arms once they return to the
+  // bottom. Defaults to true so the first render and resumed sessions land there.
+  const stickToBottomRef = React.useRef(true);
 
   // Subscribe to host messages once, and ask for the initial snapshot.
   React.useEffect(() => {
@@ -31,13 +36,28 @@ export function App(): React.JSX.Element {
     return unsubscribe;
   }, []);
 
-  // Keep the latest content in view as tokens stream and messages arrive.
+  // Track whether the user is pinned to the bottom. A small threshold absorbs
+  // sub-pixel rounding and the height growth from a token that lands between the
+  // scroll event and this read.
+  const onTranscriptScroll = (): void => {
+    const el = transcriptRef.current;
+    if (!el) return;
+    const distanceFromBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distanceFromBottom <= 24;
+  };
+
+  // Keep the latest content in view as tokens stream and messages arrive — but
+  // only while the user hasn't scrolled up to read earlier output.
   React.useEffect(() => {
     const el = transcriptRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [state.messages, state.streaming, state.thinking, state.tools]);
 
   const submit = (content: string): void => {
+    // Sending a new message should always snap to it, even if the user had
+    // scrolled up while reading the previous turn.
+    stickToBottomRef.current = true;
     dispatch({ type: LocalActionType.OptimisticSubmit, content });
     postToHost({ type: WebviewMessageType.Submit, content });
   };
@@ -169,7 +189,11 @@ export function App(): React.JSX.Element {
         </span>
       </div>
 
-      <div className="transcript" ref={transcriptRef}>
+      <div
+        className="transcript"
+        ref={transcriptRef}
+        onScroll={onTranscriptScroll}
+      >
         {state.notice ? <div className="notice">{state.notice}</div> : null}
 
         {state.messages.map((message) => (
