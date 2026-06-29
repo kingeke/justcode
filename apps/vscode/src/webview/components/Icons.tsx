@@ -105,3 +105,28 @@ export function ChevronLeftIcon({ size = 16 }: IconProps): React.JSX.Element {
     </svg>
   );
 }
+
+export function ChevronDownIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
+export function CheckIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M5 12l5 5L19 7" />
+    </svg>
+  );
+}
+
+export function UndoIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M9 7L4 12l5 5" />
+      <path d="M4 12h11a5 5 0 0 1 5 5v1" />
+    </svg>
+  );
+}

@@ -51,7 +51,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         );
         return choice === 'Delete';
       },
-      () => this.settings.reveal()
+      () => this.settings.reveal(),
+      (absolutePath) => {
+        void vscode.window.showTextDocument(vscode.Uri.file(absolutePath), {
+          preview: false,
+        });
+      }
     );
     this.bridge = bridge;
 

@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import type { ToolActivity } from '@ext/webview/state';
 import { DiffView } from '@ext/webview/components/DiffView';
+import { ToolTitle } from '@ext/webview/components/ToolTitle';
 
 const TOOL_INPUT_PREVIEW_NAMES = new Set(['grep', 'glob', 'bash']);
 const TOOL_CHANGE_PREVIEW_NAMES = new Set([
@@ -14,9 +15,11 @@ const TOOL_CHANGE_PREVIEW_NAMES = new Set([
 export function ToolActivityView({
   tools,
   expandTools = false,
+  onOpenFile,
 }: {
   tools: ToolActivity[];
   expandTools?: boolean;
+  onOpenFile?: (path: string) => void;
 }): React.JSX.Element | null {
   if (tools.length === 0) return null;
 
@@ -33,7 +36,11 @@ export function ToolActivityView({
             <span className="tool-status">
               {tool.done ? (tool.isError ? '✗' : '✓') : '…'}
             </span>
-            <span className="tool-title">{tool.view.title}</span>
+            <ToolTitle
+              title={tool.view.title}
+              path={tool.view.path}
+              onOpenFile={onOpenFile}
+            />
             <span className="tool-name">{tool.toolName}</span>
           </div>
           {expandTools &&

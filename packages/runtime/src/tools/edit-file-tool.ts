@@ -96,6 +96,7 @@ export class EditFileTool implements Tool {
     return {
       title: `edit ${parsed.path}${scope}`,
       preview: `${parsed.oldString}\n→\n${parsed.newString}`,
+      path: parsed.path,
     };
   }
 

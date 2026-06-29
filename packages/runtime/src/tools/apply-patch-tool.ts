@@ -82,7 +82,12 @@ export class ApplyPatchTool implements Tool {
         : paths.length === 1
           ? `apply patch to ${paths[0]}`
           : `apply patch to ${paths.length} files`;
-    return { title, preview: parsed.patch };
+    return {
+      title,
+      preview: parsed.patch,
+      // Only link when the patch targets a single file.
+      ...(paths.length === 1 ? { path: paths[0] } : {}),
+    };
   }
 
   public async previewDiff(

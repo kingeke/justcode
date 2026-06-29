@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { WebviewRole, type WebviewMessage } from '@ext/shared/protocol';
 import { DiffView } from '@ext/webview/components/DiffView';
+import { ToolTitle } from '@ext/webview/components/ToolTitle';
 import { renderMarkdown } from '@ext/webview/markdown';
 
 const TOOL_INPUT_PREVIEW_NAMES = new Set(['grep', 'glob', 'bash']);
@@ -14,9 +15,11 @@ const TOOL_CHANGE_PREVIEW_NAMES = new Set([
 export function MessageView({
   message,
   expandTools = false,
+  onOpenFile,
 }: {
   message: WebviewMessage;
   expandTools?: boolean;
+  onOpenFile?: (path: string) => void;
 }): React.JSX.Element {
   if (message.role === WebviewRole.Tool) {
     return (
@@ -24,9 +27,11 @@ export function MessageView({
         <div className="tool tool-done">
           <div className="tool-head">
             <span className="tool-status">✓</span>
-            <span className="tool-title">
-              {message.toolView?.title ?? 'Tool result'}
-            </span>
+            <ToolTitle
+              title={message.toolView?.title ?? 'Tool result'}
+              path={message.toolView?.path}
+              onOpenFile={onOpenFile}
+            />
             {message.toolName ? (
               <span className="tool-name">{message.toolName}</span>
             ) : null}

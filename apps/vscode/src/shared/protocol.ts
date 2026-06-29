@@ -21,6 +21,7 @@ export enum HostMessageType {
   UsageUpdate = 'usageUpdate',
   TurnComplete = 'turnComplete',
   ModelsUpdate = 'modelsUpdate',
+  FileReverted = 'fileReverted',
   Error = 'error',
 }
 
@@ -45,6 +46,8 @@ export enum WebviewMessageType {
   ClearSessions = 'clearSessions',
   ConnectProvider = 'connectProvider',
   OpenSettings = 'openSettings',
+  RevertFile = 'revertFile',
+  OpenFile = 'openFile',
 }
 
 /** Roles the transcript renders. Mirrors the persisted message roles. */
@@ -130,6 +133,8 @@ export interface WebviewToolView {
   title: string;
   preview?: string;
   diff?: WebviewDiff;
+  /** Workspace-relative path of the file the call concerns, when single-file. */
+  path?: string;
 }
 
 /** A single transcript entry sent to the webview to render history. */
@@ -278,6 +283,19 @@ export interface ModelsUpdateMessage {
   models: WebviewModel[];
 }
 
+/**
+ * Result of a webview-requested file revert. `ok` is false when the file
+ * couldn't be restored (e.g. it moved or permissions changed); the panel then
+ * keeps the row and surfaces `message`.
+ */
+export interface FileRevertedMessage {
+  type: HostMessageType.FileReverted;
+  /** Workspace-relative path that was reverted, matching the request. */
+  path: string;
+  ok: boolean;
+  message?: string;
+}
+
 export type HostToWebview =
   | ReadyMessage
   | ModelsUpdateMessage
@@ -290,6 +308,7 @@ export type HostToWebview =
   | UserInputRequestMessage
   | UsageUpdateMessage
   | TurnCompleteMessage
+  | FileRevertedMessage
   | ErrorMessage;
 
 // --- Webview -> Host -------------------------------------------------------
@@ -402,6 +421,28 @@ export interface ToggleThinkingCollapsedMessage {
   type: WebviewMessageType.ToggleThinkingCollapsed;
 }
 
+/**
+ * The user asked to undo a file's session changes from the changes panel. The
+ * host restores `oldText` (the pre-session baseline), or deletes the file when
+ * it was created this session.
+ */
+export interface RevertFileMessage {
+  type: WebviewMessageType.RevertFile;
+  /** Workspace-relative path to revert. */
+  path: string;
+  /** Baseline content to restore; ignored when `created` is true. */
+  oldText: string;
+  /** True when the file was created this session, so reverting deletes it. */
+  created: boolean;
+}
+
+/** The user ctrl/cmd-clicked a changed file to open it in the editor. */
+export interface OpenFileMessage {
+  type: WebviewMessageType.OpenFile;
+  /** Workspace-relative path to reveal. */
+  path: string;
+}
+
 export type WebviewToHost =
   | InitMessage
   | SubmitMessage
@@ -421,4 +462,6 @@ export type WebviewToHost =
   | ToggleExpandToolsMessage
   | SetReadLimitMessage
   | SetHistoryLimitMessage
-  | ToggleThinkingCollapsedMessage;
+  | ToggleThinkingCollapsedMessage
+  | RevertFileMessage
+  | OpenFileMessage;

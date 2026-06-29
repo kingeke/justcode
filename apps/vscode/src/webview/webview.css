@@ -324,6 +324,13 @@ body {
   text-overflow: ellipsis;
 }
 
+/* Ctrl/Cmd-click opens the file; hint it with a link affordance on hover. */
+.tool-title.is-openable:hover {
+  text-decoration: underline;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  cursor: pointer;
+}
+
 .tool-name {
   font-size: 11px;
   color: var(--vscode-textLink-foreground, #3794ff);
@@ -400,6 +407,176 @@ body {
     --vscode-diffEditor-insertedTextBackground,
     rgba(0, 255, 0, 0.15)
   );
+}
+
+/* --- Changes panel (session-wide edited/created files) ------------------- */
+
+.changes {
+  flex-shrink: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  border-top: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.3));
+  background: var(--vscode-editorWidget-background, transparent);
+}
+
+.changes-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+}
+
+.changes-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  text-align: left;
+}
+
+.changes-caret {
+  display: inline-flex;
+  opacity: 0.7;
+}
+
+.changes-summary {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.changes-stat {
+  flex-shrink: 0;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+}
+
+.changes-added {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #4caf50);
+}
+
+.changes-removed {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #f44336);
+}
+
+.changes-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.changes-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 3px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  background: var(--vscode-button-secondaryBackground, rgba(127, 127, 127, 0.2));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  cursor: pointer;
+}
+
+.changes-btn:hover {
+  background: var(
+    --vscode-button-secondaryHoverBackground,
+    rgba(127, 127, 127, 0.3)
+  );
+}
+
+.changes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 4px 4px;
+}
+
+/* The whole row toggles the inline diff on click. */
+.changes-row-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.changes-row-main:hover {
+  background: var(--vscode-list-hoverBackground, rgba(127, 127, 127, 0.12));
+}
+
+.changes-badge {
+  align-self: center;
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--vscode-gitDecoration-addedResourceForeground, #4caf50);
+}
+
+.changes-badge-deleted {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #f44336);
+}
+
+.changes-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+  max-width: 60%;
+}
+
+.changes-name.is-deleted {
+  text-decoration: line-through;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* The filename is a link: a plain click opens the file in the editor. */
+.changes-name-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+}
+
+.changes-name-link:hover {
+  text-decoration: underline;
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+
+/* Absorbs slack so the stats and action buttons sit at the right edge. */
+.changes-dir {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.changes-icon-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 2px;
+  background: none;
+  border: none;
+  color: var(--vscode-icon-foreground, var(--vscode-foreground));
+  opacity: 0.7;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.changes-icon-btn:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.2));
+}
+
+.changes-error {
+  padding: 4px 8px 6px;
+  font-size: 11px;
+  color: var(--vscode-errorForeground);
 }
 
 /* --- Prompts (approval / input) ------------------------------------------ */

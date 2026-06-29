@@ -20,6 +20,8 @@ import { ApprovalPrompt, InputPrompt } from '@ext/webview/components/Prompts';
 import { Composer } from '@ext/webview/components/Composer';
 import { SessionsView } from '@ext/webview/components/SessionsView';
 import { ModelPickerView } from '@ext/webview/components/ModelPickerView';
+import { ChangesPanel } from '@ext/webview/components/ChangesPanel';
+import { deriveChangedFiles, type ChangedFile } from '@ext/webview/changes';
 
 export function App(): React.JSX.Element {
   const [state, dispatch] = React.useReducer(reducer, initialState);
@@ -160,6 +162,65 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.SetHistoryLimit, count });
   };
 
+  // Every file the agent edited/created this session, minus those the user has
+  // already kept or undone (and not edited again since). Recomputed from the
+  // authoritative transcript plus any in-flight tool activity.
+  const resolvedMap = React.useMemo(
+    () => new Map(Object.entries(state.resolvedFiles)),
+    [state.resolvedFiles]
+  );
+  const changedFiles = React.useMemo(
+    () => deriveChangedFiles(state.messages, state.tools, resolvedMap),
+    [state.messages, state.tools, resolvedMap]
+  );
+
+  // Keeping a file leaves its current content on disk, so that becomes the
+  // baseline for any later changes. Undoing reverts it, so the baseline is the
+  // content it was reverted to.
+  const keepFile = (file: ChangedFile): void => {
+    dispatch({
+      type: LocalActionType.ResolveFiles,
+      files: [
+        {
+          path: file.path,
+          resolution: { editCount: file.editCount, baseline: file.current },
+        },
+      ],
+    });
+  };
+
+  const undoFile = (file: ChangedFile): void => {
+    // Hide it immediately; the host confirms via FileReverted and the reducer
+    // brings the row back if the on-disk revert failed.
+    dispatch({
+      type: LocalActionType.ResolveFiles,
+      files: [
+        {
+          path: file.path,
+          resolution: { editCount: file.editCount, baseline: file.baseline },
+        },
+      ],
+    });
+    postToHost({
+      type: WebviewMessageType.RevertFile,
+      path: file.path,
+      oldText: file.baseline,
+      created: file.created,
+    });
+  };
+
+  const keepAllFiles = (): void => {
+    for (const file of changedFiles) keepFile(file);
+  };
+
+  const undoAllFiles = (): void => {
+    for (const file of changedFiles) undoFile(file);
+  };
+
+  const openFile = (path: string): void => {
+    postToHost({ type: WebviewMessageType.OpenFile, path });
+  };
+
   const chatDisabled = !state.activeModel;
 
   if (state.view === 'sessions' || state.status === ChatStatus.Loading) {
@@ -258,7 +319,11 @@ export function App(): React.JSX.Element {
                   busy={false}
                 />
               ))}
-              <MessageView message={message} expandTools={state.expandTools} />
+              <MessageView
+                message={message}
+                expandTools={state.expandTools}
+                onOpenFile={openFile}
+              />
             </React.Fragment>
           );
         })}
@@ -296,6 +361,7 @@ export function App(): React.JSX.Element {
                   key={item.id}
                   tools={[tool]}
                   expandTools={state.expandTools}
+                  onOpenFile={openFile}
                 />
               ) : null;
             }
@@ -347,6 +413,16 @@ export function App(): React.JSX.Element {
 
         {state.error ? <div className="error">{state.error}</div> : null}
       </div>
+
+      <ChangesPanel
+        files={changedFiles}
+        error={state.revertError}
+        onKeep={keepFile}
+        onUndo={undoFile}
+        onKeepAll={keepAllFiles}
+        onUndoAll={undoAllFiles}
+        onOpenFile={openFile}
+      />
 
       <Composer
         busy={state.busy}

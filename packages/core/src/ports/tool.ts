@@ -57,6 +57,12 @@ export interface ToolInvocationView {
   preview?: string;
   /** Structured before/after, when the call changes a file. */
   diff?: ToolDiff;
+  /**
+   * Workspace-relative path of the primary file the call concerns, when it maps
+   * to a single file. Lets a UI make the file openable (e.g. the title links to
+   * it) for tools that don't produce a diff, like reads.
+   */
+  path?: string;
 }
 
 export interface Tool {

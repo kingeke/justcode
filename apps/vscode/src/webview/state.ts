@@ -12,6 +12,7 @@ import {
   type WebviewUsage,
   type WebviewStats,
 } from '@ext/shared/protocol';
+import type { ResolvedFile } from '@ext/webview/changes';
 
 /** A tool invocation as the transcript tracks it across start/end events. */
 export interface ToolActivity {
@@ -101,6 +102,15 @@ export interface ChatState {
   /** When true, thinking blocks start collapsed (user must click to expand). */
   thinkingCollapsed: boolean;
   sessionTitle?: string | undefined;
+  /**
+   * Files the user has resolved in the changes panel (kept or undone), mapping
+   * the path to where the resolution left off (edit count + baseline content).
+   * A later edit pushes the count past this mark and the file reappears, diffed
+   * against the recorded baseline. Reset per session.
+   */
+  resolvedFiles: Record<string, ResolvedFile>;
+  /** Last file-revert failure, surfaced under the changes panel. */
+  revertError?: string | undefined;
 }
 
 export const initialState: ChatState = {
@@ -123,6 +133,7 @@ export const initialState: ChatState = {
   maxReadLines: 200,
   maxHistoryMessages: 50,
   thinkingCollapsed: false,
+  resolvedFiles: {},
 };
 
 /** Local-only actions, distinct from host messages, for optimistic UI updates. */
@@ -138,6 +149,8 @@ export enum LocalActionType {
   SetHistoryLimit = 'setHistoryLimit',
   SetView = 'setView',
   SetTitle = 'setTitle',
+  ResolveFiles = 'resolveFiles',
+  UnresolveFile = 'unresolveFile',
 }
 
 export type LocalAction =
@@ -151,7 +164,12 @@ export type LocalAction =
   | { type: LocalActionType.SetReadLimit; lines: number }
   | { type: LocalActionType.SetHistoryLimit; count: number }
   | { type: LocalActionType.SetView; view: ChatView }
-  | { type: LocalActionType.SetTitle; title: string };
+  | { type: LocalActionType.SetTitle; title: string }
+  | {
+      type: LocalActionType.ResolveFiles;
+      files: Array<{ path: string; resolution: ResolvedFile }>;
+    }
+  | { type: LocalActionType.UnresolveFile; path: string };
 
 export type Action = HostToWebview | LocalAction;
 
@@ -190,6 +208,9 @@ export function reducer(state: ChatState, action: Action): ChatState {
         maxHistoryMessages: action.maxHistoryMessages,
         thinkingCollapsed: action.thinkingCollapsed,
         sessionTitle: action.sessionTitle,
+        // A fresh session/snapshot starts with an empty changes panel.
+        resolvedFiles: {},
+        revertError: undefined,
       };
 
     case HostMessageType.ModelsUpdate:
@@ -341,12 +362,66 @@ export function reducer(state: ChatState, action: Action): ChatState {
     case LocalActionType.SetTitle:
       return { ...state, sessionTitle: action.title };
 
+    case LocalActionType.ResolveFiles:
+      return {
+        ...state,
+        resolvedFiles: mergeResolved(state.resolvedFiles, action.files),
+        revertError: undefined,
+      };
+
+    case LocalActionType.UnresolveFile:
+      return {
+        ...state,
+        resolvedFiles: omitResolved(state.resolvedFiles, action.path),
+      };
+
+    case HostMessageType.FileReverted:
+      // Undo hides the row optimistically; nothing more to do on success. On
+      // failure, bring the row back and explain why so the user can retry rather
+      // than believing a file was reverted when it wasn't.
+      return action.ok
+        ? { ...state, revertError: undefined }
+        : {
+            ...state,
+            resolvedFiles: omitResolved(state.resolvedFiles, action.path),
+            revertError: action.message ?? `Couldn't undo ${action.path}.`,
+          };
+
     case HostMessageType.TitleUpdate:
       return { ...state, sessionTitle: action.title };
 
     default:
       return state;
   }
+}
+
+/**
+ * Records where each file was resolved, keeping the most recent resolution (the
+ * one with the highest edit count) so re-resolving after a new edit raises the
+ * bar rather than lowering it.
+ */
+function mergeResolved(
+  existing: Record<string, ResolvedFile>,
+  files: Array<{ path: string; resolution: ResolvedFile }>
+): Record<string, ResolvedFile> {
+  const next = { ...existing };
+  for (const { path, resolution } of files) {
+    const prior = next[path];
+    if (!prior || resolution.editCount >= prior.editCount) {
+      next[path] = resolution;
+    }
+  }
+  return next;
+}
+
+/** Drops a path from the resolved set (e.g. after a failed undo). */
+function omitResolved(
+  existing: Record<string, ResolvedFile>,
+  path: string
+): Record<string, ResolvedFile> {
+  if (!(path in existing)) return existing;
+  const { [path]: _removed, ...rest } = existing;
+  return rest;
 }
 
 function flushThinking(state: ChatState): ChatState {
@@ -426,6 +501,11 @@ function applyToolActivity(
           ...tool,
           done: true,
           isError: action.isError ?? false,
+          // A diff that only materializes on `end` (e.g. a bash deletion, known
+          // once the file is gone) wasn't on the start view; fold it in now.
+          ...(action.view.diff && !tool.view.diff
+            ? { view: { ...tool.view, diff: action.view.diff } }
+            : {}),
           ...(action.resultPreview
             ? { resultPreview: action.resultPreview }
             : {}),

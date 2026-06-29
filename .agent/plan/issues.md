@@ -9,8 +9,9 @@ This document tracks the issues so far.
 - VSCODE EXTENSION
 - add model thinking level pop up
 - add images
-- show edited files like vscode with ability to keep or revert
 - send queued messages
+- @ files and methods
+- show button to go to bottom when scrolled up
 
 # Instruction
 

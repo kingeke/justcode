@@ -100,10 +100,13 @@ export class ReadFileTool implements Tool {
       return { title: 'read_file (unparseable arguments)' };
     }
     if (parsed.method) {
-      return { title: `read ${parsed.path}::${parsed.method}` };
+      return {
+        title: `read ${parsed.path}::${parsed.method}`,
+        path: parsed.path,
+      };
     }
     const suffix = parsed.offset > 1 ? ` (from line ${parsed.offset})` : '';
-    return { title: `read ${parsed.path}${suffix}` };
+    return { title: `read ${parsed.path}${suffix}`, path: parsed.path };
   }
 
   public async execute(

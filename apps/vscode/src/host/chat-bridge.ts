@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { rm, writeFile } from 'node:fs/promises';
+import { isAbsolute, relative, resolve } from 'node:path';
 
 import type { Conversation } from '@core/domain/conversation';
 import { APP_NAME } from '@core/branding';
@@ -15,6 +18,7 @@ import {
   type ToolActivityEvent,
 } from '@core/application/chat-session-service';
 import type { ToolInvocationView, UserQuestionRequest } from '@core/ports/tool';
+import { ToolName } from '@core/domain/tool-name';
 import { cacheDirectory } from '@core/application/cache-dir';
 import {
   deleteDebugLog,
@@ -30,6 +34,8 @@ import {
   createRuntimeServices,
   type RuntimeServices,
 } from '@runtime/bootstrap/create-services';
+
+import { parseRemovedPaths } from '@ext/host/parse-removed-paths';
 
 import {
   HostMessageType,
@@ -69,6 +75,14 @@ export class ChatBridge {
   // transcript can reuse the pre-edit diff. Recomputing it afterward fails for
   // edits/patches: the file is already changed, so the original text is gone.
   private readonly toolViewsByCallId = new Map<string, WebviewToolView>();
+  // Files a bash call is about to delete, with their pre-deletion content,
+  // keyed by tool-call id. Captured when the call starts (before it runs) so a
+  // deletion can be shown in the changes panel and reverted by restoring the
+  // content. Resolved and cleared when the call ends.
+  private readonly capturedDeletions = new Map<
+    string,
+    Array<{ path: string; oldText: string }>
+  >();
   private sessionId: string = randomUUID();
   private autoApplyWrites = false;
   private expandTools = false;
@@ -100,7 +114,9 @@ export class ChatBridge {
       title: string
     ) => Promise<boolean>,
     /** Reveals the Settings editor tab; injected by the view provider. */
-    private readonly onOpenSettings?: () => void
+    private readonly onOpenSettings?: () => void,
+    /** Opens a workspace file in the editor; injected by the view provider. */
+    private readonly onOpenFile?: (absolutePath: string) => void
   ) {
     // The extension host's cwd isn't the workspace, and anchoring to the
     // workspace root would scatter a debug.log into every project (and force the
@@ -174,6 +190,12 @@ export class ChatBridge {
         return;
       case WebviewMessageType.ToggleThinkingCollapsed:
         await this.toggleThinkingCollapsed();
+        return;
+      case WebviewMessageType.RevertFile:
+        await this.revertFile(message.path, message.oldText, message.created);
+        return;
+      case WebviewMessageType.OpenFile:
+        this.openFile(message.path);
         return;
     }
   }
@@ -502,14 +524,35 @@ export class ChatBridge {
     };
     this.tokensPerSecondSamples = [];
     this.toolViewsByCallId.clear();
+    this.capturedDeletions.clear();
   }
 
   private postToolActivity(event: ToolActivityEvent): void {
     const view = toToolView(event.view);
+
+    // Bash is the only path to a file deletion (there's no delete tool), and it
+    // emits no diff. Capture the soon-to-be-deleted content before the command
+    // runs, then synthesize a deletion diff once the file is gone so it shows in
+    // the changes panel like any other edit.
+    if (event.toolName === ToolName.Bash) {
+      if (event.phase === 'start') {
+        this.captureDeletionCandidates(event.toolCallId, view.preview);
+      } else {
+        const diff = this.resolveDeletionDiff(event.toolCallId);
+        if (diff) view.diff = diff;
+      }
+    }
+
     // Capture the live view (the start phase carries the pre-edit diff) so the
     // post-turn transcript rebuild can reuse it instead of recomputing against
-    // the already-edited file, which would drop the diff entirely.
-    if (event.phase === 'start' || !this.toolViewsByCallId.has(event.toolCallId)) {
+    // the already-edited file, which would drop the diff entirely. A bash
+    // deletion diff is only known on `end`, so let that overwrite the cached
+    // start view.
+    if (
+      event.phase === 'start' ||
+      !this.toolViewsByCallId.has(event.toolCallId) ||
+      (event.phase === 'end' && view.diff)
+    ) {
       this.toolViewsByCallId.set(event.toolCallId, view);
     }
     this.post({
@@ -525,6 +568,54 @@ export class ChatBridge {
           }
         : {}),
     });
+  }
+
+  /**
+   * Reads, synchronously, the content of every file a bash command is about to
+   * delete. Runs in the tool's `start` callback, which fires before the command
+   * executes, so the content is captured while the file still exists. Paths
+   * outside the workspace, directories, and anything needing shell expansion are
+   * skipped — only literal files we can later restore are kept.
+   */
+  private captureDeletionCandidates(
+    toolCallId: string,
+    command: string | undefined
+  ): void {
+    if (!command) return;
+    const captured: Array<{ path: string; oldText: string }> = [];
+    for (const rawPath of parseRemovedPaths(command)) {
+      const absolute = resolve(this.workspaceRoot, rawPath);
+      const rel = relative(this.workspaceRoot, absolute);
+      if (rel.startsWith('..') || isAbsolute(rel)) continue;
+      try {
+        if (!statSync(absolute).isFile()) continue;
+        captured.push({
+          path: rel.split('\\').join('/'),
+          oldText: readFileSync(absolute, 'utf8'),
+        });
+      } catch {
+        // Unreadable, missing, or a directory — nothing we can restore later.
+      }
+    }
+    if (captured.length > 0) this.capturedDeletions.set(toolCallId, captured);
+  }
+
+  /**
+   * After a bash command finishes, turns the first captured file that's now gone
+   * into a deletion diff (old content → empty). Only one diff fits per tool call,
+   * so a command deleting several files surfaces the first; the rest are dropped.
+   */
+  private resolveDeletionDiff(
+    toolCallId: string
+  ): { path: string; oldText: string; newText: string } | undefined {
+    const captured = this.capturedDeletions.get(toolCallId);
+    this.capturedDeletions.delete(toolCallId);
+    if (!captured) return undefined;
+    const deleted = captured.find(
+      (entry) => !existsSync(resolve(this.workspaceRoot, entry.path))
+    );
+    if (!deleted) return undefined;
+    return { path: deleted.path, oldText: deleted.oldText, newText: '' };
   }
 
   private requestApproval(request: ToolApprovalRequest): Promise<boolean> {
@@ -734,6 +825,61 @@ export class ChatBridge {
     });
   }
 
+  /**
+   * Undoes a file's session changes from the changes panel: restores the
+   * pre-session baseline, or deletes the file when it was created this session.
+   * The diff path is workspace-relative; it's resolved against the workspace
+   * root and rejected if it escapes it, so a malformed path can't write outside
+   * the project.
+   */
+  private async revertFile(
+    path: string,
+    oldText: string,
+    created: boolean
+  ): Promise<void> {
+    const target = resolve(this.workspaceRoot, path);
+    const rel = relative(this.workspaceRoot, target);
+    if (rel.startsWith('..') || isAbsolute(rel)) {
+      this.post({
+        type: HostMessageType.FileReverted,
+        path,
+        ok: false,
+        message: `Refusing to revert a path outside the workspace: ${path}`,
+      });
+      return;
+    }
+
+    try {
+      if (created) {
+        // The file didn't exist before this session; undoing means removing it.
+        // `force` makes a missing file (already deleted by the user) a no-op.
+        await rm(target, { force: true });
+      } else {
+        await writeFile(target, oldText, 'utf8');
+      }
+      this.post({ type: HostMessageType.FileReverted, path, ok: true });
+    } catch (error) {
+      this.post({
+        type: HostMessageType.FileReverted,
+        path,
+        ok: false,
+        message: `Couldn't undo ${path}: ${errorMessage(error)}`,
+      });
+    }
+  }
+
+  /**
+   * Reveals a changed file in the editor. The path is workspace-relative and is
+   * resolved + bounds-checked against the workspace root, mirroring
+   * {@link revertFile}, so a malformed path can't open something outside it.
+   */
+  private openFile(path: string): void {
+    const target = resolve(this.workspaceRoot, path);
+    const rel = relative(this.workspaceRoot, target);
+    if (rel.startsWith('..') || isAbsolute(rel)) return;
+    this.onOpenFile?.(target);
+  }
+
   private async selectProvider(providerId: string): Promise<void> {
     const services = await this.ensureServices();
     let provider: ProviderClient;
@@ -813,6 +959,7 @@ function toToolView(view: ToolInvocationView): WebviewToolView {
     title: view.title,
     ...(view.preview ? { preview: view.preview } : {}),
     ...(view.diff ? { diff: view.diff } : {}),
+    ...(view.path ? { path: view.path } : {}),
   };
 }
 
@@ -821,7 +968,7 @@ function toToolView(view: ToolInvocationView): WebviewToolView {
  * System messages are internal; assistant messages that only carried tool calls
  * (no prose) are dropped because their work is shown as tool activity instead.
  */
-async function toWebviewMessages(
+export async function toWebviewMessages(
   conversation: Conversation,
   services?: RuntimeServices,
   cachedToolViews?: ReadonlyMap<string, WebviewToolView>

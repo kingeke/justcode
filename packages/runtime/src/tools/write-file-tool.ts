@@ -50,7 +50,11 @@ export class WriteFileTool implements Tool {
     if (!parsed) {
       return { title: 'write_file (unparseable arguments)' };
     }
-    return { title: `write ${parsed.path}`, preview: parsed.content };
+    return {
+      title: `write ${parsed.path}`,
+      preview: parsed.content,
+      path: parsed.path,
+    };
   }
 
   public async previewDiff(
