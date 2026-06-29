@@ -312,18 +312,23 @@ body {
 .tool-status {
   width: 14px;
   text-align: center;
+  flex-shrink: 0;
 }
 
 .tool-title {
   flex: 1;
+  min-width: 0;
   font-weight: 600;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tool-name {
   font-size: 11px;
   color: var(--vscode-textLink-foreground, #3794ff);
   font-weight: 600;
+  flex-shrink: 0;
 }
 
 .tool-preview,
@@ -336,6 +341,13 @@ body {
   border-radius: 3px;
   max-height: 240px;
   overflow: auto;
+}
+
+.tool-section-label {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.7;
 }
 
 /* --- Diff ----------------------------------------------------------------- */
@@ -370,6 +382,10 @@ body {
   width: 1ch;
   margin-right: 6px;
   opacity: 0.6;
+}
+
+.diff-context {
+  color: var(--vscode-descriptionForeground);
 }
 
 .diff-removed {

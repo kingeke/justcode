@@ -37,6 +37,7 @@ export interface RuntimeServices {
   chatSessionService: ChatSessionService;
   listModelsService: ListModelsService;
   promptAttachmentService: PromptAttachmentService;
+  toolRegistry: ToolRegistry;
   allProviders: ProviderClient[];
   createProvider: (id: ProviderId) => ProviderClient;
   /** Update, at runtime, how many lines a single file read returns. */
@@ -133,6 +134,7 @@ export async function createRuntimeServices(
       workspaceFiles,
       () => readSettings.maxReadLines
     ),
+    toolRegistry,
     allProviders,
     createProvider: (id: ProviderId) => registry.create(id),
     setMaxReadLines: (lines: number) => {

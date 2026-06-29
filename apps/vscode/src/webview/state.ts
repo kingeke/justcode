@@ -96,7 +96,7 @@ export interface ChatState {
   autoApplyWrites: boolean;
   expandTools: boolean;
   maxReadLines: number;
-  /** Recent messages sent to the model per request; 0 means "off" (send all). */
+  /** Recent context window items sent to the model per request; 0 means "off" (send all). */
   maxHistoryMessages: number;
   /** When true, thinking blocks start collapsed (user must click to expand). */
   thinkingCollapsed: boolean;

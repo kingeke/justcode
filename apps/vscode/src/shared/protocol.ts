@@ -139,6 +139,8 @@ export interface WebviewMessage {
   content: string;
   /** Present on tool messages, names the tool that produced the result. */
   toolName?: string;
+  /** Present on tool messages when we can reconstruct the original call view. */
+  toolView?: WebviewToolView;
   /** Persisted assistant reasoning/thinking, when the provider streamed it. */
   thinking?: {
     content: string;
@@ -177,7 +179,7 @@ export interface ReadyMessage {
   autoApplyWrites: boolean;
   expandTools: boolean;
   maxReadLines: number;
-  /** Recent messages sent to the model per request; 0 means "off" (send all). */
+  /** Recent context window items sent to the model per request; 0 means "off" (send all). */
   maxHistoryMessages: number;
   /** When true, thinking blocks start collapsed so the user has to click to expand. */
   thinkingCollapsed: boolean;

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { ChatSessionService } from '@core/application/chat-session-service';
+import {
+  ChatSessionService,
+  describeTool,
+} from '@core/application/chat-session-service';
 import { ToolRegistry } from '@core/application/tool-registry';
 import { createConversation } from '@core/domain/conversation';
 import { createMessage } from '@core/domain/message';
@@ -110,6 +113,20 @@ class RecordingWriteTool implements Tool {
   public async execute(rawArguments: string): Promise<{ content: string }> {
     this.executed.push(rawArguments);
     return { content: 'wrote the file' };
+  }
+}
+
+class PreviewingWriteTool extends RecordingWriteTool {
+  public async previewDiff(): Promise<{
+    path: string;
+    oldText: string;
+    newText: string;
+  }> {
+    return {
+      path: 'a.txt',
+      oldText: 'before',
+      newText: 'after',
+    };
   }
 }
 
@@ -765,6 +782,21 @@ describe('ChatSessionService', () => {
       content: 'again',
     });
     expect(requests).toEqual([undefined]);
+  });
+
+  it('describeTool includes previewDiff output when available', async () => {
+    const view = await describeTool(
+      new PreviewingWriteTool(),
+      '{"path":"a.txt","content":"after"}',
+      { workspaceRoot: '/workspace' }
+    );
+
+    expect(view.title).toBe('write');
+    expect(view.diff).toEqual({
+      path: 'a.txt',
+      oldText: 'before',
+      newText: 'after',
+    });
   });
 
   it('skips execution and reports rejection when approval is denied', async () => {

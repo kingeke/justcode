@@ -9,9 +9,10 @@ import type {
   TokenUsage,
 } from '@core/ports/chat-model';
 import { ProviderId, PROVIDER_BY_ID } from '@core/ports/provider-catalog';
-import type {
-  ToolApprovalRequest,
-  ToolActivityEvent,
+import {
+  describeTool,
+  type ToolApprovalRequest,
+  type ToolActivityEvent,
 } from '@core/application/chat-session-service';
 import type { ToolInvocationView, UserQuestionRequest } from '@core/ports/tool';
 import { cacheDirectory } from '@core/application/cache-dir';
@@ -64,6 +65,10 @@ export class ChatBridge {
     (approved: boolean) => void
   >();
   private readonly pendingInputs = new Map<string, (value: string) => void>();
+  // Tool views captured live (keyed by tool-call id), kept so the rebuilt
+  // transcript can reuse the pre-edit diff. Recomputing it afterward fails for
+  // edits/patches: the file is already changed, so the original text is gone.
+  private readonly toolViewsByCallId = new Map<string, WebviewToolView>();
   private sessionId: string = randomUUID();
   private autoApplyWrites = false;
   private expandTools = false;
@@ -279,7 +284,11 @@ export class ChatBridge {
         providerId: services.providerId,
         activeModel: session.activeModel,
         models: this.models.map(toWebviewModel),
-        messages: toWebviewMessages(session.conversation),
+        messages: await toWebviewMessages(
+          session.conversation,
+          services,
+          this.toolViewsByCallId
+        ),
         autoApplyWrites: this.autoApplyWrites,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
@@ -434,7 +443,11 @@ export class ChatBridge {
         this.cumulativeUsage.outputTokens > 0;
       this.post({
         type: HostMessageType.TurnComplete,
-        messages: toWebviewMessages(result.conversation),
+        messages: await toWebviewMessages(
+          result.conversation,
+          services,
+          this.toolViewsByCallId
+        ),
         ...(hasUsage ? { usage: { ...this.cumulativeUsage } } : {}),
         ...(stats ? { stats } : {}),
       });
@@ -488,15 +501,23 @@ export class ChatBridge {
       cost: 0,
     };
     this.tokensPerSecondSamples = [];
+    this.toolViewsByCallId.clear();
   }
 
   private postToolActivity(event: ToolActivityEvent): void {
+    const view = toToolView(event.view);
+    // Capture the live view (the start phase carries the pre-edit diff) so the
+    // post-turn transcript rebuild can reuse it instead of recomputing against
+    // the already-edited file, which would drop the diff entirely.
+    if (event.phase === 'start' || !this.toolViewsByCallId.has(event.toolCallId)) {
+      this.toolViewsByCallId.set(event.toolCallId, view);
+    }
     this.post({
       type: HostMessageType.ToolActivity,
       phase: event.phase === 'start' ? ToolPhase.Start : ToolPhase.End,
       toolName: event.toolName,
       toolCallId: event.toolCallId,
-      view: toToolView(event.view),
+      view,
       ...(event.result
         ? {
             isError: event.result.isError ?? false,
@@ -688,7 +709,7 @@ export class ChatBridge {
     });
   }
 
-  // 0 (or less) turns trimming off — the whole conversation is sent.
+  // 0 (or less) turns context window trimming off — the whole conversation is sent.
   private async setHistoryLimit(count: number): Promise<void> {
     this.maxHistoryMessages = count;
     const services = this.services;
@@ -800,10 +821,36 @@ function toToolView(view: ToolInvocationView): WebviewToolView {
  * System messages are internal; assistant messages that only carried tool calls
  * (no prose) are dropped because their work is shown as tool activity instead.
  */
-function toWebviewMessages(conversation: Conversation): WebviewMessage[] {
+async function toWebviewMessages(
+  conversation: Conversation,
+  services?: RuntimeServices,
+  cachedToolViews?: ReadonlyMap<string, WebviewToolView>
+): Promise<WebviewMessage[]> {
   const result: WebviewMessage[] = [];
+  const toolViewsByCallId = new Map<string, WebviewToolView>();
   for (const message of conversation.messages) {
     if (message.role === 'system') continue;
+    if (message.role === 'assistant' && message.toolCalls?.length && services) {
+      for (const toolCall of message.toolCalls) {
+        // Prefer the view captured while the tool ran: it holds the pre-edit
+        // diff, which can't be recomputed once the file has changed on disk.
+        const cached = cachedToolViews?.get(toolCall.id);
+        if (cached) {
+          toolViewsByCallId.set(toolCall.id, cached);
+          continue;
+        }
+        const tool = services.toolRegistry.get(toolCall.name);
+        if (!tool) continue;
+        try {
+          const view = await describeTool(tool, toolCall.arguments, {
+            workspaceRoot: services.workspaceRoot,
+          });
+          toolViewsByCallId.set(toolCall.id, toToolView(view));
+        } catch {
+          toolViewsByCallId.set(toolCall.id, { title: toolCall.name });
+        }
+      }
+    }
     if (
       message.role === 'assistant' &&
       !message.content.trim() &&
@@ -817,6 +864,9 @@ function toWebviewMessages(conversation: Conversation): WebviewMessage[] {
       content: message.content,
       ...(message.role === 'tool' && message.name
         ? { toolName: message.name }
+        : {}),
+      ...(message.role === 'tool' && message.toolCallId
+        ? { toolView: toolViewsByCallId.get(message.toolCallId) }
         : {}),
       ...(message.thinking ? { thinking: message.thinking } : {}),
     });

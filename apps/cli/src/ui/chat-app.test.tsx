@@ -84,3 +84,28 @@ describe('chat app markdown rendering', () => {
     );
   });
 });
+
+describe('chat app tool diff rendering', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'apps/cli/src/ui/chat-app.tsx'),
+    'utf8'
+  );
+
+  it('keeps file diffs visible while a tool is still running', () => {
+    expect(source).toContain("const running = content === ''");
+    expect(source).toContain('const showDiff = running || expanded');
+  });
+
+  it('shows the result summary under the diff once a file tool finishes', () => {
+    expect(source).toContain(
+      '<ToolResultBlock content={content} expanded={false} />'
+    );
+  });
+
+  it('preserves finished tool content across the final committed rerender when expand-tools is active', () => {
+    expect(source).toContain('if (!expandTools || !prev) {');
+    expect(source).toContain('const previousToolMessagesByCallId = new Map(');
+    expect(source).toContain("message.role === 'tool' &&");
+    expect(source).toContain("message.content !== ''");
+  });
+});

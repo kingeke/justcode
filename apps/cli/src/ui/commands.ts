@@ -10,7 +10,7 @@ export enum CommandName {
   AutoWrites = 'auto-writes',
   ExpandTools = 'expand-tools',
   ReadLimit = 'read-limit',
-  HistoryLimit = 'history-limit',
+  ContextWindow = 'context-window',
   Config = 'config',
   Reset = 'reset',
 }
@@ -67,9 +67,9 @@ export const COMMANDS: Command[] = [
       'Set how many lines of a file the model reads at once, e.g. /read-limit 500',
   },
   {
-    name: CommandName.HistoryLimit,
+    name: CommandName.ContextWindow,
     description:
-      'Set how many recent messages are sent to the model, e.g. /history-limit 50',
+      'Set how many recent context window items are sent to the model, e.g. /context-window 50',
   },
   {
     name: CommandName.Config,

@@ -300,11 +300,11 @@ function commandLineContent(
     );
   } else if (cmd.name === CommandName.ReadLimit) {
     chunks.push(tc('  '), tc(`[${state.maxReadLines} lines]`, { fg: 'green' }));
-  } else if (cmd.name === CommandName.HistoryLimit) {
+  } else if (cmd.name === CommandName.ContextWindow) {
     chunks.push(
       tc('  '),
       state.maxHistoryMessages > 0
-        ? tc(`[${state.maxHistoryMessages} msgs]`, { fg: 'green' })
+        ? tc(`[${state.maxHistoryMessages} items]`, { fg: 'green' })
         : tc('[off]', { fg: 'yellow' })
     );
   } else if (cmd.name === CommandName.Reasoning) {
@@ -1566,24 +1566,24 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         return;
       }
 
-      case CommandName.HistoryLimit: {
+      case CommandName.ContextWindow: {
         const trimmed = (arg ?? '').trim();
         const current = maxHistoryMessagesRef.current;
         if (!trimmed) {
           setStatus(
             current > 0
-              ? `History limit is ${current} messages (use /history-limit <count|off> to change)`
-              : 'History limit is off — the full conversation is sent (use /history-limit <count> to cap it)'
+              ? `Context window is ${current} items (use /context-window <count|off> to change)`
+              : 'Context window is off — the full conversation is sent (use /context-window <count> to cap it)'
           );
           return;
         }
         // "off" disables trimming (send the whole conversation); a positive
-        // count caps how many recent messages are forwarded.
+        // count caps how many recent context window items are forwarded.
         const isOff = trimmed.toLowerCase() === 'off';
         const count = isOff ? 0 : Number.parseInt(trimmed, 10);
         if (!isOff && (!Number.isFinite(count) || count <= 0)) {
           setError(
-            `Invalid history limit '${trimmed}'. Provide a positive number of messages or "off".`
+            `Invalid context window '${trimmed}'. Provide a positive number of items or "off".`
           );
           return;
         }
@@ -1592,8 +1592,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         props.onMaxHistoryMessagesChange?.(count);
         setStatus(
           count > 0
-            ? `History limit set to ${count} messages`
-            : 'History limit turned off — sending the full conversation'
+            ? `Context window set to ${count} items`
+            : 'Context window turned off — sending the full conversation'
         );
         return;
       }
@@ -2067,11 +2067,43 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         // The title is async metadata delivered via onTitle, so a turn result
         // may not carry it yet. Keep any title we already have instead of
         // reverting the label back to the session uuid.
-        setConversation((prev) =>
-          result.conversation.title || !prev?.title
-            ? result.conversation
-            : { ...result.conversation, title: prev.title }
-        );
+        setConversation((prev) => {
+          const mergedConversation =
+            result.conversation.title || !prev?.title
+              ? result.conversation
+              : { ...result.conversation, title: prev.title };
+
+          if (!expandTools || !prev) {
+            return mergedConversation;
+          }
+
+          const previousToolMessagesByCallId = new Map(
+            prev.messages
+              .filter(
+                (message) =>
+                  message.role === 'tool' &&
+                  message.toolCallId &&
+                  message.content !== ''
+              )
+              .map((message) => [message.toolCallId as string, message.content])
+          );
+
+          return {
+            ...mergedConversation,
+            messages: mergedConversation.messages.map((message) =>
+              message.role === 'tool' &&
+              message.toolCallId &&
+              previousToolMessagesByCallId.has(message.toolCallId)
+                ? {
+                    ...message,
+                    content:
+                      previousToolMessagesByCallId.get(message.toolCallId) ??
+                      message.content,
+                  }
+                : message
+            ),
+          };
+        });
         setStatus('Ready');
         if (assistantMessages.length && thinkingSegments.length) {
           const anchored: Record<
@@ -3045,16 +3077,22 @@ const ToolResultInline = React.memo(function ToolResultInline({
   expanded: boolean;
   diff?: string | undefined;
 }): React.ReactNode {
-  if (expanded && diff) {
-    return (
-      <box flexDirection="column">
-        <box marginLeft={2}>
-          <text content={ansiToStyledText(diff)} />
+  if (diff) {
+    const running = content === '';
+    const showDiff = running || expanded;
+
+    if (showDiff) {
+      return (
+        <box flexDirection="column">
+          <box marginLeft={2}>
+            <text content={ansiToStyledText(diff)} />
+          </box>
+          <ToolResultBlock content={content} expanded={false} />
         </box>
-        <ToolResultBlock content={content} expanded={false} />
-      </box>
-    );
+      );
+    }
   }
+
   return <ToolResultBlock content={content} expanded={expanded} />;
 });
 

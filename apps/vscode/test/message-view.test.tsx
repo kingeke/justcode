@@ -43,4 +43,56 @@ describe('MessageView', () => {
     expect(markup).toContain('tool-result');
     expect(markup).toContain('README.md lines 1-10');
   });
+
+  it('renders change diff and hides input preview for historical edit tools', () => {
+    const markup = renderToStaticMarkup(
+      <MessageView
+        expandTools={true}
+        message={{
+          id: 'tool-2',
+          role: WebviewRole.Tool,
+          content: 'Edited README.md (1 occurrence replaced).',
+          toolName: 'edit_file',
+          toolView: {
+            title: 'edit README.md',
+            preview: 'old\n→\nnew',
+            diff: {
+              path: 'README.md',
+              oldText: 'old',
+              newText: 'new',
+            },
+          },
+        }}
+      />
+    );
+
+    expect(markup).toContain('edit README.md');
+    expect(markup).not.toContain(`old
+→
+new`);
+    expect(markup).toContain('diff-line diff-added');
+    expect(markup).toContain('Edited README.md (1 occurrence replaced).');
+  });
+
+  it('renders input preview for whitelisted historical tools', () => {
+    const markup = renderToStaticMarkup(
+      <MessageView
+        expandTools={true}
+        message={{
+          id: 'tool-3',
+          role: WebviewRole.Tool,
+          content: 'Found 1 matching line.',
+          toolName: 'grep',
+          toolView: {
+            title: 'grep README',
+            preview: 'pattern: README',
+          },
+        }}
+      />
+    );
+
+    expect(markup).toContain('Input');
+    expect(markup).toContain('pattern: README');
+    expect(markup).toContain('Found 1 matching line.');
+  });
 });

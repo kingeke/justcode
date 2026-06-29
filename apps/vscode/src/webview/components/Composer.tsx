@@ -24,7 +24,7 @@ export interface ComposerProps {
   autoApplyWrites: boolean;
   expandTools: boolean;
   maxReadLines: number;
-  /** Recent messages sent to the model per request; 0 means "off" (send all). */
+  /** Recent context window items sent to the model per request; 0 means "off" (send all). */
   maxHistoryMessages: number;
   onSubmit: (content: string) => void;
   onCancel: () => void;
@@ -254,7 +254,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                     )}
                   </div>
                   <div className="settings-popup-row">
-                    <span className="settings-popup-label">History</span>
+                    <span className="settings-popup-label">Context Window</span>
                     {editingHistoryLimit ? (
                       <input
                         className="settings-popup-input"
@@ -271,7 +271,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                       <button
                         type="button"
                         className="settings-popup-value-btn"
-                        title="Recent messages sent to model — 0 means send all"
+                        title="Recent context window items sent to model — 0 means send all"
                         onClick={() => {
                           setHistoryLimitDraft(
                             props.maxHistoryMessages > 0
@@ -282,7 +282,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         }}
                       >
                         {props.maxHistoryMessages > 0
-                          ? `${props.maxHistoryMessages} msgs`
+                          ? `${props.maxHistoryMessages} items`
                           : 'All'}
                       </button>
                     )}

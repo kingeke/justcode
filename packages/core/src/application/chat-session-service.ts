@@ -647,7 +647,7 @@ export class ChatSessionService {
   }
 }
 
-async function describeTool(
+export async function describeTool(
   tool: Tool,
   rawArguments: string,
   context: ToolExecutionContext
