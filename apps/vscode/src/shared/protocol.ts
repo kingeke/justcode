@@ -113,6 +113,16 @@ export interface WebviewUsage {
   cost?: number;
 }
 
+/** Per-session timing stats mirroring the CLI's TTFT / tok-s footer. */
+export interface WebviewStats {
+  /** Time to first token for the most recent turn, in milliseconds. */
+  ttftMs: number;
+  /** Generation rate of the most recent turn, in tokens per second. */
+  tokensPerSecond: number;
+  /** Mean tok/s across every completed turn this session. */
+  avgTokensPerSecond: number;
+}
+
 // --- Host -> Webview -------------------------------------------------------
 
 /** Full snapshot of session state; sent on init and after a session reset. */
@@ -187,7 +197,10 @@ export interface UserInputRequestMessage {
 export interface TurnCompleteMessage {
   type: HostMessageType.TurnComplete;
   messages: WebviewMessage[];
+  /** Cumulative token usage across every turn in the session so far. */
   usage?: WebviewUsage;
+  /** Timing stats for the footer; absent if no tokens streamed this turn. */
+  stats?: WebviewStats;
 }
 
 /** A turn failed (or was aborted); the webview surfaces this and re-enables input. */

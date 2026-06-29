@@ -225,6 +225,7 @@ export function App(): React.JSX.Element {
         activeModel={state.activeModel}
         activeProviderId={state.providerId}
         usage={state.usage}
+        stats={state.stats}
         autoApplyWrites={state.autoApplyWrites}
         expandTools={state.expandTools}
         maxReadLines={state.maxReadLines}

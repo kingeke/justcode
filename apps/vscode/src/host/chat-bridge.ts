@@ -3,7 +3,11 @@ import { randomUUID } from 'node:crypto';
 import type { Conversation } from '@core/domain/conversation';
 import { APP_NAME } from '@core/branding';
 import type { MessageRole } from '@core/domain/message';
-import type { ModelInfo, ProviderClient } from '@core/ports/chat-model';
+import type {
+  ModelInfo,
+  ProviderClient,
+  TokenUsage,
+} from '@core/ports/chat-model';
 import { ProviderId } from '@core/ports/provider-catalog';
 import type {
   ToolApprovalRequest,
@@ -36,9 +40,11 @@ import {
   WebviewRole,
   type HostToWebview,
   type WebviewMessage,
+  type WebviewStats,
   type WebviewToHost,
   type WebviewModel,
   type WebviewToolView,
+  type WebviewUsage,
 } from '@ext/shared/protocol';
 
 /** Longest tool-result snippet we forward to the webview as a preview. */
@@ -65,6 +71,16 @@ export class ChatBridge {
   private autoApplyWrites = false;
   private expandTools = false;
   private maxReadLines = DEFAULT_MAX_READ_LINES;
+  // Cumulative token usage across the session, mirroring the CLI's metrics
+  // footer (ctx / cached / new / out / cost). Reset whenever the conversation is.
+  private cumulativeUsage: Required<WebviewUsage> = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedTokens: 0,
+    cost: 0,
+  };
+  // Every completed turn's tok/s; the session average is their mean.
+  private tokensPerSecondSamples: number[] = [];
 
   public constructor(
     private readonly post: (message: HostToWebview) => void,
@@ -341,16 +357,28 @@ export class ChatBridge {
     const abortController = new AbortController();
     this.abortController = abortController;
 
+    // Timing for the TTFT / tok-s footer. `firstTokenMs` is stamped by the first
+    // streamed token (visible or thinking), matching the CLI's measurement.
+    const startMs = Date.now();
+    let firstTokenMs: number | null = null;
+    const markFirstToken = (): void => {
+      if (firstTokenMs === null) firstTokenMs = Date.now();
+    };
+
     try {
       const result = await services.chatSessionService.submitMessage({
         conversation: this.conversation,
         model: this.activeModel,
         content,
         signal: abortController.signal,
-        onToken: (token) =>
-          this.post({ type: HostMessageType.Token, token }),
-        onThinkingToken: (token) =>
-          this.post({ type: HostMessageType.Thinking, token }),
+        onToken: (token) => {
+          markFirstToken();
+          this.post({ type: HostMessageType.Token, token });
+        },
+        onThinkingToken: (token) => {
+          markFirstToken();
+          this.post({ type: HostMessageType.Thinking, token });
+        },
         onToolActivity: (event) => this.postToolActivity(event),
         ...(!this.autoApplyWrites && {
           requestApproval: (request) => this.requestApproval(request),
@@ -360,11 +388,34 @@ export class ChatBridge {
           this.post({ type: HostMessageType.TitleUpdate, title }),
       });
 
+      const endMs = Date.now();
       this.conversation = result.conversation;
+
+      if (result.usage) {
+        this.accumulateUsage(result.usage);
+      }
+
+      let stats: WebviewStats | undefined;
+      if (firstTokenMs !== null) {
+        const ttftMs = Math.max(firstTokenMs - startMs, 0);
+        const genSeconds = Math.max(endMs - firstTokenMs, 1) / 1000;
+        const tokensPerSecond = (result.usage?.outputTokens ?? 0) / genSeconds;
+        this.tokensPerSecondSamples.push(tokensPerSecond);
+        stats = {
+          ttftMs,
+          tokensPerSecond,
+          avgTokensPerSecond: average(this.tokensPerSecondSamples),
+        };
+      }
+
+      const hasUsage =
+        this.cumulativeUsage.inputTokens > 0 ||
+        this.cumulativeUsage.outputTokens > 0;
       this.post({
         type: HostMessageType.TurnComplete,
         messages: toWebviewMessages(result.conversation),
-        ...(result.usage ? { usage: result.usage } : {}),
+        ...(hasUsage ? { usage: { ...this.cumulativeUsage } } : {}),
+        ...(stats ? { stats } : {}),
       });
     } catch (error) {
       const aborted = isAbortError(error);
@@ -380,6 +431,43 @@ export class ChatBridge {
       this.pendingApprovals.clear();
       this.pendingInputs.clear();
     }
+  }
+
+  /**
+   * Folds one turn's usage into the running session totals, deriving cost from
+   * the active model's pricing when the provider didn't report it (mirrors the
+   * CLI's metrics footer).
+   */
+  private accumulateUsage(usage: TokenUsage): void {
+    const cost = usage.cost ?? this.estimateCost(usage);
+    this.cumulativeUsage = {
+      inputTokens: this.cumulativeUsage.inputTokens + usage.inputTokens,
+      outputTokens: this.cumulativeUsage.outputTokens + usage.outputTokens,
+      cachedTokens: this.cumulativeUsage.cachedTokens + usage.cachedTokens,
+      cost: this.cumulativeUsage.cost + cost,
+    };
+  }
+
+  private estimateCost(usage: TokenUsage): number {
+    const pricing = this.models.find((m) => m.id === this.activeModel)?.pricing;
+    if (!pricing) return 0;
+    return (
+      usage.inputTokens * pricing.inputPerToken +
+      usage.outputTokens * pricing.outputPerToken +
+      usage.cachedTokens *
+        (pricing.cacheReadPerToken ?? pricing.inputPerToken)
+    );
+  }
+
+  /** Clears the running usage/stats totals; called whenever the conversation is. */
+  private resetMetrics(): void {
+    this.cumulativeUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+      cost: 0,
+    };
+    this.tokensPerSecondSamples = [];
   }
 
   private postToolActivity(event: ToolActivityEvent): void {
@@ -448,6 +536,7 @@ export class ChatBridge {
   private async openSession(sessionId: string): Promise<void> {
     this.sessionId = sessionId;
     this.conversation = undefined;
+    this.resetMetrics();
     await this.sendReady();
   }
 
@@ -480,6 +569,7 @@ export class ChatBridge {
     if (sessionId === this.sessionId) {
       this.sessionId = randomUUID();
       this.conversation = undefined;
+      this.resetMetrics();
     }
 
     await this.sendSessionsList();
@@ -510,6 +600,7 @@ export class ChatBridge {
     // the chat view doesn't resurrect a deleted conversation.
     this.sessionId = randomUUID();
     this.conversation = undefined;
+    this.resetMetrics();
 
     await this.sendSessionsList();
   }
@@ -602,6 +693,7 @@ export class ChatBridge {
     }
     this.sessionId = randomUUID();
     this.conversation = undefined;
+    this.resetMetrics();
     await this.sendReady();
   }
 }
@@ -667,6 +759,11 @@ function toWebviewRole(role: MessageRole): WebviewRole {
     case 'system':
       return WebviewRole.System;
   }
+}
+
+function average(samples: number[]): number {
+  if (samples.length === 0) return 0;
+  return samples.reduce((sum, value) => sum + value, 0) / samples.length;
 }
 
 function truncate(text: string, limit: number): string {

@@ -11,6 +11,7 @@ import {
   type WebviewSessionSummary,
   type WebviewToolView,
   type WebviewUsage,
+  type WebviewStats,
 } from '@ext/shared/protocol';
 
 /** A tool invocation as the transcript tracks it across start/end events. */
@@ -49,6 +50,7 @@ export interface ChatState {
   approval?: ApprovalRequestMessage | undefined;
   input?: UserInputRequestMessage | undefined;
   usage?: WebviewUsage | undefined;
+  stats?: WebviewStats | undefined;
   error?: string | undefined;
   autoApplyWrites: boolean;
   expandTools: boolean;
@@ -124,6 +126,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
         approval: undefined,
         input: undefined,
         error: undefined,
+        usage: undefined,
+        stats: undefined,
         autoApplyWrites: action.autoApplyWrites,
         expandTools: action.expandTools,
         maxReadLines: action.maxReadLines,
@@ -189,6 +193,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         ...state,
         messages: action.messages,
         usage: action.usage ?? state.usage,
+        stats: action.stats ?? state.stats,
         busy: false,
         thinking: '',
         streaming: '',

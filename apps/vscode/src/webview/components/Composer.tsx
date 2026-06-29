@@ -3,6 +3,7 @@ import * as React from 'react';
 import { APP_NAME } from '@core/branding';
 import type {
   WebviewModel,
+  WebviewStats,
   WebviewUsage,
 } from '@ext/shared/protocol';
 import {
@@ -19,6 +20,7 @@ export interface ComposerProps {
   activeModel: string | undefined;
   activeProviderId: string | undefined;
   usage: WebviewUsage | undefined;
+  stats: WebviewStats | undefined;
   autoApplyWrites: boolean;
   expandTools: boolean;
   maxReadLines: number;
@@ -149,67 +151,131 @@ export function Composer(props: ComposerProps): React.JSX.Element {
       </div>
 
       <div className="statusbar">
-        <button
-          type="button"
-          className={`status-btn ${props.autoApplyWrites ? 'status-btn-active' : ''}`}
-          title={
-            props.autoApplyWrites
-              ? 'Auto writes on — click to require approval'
-              : 'Auto writes off — click to skip approval prompts'
-          }
-          onClick={props.onToggleAutoWrites}
-        >
-          Auto writes: {props.autoApplyWrites ? 'On' : 'Off'}
-        </button>
-        <span className="toolbar-divider" />
-        <button
-          type="button"
-          className={`status-btn ${props.expandTools ? 'status-btn-active' : ''}`}
-          title={
-            props.expandTools
-              ? 'Tool details expanded — click to collapse'
-              : 'Tool details collapsed — click to expand'
-          }
-          onClick={props.onToggleExpandTools}
-        >
-          Expand: {props.expandTools ? 'On' : 'Off'}
-        </button>
-        <span className="toolbar-divider" />
-        {editingReadLimit ? (
-          <input
-            className="status-read-input"
-            type="number"
-            min={1}
-            value={readLimitDraft}
-            autoFocus
-            onChange={(e) => setReadLimitDraft(e.target.value)}
-            onBlur={commitReadLimit}
-            onKeyDown={onReadLimitKeyDown}
-          />
-        ) : (
+        <div className="statusbar-controls">
           <button
             type="button"
-            className="status-btn"
-            title="Max lines per file read — click to change"
-            onClick={() => {
-              setReadLimitDraft(String(props.maxReadLines));
-              setEditingReadLimit(true);
-            }}
+            className={`status-btn ${props.autoApplyWrites ? 'status-btn-active' : ''}`}
+            title={
+              props.autoApplyWrites
+                ? 'Auto writes on — click to require approval'
+                : 'Auto writes off — click to skip approval prompts'
+            }
+            onClick={props.onToggleAutoWrites}
           >
-            Max File Read: {props.maxReadLines} Lines
+            Auto writes: {props.autoApplyWrites ? 'On' : 'Off'}
           </button>
-        )}
-        <span className="status-spacer" />
-        {props.usage ? (
-          <span className="status-usage" title="Tokens this session">
-            {props.usage.inputTokens + props.usage.outputTokens} tok
-            {props.usage.cost !== undefined
-              ? ` · $${props.usage.cost.toFixed(4)}`
-              : ''}
-          </span>
+          <span className="toolbar-divider" />
+          <button
+            type="button"
+            className={`status-btn ${props.expandTools ? 'status-btn-active' : ''}`}
+            title={
+              props.expandTools
+                ? 'Tool details expanded — click to collapse'
+                : 'Tool details collapsed — click to expand'
+            }
+            onClick={props.onToggleExpandTools}
+          >
+            Expand: {props.expandTools ? 'On' : 'Off'}
+          </button>
+          <span className="toolbar-divider" />
+          {editingReadLimit ? (
+            <input
+              className="status-read-input"
+              type="number"
+              min={1}
+              value={readLimitDraft}
+              autoFocus
+              onChange={(e) => setReadLimitDraft(e.target.value)}
+              onBlur={commitReadLimit}
+              onKeyDown={onReadLimitKeyDown}
+            />
+          ) : (
+            <button
+              type="button"
+              className="status-btn"
+              title="Max lines per file read — click to change"
+              onClick={() => {
+                setReadLimitDraft(String(props.maxReadLines));
+                setEditingReadLimit(true);
+              }}
+            >
+              Max File Read: {props.maxReadLines} Lines
+            </button>
+          )}
+          <span className="status-spacer" />
+          {busy ? <span className="spinner" aria-label="Working" /> : null}
+        </div>
+
+        {props.usage || props.stats ? (
+          <div className="statusbar-metrics">
+            {props.usage ? (
+              <span className="status-usage" title="Token usage this session">
+                <span className="metric-label">ctx </span>
+                <span className="metric-value">
+                  {props.usage.inputTokens.toLocaleString()}
+                </span>
+                <span className="metric-label"> cached </span>
+                <span className="metric-value">
+                  {props.usage.cachedTokens.toLocaleString()}
+                </span>
+                <span className="metric-label"> new </span>
+                <span className="metric-value">
+                  {Math.max(
+                    props.usage.inputTokens - props.usage.cachedTokens,
+                    0
+                  ).toLocaleString()}
+                </span>
+                <span className="metric-label"> out </span>
+                <span className="metric-value">
+                  {props.usage.outputTokens.toLocaleString()}
+                </span>
+                {props.usage.cost !== undefined ? (
+                  <>
+                    <span className="metric-label"> · $</span>
+                    <span className="metric-value">
+                      {props.usage.cost.toFixed(4)}
+                    </span>
+                  </>
+                ) : null}
+              </span>
+            ) : (
+              <span />
+            )}
+            {props.stats ? (
+              <span
+                className="status-stats"
+                title="Latency and throughput"
+              >
+                <span className="metric-label">TTFT </span>
+                <span className="metric-value">
+                  {formatDuration(props.stats.ttftMs)}
+                </span>
+                <span className="metric-label"> · </span>
+                <span className="metric-value">
+                  {props.stats.tokensPerSecond.toFixed(1)}
+                </span>
+                <span className="metric-label"> tok/s · AVG </span>
+                <span className="metric-value">
+                  {props.stats.avgTokensPerSecond.toFixed(1)}
+                </span>
+              </span>
+            ) : null}
+          </div>
         ) : null}
-        {busy ? <span className="spinner" aria-label="Working" /> : null}
       </div>
     </div>
   );
+}
+
+/** Formats a millisecond duration the way the CLI footer does (e.g. 1.5s). */
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const totalSeconds = ms / 1000;
+  if (totalSeconds < 60) {
+    const rounded = Math.round(totalSeconds * 10) / 10;
+    return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.round(totalSeconds % 60);
+  return seconds > 0 ? `${minutes}min ${seconds}s` : `${minutes}min`;
 }
