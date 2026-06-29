@@ -7,19 +7,19 @@ import { describe, expect, it } from 'vitest';
 import { logDebug, logRequestResponse } from '@core/application/debug-log';
 
 describe('logDebug', () => {
-  it('prepends timestamped log lines so the newest is first', async () => {
+  it('appends timestamped log lines in chronological order', async () => {
     const filePath = join(tmpdir(), `justcode-debug-${Date.now()}.log`);
 
     await logDebug({ hello: 'world' }, { filePath });
     await logDebug('plain text', { filePath });
 
     const contents = await readFile(filePath, 'utf8');
-    // Each entry is timestamped, and the most recent ("plain text") sits at the
-    // top, before the earlier object entry.
-    expect(contents).toMatch(/^\[\d{4}-\d{2}-\d{2}T.*Z\] plain text\n/);
+    // Each entry is timestamped, and the earliest entry sits at the top with the
+    // most recent ("plain text") appended below it.
+    expect(contents).toMatch(/^\[\d{4}-\d{2}-\d{2}T.*Z\] \{/);
     expect(contents).toContain('"hello": "world"');
-    expect(contents.indexOf('plain text')).toBeLessThan(
-      contents.indexOf('"hello": "world"')
+    expect(contents.indexOf('"hello": "world"')).toBeLessThan(
+      contents.indexOf('plain text')
     );
   });
 

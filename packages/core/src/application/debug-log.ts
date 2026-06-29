@@ -1,4 +1,4 @@
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 export interface DebugLogOptions {
@@ -60,15 +60,9 @@ export async function logDebug(
   try {
     const filePath = options.filePath ?? defaultFilePath();
     await mkdir(dirname(filePath), { recursive: true });
-    // Prepend so the newest entry is at the top of the file. Best-effort: read
-    // the prior contents (if any) and rewrite with the new entry first.
-    let existing = '';
-    try {
-      existing = await readFile(filePath, 'utf8');
-    } catch {
-      // no prior log yet
-    }
-    await writeFile(filePath, `${formatEntry(value)}\n${existing}`, 'utf8');
+    // Append so entries land in chronological (ascending) order: oldest first,
+    // newest at the bottom.
+    await appendFile(filePath, `${formatEntry(value)}\n`, 'utf8');
   } catch {
     // best effort only; logging must never break the app
   }
