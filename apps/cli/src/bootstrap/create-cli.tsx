@@ -19,6 +19,7 @@ import {
   writeGlobalConfig,
 } from '@runtime/persistence/global-config';
 import { resetAppState } from '@runtime/persistence/reset-app-state';
+import { APP_NAME, APP_NAME_LOWERED } from '@core/branding';
 
 interface SharedOptions {
   provider?: string;
@@ -41,7 +42,7 @@ export function createCli(): Command {
   void deleteDebugLog();
 
   program
-    .name('JustCode')
+    .name(APP_NAME)
     .description('Just Code CLI')
     .option(
       '-p, --provider <provider>',
@@ -84,7 +85,7 @@ export function createCli(): Command {
 
       if (!runtime.providerId) {
         process.stdout.write(
-          'No provider is configured. Run `justcode` and use /connect first.\n'
+          `No provider is configured. Run \`${APP_NAME_LOWERED}\` and use /connect first.\n`
         );
         return;
       }
@@ -148,7 +149,7 @@ export function normalizeArgv(argv: readonly string[]): string[] {
 
 async function confirmReset(): Promise<boolean> {
   process.stdout.write(
-    'This will permanently reset JustCode to defaults and clear connected providers, pulled models, and sessions. This is irreversible.\n'
+    `This will permanently reset ${APP_NAME} to defaults and clear connected providers, pulled models, and sessions. This is irreversible.\n`
   );
 
   const readline = createInterface({

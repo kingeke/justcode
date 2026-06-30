@@ -89,6 +89,7 @@ import { ClearSessionsPicker } from '@cli/ui/clear-sessions-picker.js';
 import { SessionPicker } from '@cli/ui/session-picker.js';
 import { ProviderId } from '@core/ports/provider-catalog.js';
 import type { ConversationSummary } from '@core/ports/conversation-repository';
+import { APP_NAME, APP_NAME_LOWERED } from '@core/branding';
 
 const MAX_COMMAND_ITEMS = 8;
 
@@ -2450,7 +2451,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     return (
       <ResetPicker
         onConfirm={() => {
-          const configDirectory = join(homedir(), '.cache', 'justcode');
+          const configDirectory = join(homedir(), '.cache', APP_NAME_LOWERED);
           void resetAppState(configDirectory)
             .then(() => {
               const resetConfig = {
@@ -2559,7 +2560,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           flexShrink={0}
           content={
             new StyledText([
-              tc('JustCode ', { fg: 'cyan' }),
+              tc(`${APP_NAME} `, { fg: 'cyan' }),
               tc(`v${props.version}`, { fg: MUTED }),
             ])
           }

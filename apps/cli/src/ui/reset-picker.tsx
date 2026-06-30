@@ -3,6 +3,7 @@ import { createTextAttributes } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
 
 import { KeyName } from '@cli/ui/key-name.js';
+import { APP_NAME } from '@core/branding';
 
 const BOLD = createTextAttributes({ bold: true });
 const WARNING = '#f59e0b';
@@ -59,7 +60,7 @@ export function ResetPicker(props: ResetPickerProps): React.ReactNode {
         Confirm reset
       </text>
       <text fg={WARNING}>This action is irreversible.</text>
-      <text marginTop={1}>Resetting JustCode will:</text>
+      <text marginTop={1}>Resetting {APP_NAME} will:</text>
       <text>• restore config to defaults</text>
       <text>• remove all connected providers</text>
       <text>• remove all pulled models</text>

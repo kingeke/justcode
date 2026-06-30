@@ -7,3 +7,4 @@
  * VSCode webview, without dragging in `node:` modules.
  */
 export const APP_NAME = 'JustCode';
+export const APP_NAME_LOWERED = APP_NAME.toLowerCase();
