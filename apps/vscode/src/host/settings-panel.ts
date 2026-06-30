@@ -400,12 +400,12 @@ function validateMcpJson(content: string): string | undefined {
     return '"mcpServers" must be an object mapping a name to its config.';
   }
   for (const [name, value] of Object.entries(servers)) {
-    if (
-      typeof value !== 'object' ||
-      value === null ||
-      typeof (value as { command?: unknown }).command !== 'string'
-    ) {
-      return `Server "${name}" must have a string "command".`;
+    if (typeof value !== 'object' || value === null) {
+      return `Server "${name}" must be an object.`;
+    }
+    const entry = value as { command?: unknown; url?: unknown };
+    if (typeof entry.command !== 'string' && typeof entry.url !== 'string') {
+      return `Server "${name}" must have a string "command" (local) or "url" (remote).`;
     }
   }
   return undefined;

@@ -4,23 +4,29 @@ import { join } from 'node:path';
 /**
  * Configuration for a single MCP server, mirroring the shape used by LM Studio,
  * Claude Desktop, and friends so users can paste an existing `mcp.json` entry
- * unchanged:
+ * unchanged. A server is either local (a `command` run over stdio) or remote (a
+ * `url` reached over Streamable HTTP):
  *
  * ```json
  * {
  *   "mcpServers": {
- *     "playwright": { "command": "npx", "args": ["@playwright/mcp@latest"] }
+ *     "playwright": { "command": "npx", "args": ["@playwright/mcp@latest"] },
+ *     "remote": { "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer …" } }
  *   }
  * }
  * ```
  */
 export interface McpServerConfig {
-  /** Executable to launch the server (e.g. `npx`, `uvx`, an absolute path). */
-  command: string;
-  /** Arguments passed to the command. */
+  /** Executable to launch a local server (e.g. `npx`, `uvx`, an absolute path). */
+  command?: string;
+  /** Arguments passed to the command (local servers only). */
   args?: string[];
   /** Extra environment variables for the spawned process (merged over the parent's). */
   env?: Record<string, string>;
+  /** Endpoint of a remote server, reached over Streamable HTTP. */
+  url?: string;
+  /** Extra HTTP headers for a remote server (e.g. an auth token). */
+  headers?: Record<string, string>;
   /**
    * When true, the server is defined but skipped at load time — a convenient way
    * to keep an entry around without launching it.
@@ -97,25 +103,37 @@ function normalizeServers(parsed: unknown): Record<string, McpServerConfig> {
 
   const result: Record<string, McpServerConfig> = {};
   for (const [name, value] of Object.entries(servers)) {
-    if (!isRecord(value) || typeof value.command !== 'string') continue;
+    if (!isRecord(value)) continue;
+    const hasCommand = typeof value.command === 'string';
+    const hasUrl = typeof value.url === 'string';
+    // Each server must declare exactly one transport: a local command or a
+    // remote url. An entry with neither is malformed and skipped.
+    if (!hasCommand && !hasUrl) continue;
     const args = Array.isArray(value.args)
       ? value.args.filter((arg): arg is string => typeof arg === 'string')
       : undefined;
-    const env = isRecord(value.env)
-      ? Object.fromEntries(
-          Object.entries(value.env).filter(
-            (entry): entry is [string, string] => typeof entry[1] === 'string'
-          )
-        )
-      : undefined;
+    const env = stringRecord(value.env);
+    const headers = stringRecord(value.headers);
     result[name] = {
-      command: value.command,
+      ...(hasCommand ? { command: value.command as string } : {}),
+      ...(hasUrl ? { url: value.url as string } : {}),
       ...(args ? { args } : {}),
       ...(env ? { env } : {}),
+      ...(headers ? { headers } : {}),
       ...(value.disabled === true ? { disabled: true } : {}),
     };
   }
   return result;
+}
+
+/** Keeps only the string-valued entries of a record, or undefined if not one. */
+function stringRecord(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) return undefined;
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string'
+    )
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

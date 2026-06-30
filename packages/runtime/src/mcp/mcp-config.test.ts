@@ -79,6 +79,45 @@ describe('readMcpConfig', () => {
     });
   });
 
+  it('parses a remote (url) server with headers', async () => {
+    const dir = await tempDir();
+    await writeFile(
+      mcpConfigPath(dir),
+      JSON.stringify({
+        mcpServers: {
+          remote: {
+            url: 'https://example.com/mcp',
+            headers: { Authorization: 'Bearer x' },
+          },
+        },
+      }),
+      'utf8'
+    );
+    expect(await readMcpConfig(dir)).toEqual({
+      remote: {
+        url: 'https://example.com/mcp',
+        headers: { Authorization: 'Bearer x' },
+      },
+    });
+  });
+
+  it('skips entries with neither a command nor a url', async () => {
+    const dir = await tempDir();
+    await writeFile(
+      mcpConfigPath(dir),
+      JSON.stringify({
+        mcpServers: {
+          good: { url: 'https://example.com/mcp' },
+          bad: { headers: { a: 'b' } },
+        },
+      }),
+      'utf8'
+    );
+    expect(await readMcpConfig(dir)).toEqual({
+      good: { url: 'https://example.com/mcp' },
+    });
+  });
+
   it('carries the disabled flag through', async () => {
     const dir = await tempDir();
     await writeFile(

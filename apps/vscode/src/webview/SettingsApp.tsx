@@ -1030,6 +1030,10 @@ const MCP_PLACEHOLDER = `{
     "playwright": {
       "command": "npx",
       "args": ["@playwright/mcp@latest"]
+    },
+    "remote": {
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer …" }
     }
   }
 }`;
@@ -1059,7 +1063,8 @@ function McpTab({
     <div className="settings-section mcp-section">
       <h2 className="settings-section-title">MCP Servers</h2>
       <p className="settings-hint mcp-intro">
-        Define MCP servers as JSON. On save, JustCode connects to each server
+        Define MCP servers as JSON — a local <code>command</code> or a remote{' '}
+        <code>url</code> (over HTTP). On save, JustCode connects to each server
         and adds its tools — manage them under the tools button in chat. Changes
         apply immediately.
       </p>
