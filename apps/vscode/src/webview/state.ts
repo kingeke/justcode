@@ -65,6 +65,17 @@ export enum ChatStatus {
   Ready = 'ready',
 }
 
+/**
+ * A message the user submitted while a turn was in flight, held until the turn
+ * finishes. Carries its own staged images so a screenshot queued mid-turn isn't
+ * lost. Flushed (combined into one turn) once the agent is idle again.
+ */
+export interface QueuedMessage {
+  id: string;
+  content: string;
+  images: WebviewImage[];
+}
+
 export type ChatView = 'sessions' | 'chat' | 'model-picker';
 
 export interface ChatState {
@@ -123,6 +134,8 @@ export interface ChatState {
   resolvedFiles: Record<string, ResolvedFile>;
   /** Last file-revert failure, surfaced under the changes panel. */
   revertError?: string | undefined;
+  /** Messages submitted mid-turn, sent once the active turn finishes. */
+  queuedMessages: QueuedMessage[];
 }
 
 export const initialState: ChatState = {
@@ -148,6 +161,7 @@ export const initialState: ChatState = {
   localModelAutoRefresh: true,
   reasoningEffortByModel: {},
   resolvedFiles: {},
+  queuedMessages: [],
 };
 
 /** Local-only actions, distinct from host messages, for optimistic UI updates. */
@@ -165,6 +179,10 @@ export enum LocalActionType {
   SetHistoryLimit = 'setHistoryLimit',
   SetView = 'setView',
   SetTitle = 'setTitle',
+  QueueMessage = 'queueMessage',
+  DequeueMessage = 'dequeueMessage',
+  UpdateQueuedMessage = 'updateQueuedMessage',
+  ClearQueue = 'clearQueue',
   ResolveFiles = 'resolveFiles',
   UnresolveFile = 'unresolveFile',
 }
@@ -192,6 +210,10 @@ export type LocalAction =
   | { type: LocalActionType.SetHistoryLimit; count: number }
   | { type: LocalActionType.SetView; view: ChatView }
   | { type: LocalActionType.SetTitle; title: string }
+  | { type: LocalActionType.QueueMessage; content: string; images: WebviewImage[] }
+  | { type: LocalActionType.DequeueMessage; id: string }
+  | { type: LocalActionType.UpdateQueuedMessage; id: string; content: string }
+  | { type: LocalActionType.ClearQueue }
   | {
       type: LocalActionType.ResolveFiles;
       files: Array<{ path: string; resolution: ResolvedFile }>;
@@ -240,6 +262,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
         // A fresh session/snapshot starts with an empty changes panel.
         resolvedFiles: {},
         revertError: undefined,
+        // A new session/snapshot drops anything that was queued.
+        queuedMessages: [],
       };
 
     case HostMessageType.ModelsUpdate:
@@ -416,6 +440,36 @@ export function reducer(state: ChatState, action: Action): ChatState {
 
     case LocalActionType.SetTitle:
       return { ...state, sessionTitle: action.title };
+
+    case LocalActionType.QueueMessage:
+      return {
+        ...state,
+        queuedMessages: [
+          ...state.queuedMessages,
+          {
+            id: `queued-${Date.now()}-${state.queuedMessages.length}`,
+            content: action.content,
+            images: action.images,
+          },
+        ],
+      };
+
+    case LocalActionType.DequeueMessage:
+      return {
+        ...state,
+        queuedMessages: state.queuedMessages.filter((m) => m.id !== action.id),
+      };
+
+    case LocalActionType.UpdateQueuedMessage:
+      return {
+        ...state,
+        queuedMessages: state.queuedMessages.map((m) =>
+          m.id === action.id ? { ...m, content: action.content } : m
+        ),
+      };
+
+    case LocalActionType.ClearQueue:
+      return { ...state, queuedMessages: [] };
 
     case LocalActionType.ResolveFiles:
       return {

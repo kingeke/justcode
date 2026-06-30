@@ -29,6 +29,11 @@ export function App(): React.JSX.Element {
   const [state, dispatch] = React.useReducer(reducer, initialState);
   // The image (data URL) shown full-size in the preview modal, or null when closed.
   const [previewImage, setPreviewImage] = React.useState<string | null>(null);
+  // The queued message being edited inline, and its working draft text.
+  const [editingQueuedId, setEditingQueuedId] = React.useState<string | null>(
+    null
+  );
+  const [queuedDraft, setQueuedDraft] = React.useState('');
   const transcriptRef = React.useRef<HTMLDivElement>(null);
   // Whether new content should auto-scroll. True while the user is parked at the
   // bottom; flips to false the moment they scroll up to read earlier output, so
@@ -70,7 +75,7 @@ export function App(): React.JSX.Element {
     if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [state.messages, state.streaming, state.thinking, state.tools]);
 
-  const submit = (content: string, images: WebviewImage[]): void => {
+  const sendNow = (content: string, images: WebviewImage[]): void => {
     // Sending a new message should always snap to it, even if the user had
     // scrolled up while reading the previous turn.
     stickToBottomRef.current = true;
@@ -80,6 +85,65 @@ export function App(): React.JSX.Element {
       content,
       ...(images.length ? { images } : {}),
     });
+  };
+
+  const submit = (content: string, images: WebviewImage[]): void => {
+    // A turn is in flight — hold this message and send it once the agent is idle
+    // instead of erroring. It's shown as a pending pill the user can cancel.
+    if (state.busy) {
+      dispatch({ type: LocalActionType.QueueMessage, content, images });
+      return;
+    }
+    sendNow(content, images);
+  };
+
+  // Flush the queue once the active turn finishes: combine the held messages into
+  // a single turn (joined by blank lines, images concatenated) and send it.
+  React.useEffect(() => {
+    if (state.busy || state.queuedMessages.length === 0) return;
+    if (!state.activeModel) return;
+    // Don't send a queued message out from under an in-progress edit.
+    if (editingQueuedId !== null) return;
+    const content = state.queuedMessages
+      .map((m) => m.content)
+      .filter((c) => c.trim().length > 0)
+      .join('\n\n');
+    const images = state.queuedMessages.flatMap((m) => m.images);
+    dispatch({ type: LocalActionType.ClearQueue });
+    sendNow(content, images);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.busy, state.queuedMessages, editingQueuedId]);
+
+  const dequeueMessage = (id: string): void => {
+    dispatch({ type: LocalActionType.DequeueMessage, id });
+  };
+
+  const startEditQueued = (id: string, content: string): void => {
+    setEditingQueuedId(id);
+    setQueuedDraft(content);
+  };
+
+  const commitEditQueued = (): void => {
+    const id = editingQueuedId;
+    if (id === null) return;
+    const trimmed = queuedDraft.trim();
+    // Clearing the text cancels the queued message entirely.
+    if (trimmed) {
+      dispatch({
+        type: LocalActionType.UpdateQueuedMessage,
+        id,
+        content: queuedDraft,
+      });
+    } else {
+      dispatch({ type: LocalActionType.DequeueMessage, id });
+    }
+    setEditingQueuedId(null);
+    setQueuedDraft('');
+  };
+
+  const cancelEditQueued = (): void => {
+    setEditingQueuedId(null);
+    setQueuedDraft('');
   };
 
   const cancel = (): void => {
@@ -465,6 +529,64 @@ export function App(): React.JSX.Element {
         onUndoAll={undoAllFiles}
         onOpenFile={openFile}
       />
+
+      {state.queuedMessages.length > 0 ? (
+        <div className="queued-messages">
+          {state.queuedMessages.map((m) => {
+            const editing = editingQueuedId === m.id;
+            return (
+              <div
+                key={m.id}
+                className="queued-message"
+                title={
+                  editing
+                    ? undefined
+                    : 'Queued — sends when the current turn finishes'
+                }
+              >
+                <span className="queued-message-icon">⏱</span>
+                {editing ? (
+                  <input
+                    className="queued-message-input"
+                    value={queuedDraft}
+                    // eslint-disable-next-line jsx-a11y/no-autofocus
+                    autoFocus
+                    onChange={(e) => setQueuedDraft(e.target.value)}
+                    onBlur={commitEditQueued}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        commitEditQueued();
+                      }
+                      if (e.key === 'Escape') cancelEditQueued();
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="queued-message-text"
+                    title="Click to edit"
+                    onClick={() => startEditQueued(m.id, m.content)}
+                  >
+                    {m.content.trim() ||
+                      (m.images.length === 1
+                        ? '1 image'
+                        : `${m.images.length} images`)}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="queued-message-remove"
+                  title="Cancel this queued message"
+                  onClick={() => dequeueMessage(m.id)}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
 
       <Composer
         busy={state.busy}

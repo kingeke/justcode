@@ -541,7 +541,7 @@ export class ChatBridge {
       const aborted = isAbortError(error);
       this.post({
         type: HostMessageType.Error,
-        message: aborted ? 'Turn cancelled.' : errorMessage(error),
+        message: aborted ? 'Request cancelled.' : errorMessage(error),
         aborted,
       });
     } finally {
@@ -862,8 +862,7 @@ export class ChatBridge {
     const config = await readGlobalConfig(configDir);
     await writeGlobalConfig(configDir, {
       ...config,
-      reasoningEffortByModel: this
-        .reasoningEffortByModel as NonNullable<
+      reasoningEffortByModel: this.reasoningEffortByModel as NonNullable<
         GlobalConfig['reasoningEffortByModel']
       >,
     });
@@ -1056,7 +1055,11 @@ export class ChatBridge {
     // network call for local providers (Ollama/LM Studio), a disk read+parse
     // otherwise — and only renders the blank chat once that resolves, the lag
     // the user sees when clicking "+". Reuse the cached state so it shows at once.
-    if (this.services?.providerId && this.activeModel && this.models.length > 0) {
+    if (
+      this.services?.providerId &&
+      this.activeModel &&
+      this.models.length > 0
+    ) {
       this.conversation = createConversation(this.sessionId);
       this.post({
         type: HostMessageType.Ready,

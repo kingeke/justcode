@@ -18,6 +18,9 @@ body {
   font-size: var(--vscode-font-size, 13px);
   color: var(--vscode-foreground);
   background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  /* The panel is a fixed-width sidebar; never scroll the page sideways — wide
+     content (code blocks, metrics, long model names) is handled per-element. */
+  overflow-x: hidden;
 }
 
 .app {
@@ -31,7 +34,13 @@ body {
 .transcript {
   flex: 1;
   overflow-y: auto;
+  /* overflow-y:auto makes the browser compute overflow-x to `auto` too, so a
+     single wide child (a fenced code block, a long unbroken token) would give
+     the whole transcript a horizontal scrollbar. Clip instead — code blocks keep
+     their own internal scroll, and prose wraps. */
+  overflow-x: hidden;
   padding: 8px;
+  min-width: 0;
 }
 
 .notice {
@@ -61,8 +70,12 @@ body {
 
 .msg-content {
   margin: 0;
+  max-width: 100%;
   white-space: pre-wrap;
   word-break: break-word;
+  /* Break even a long unbroken token (URL, path, base64) so it never widens
+     the bubble past the panel. */
+  overflow-wrap: anywhere;
   font-family: inherit;
   font-size: 13px;
 }
@@ -98,6 +111,11 @@ body {
 .markdown-body {
   white-space: normal;
   line-height: 1.5;
+  /* Stay within the bubble so wide children (code blocks, tables) scroll
+     internally instead of stretching the message past the panel width. */
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body > *:first-child {
@@ -166,6 +184,9 @@ body {
 .markdown-body pre {
   margin: 0 0 8px;
   padding: 10px 12px;
+  /* Long code lines scroll inside the block (with this as the bounding box)
+     rather than widening the message and forcing a transcript scrollbar. */
+  max-width: 100%;
   overflow-x: auto;
   background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.12));
   border: 1px solid var(--vscode-panel-border, transparent);
@@ -982,7 +1003,6 @@ textarea:focus {
 
 /* Model button in the composer toolbar (replaces the inline select). */
 .model-btn {
-  display: inline-flex;
   align-items: center;
   padding: 2px 6px;
   border: none;
@@ -993,9 +1013,13 @@ textarea:focus {
   font-size: 12px;
   cursor: pointer;
   max-width: 220px;
+  /* Let the button shrink below its text width so the ellipsis engages instead
+     of forcing the toolbar (and the whole panel) wider than the sidebar. */
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: inline-block;
 }
 
 .model-btn:hover:not(:disabled) {
@@ -1007,6 +1031,81 @@ textarea:focus {
   cursor: default;
 }
 
+/* --- Queued messages (sent when the active turn finishes) ----------------- */
+
+.queued-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 8px 4px;
+}
+
+.queued-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px dashed var(--vscode-panel-border, rgba(127, 127, 127, 0.4));
+  border-radius: 6px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.queued-message-icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.queued-message-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Button reset — it reads as text but is clickable to edit. */
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: text;
+}
+
+.queued-message-text:hover {
+  text-decoration: underline dotted;
+}
+
+.queued-message-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--vscode-focusBorder, rgba(127, 127, 127, 0.5));
+  border-radius: 4px;
+  padding: 2px 6px;
+  font: inherit;
+  background: var(--vscode-input-background, transparent);
+  color: var(--vscode-input-foreground, inherit);
+}
+
+.queued-message-remove {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.queued-message-remove:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15));
+}
+
 /* --- Composer (Copilot-style) -------------------------------------------- */
 
 .composer-area {
@@ -1014,6 +1113,7 @@ textarea:focus {
 }
 
 .composer {
+  position: relative;
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, #555));
   border-radius: 8px;
   background: var(--vscode-input-background);
@@ -1023,6 +1123,86 @@ textarea:focus {
 
 .composer:focus-within {
   border-color: var(--vscode-focusBorder);
+}
+
+/* While a turn is in flight, a bright blue arc travels around the composer's
+   edge — a "thinking" affordance. The arc is a conic gradient rotated via the
+   --composer-angle custom property, clipped to a 1.5px ring with a mask, and
+   given a soft glow with drop-shadow. */
+@property --composer-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.composer-busy {
+  border-color: transparent;
+}
+
+.composer-busy::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  z-index: 0;
+  border-radius: 9px;
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--composer-angle),
+    transparent 0deg,
+    transparent 210deg,
+    var(--vscode-focusBorder, #3794ff) 300deg,
+    #7cc0ff 335deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  filter: drop-shadow(0 0 4px var(--vscode-focusBorder, #3794ff));
+  animation: composer-border-spin 2.4s linear infinite;
+  pointer-events: none;
+}
+
+/* Keep the input and toolbar above the animated ring. */
+.composer-busy > * {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes composer-border-spin {
+  to {
+    --composer-angle: 360deg;
+  }
+}
+
+/* Small spinner shown next to the stop button while working. */
+.composer-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-right: 2px;
+  border: 2px solid var(--vscode-focusBorder, #3794ff);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: composer-spin 0.7s linear infinite;
+}
+
+@keyframes composer-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-busy::before {
+    animation: none;
+    background: var(--vscode-focusBorder, #3794ff);
+  }
+  .composer-spinner {
+    animation: none;
+  }
 }
 
 .composer-disabled {
@@ -1559,8 +1739,8 @@ textarea:focus {
 }
 
 .status-stats {
-  white-space: nowrap;
   margin-left: auto;
+  min-width: 0;
 }
 
 .status-item {
@@ -1575,7 +1755,7 @@ textarea:focus {
 }
 
 .status-usage {
-  white-space: nowrap;
+  min-width: 0;
 }
 
 .status-btn {

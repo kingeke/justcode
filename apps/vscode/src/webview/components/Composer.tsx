@@ -163,8 +163,9 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   const submit = (): void => {
     const trimmed = value.trim();
     // An image-only message is valid (just a pasted screenshot), so allow a
-    // send when there's no prose but at least one image is staged.
-    if ((!trimmed && images.length === 0) || busy || disabled) return;
+    // send when there's no prose but at least one image is staged. While a turn
+    // is busy this still fires — the parent queues it rather than sending now.
+    if ((!trimmed && images.length === 0) || disabled) return;
     props.onSubmit(trimmed, images);
     setValue('');
     setImages([]);
@@ -255,7 +256,11 @@ export function Composer(props: ComposerProps): React.JSX.Element {
 
   return (
     <div className="composer-area">
-      <div className={`composer ${disabled ? 'composer-disabled' : ''}`}>
+      <div
+        className={`composer ${disabled ? 'composer-disabled' : ''} ${
+          busy ? 'composer-busy' : ''
+        }`}
+      >
         {images.length > 0 ? (
           <div className="composer-attachments">
             {images.map((image, index) => {
@@ -298,7 +303,9 @@ export function Composer(props: ComposerProps): React.JSX.Element {
           placeholder={
             disabled
               ? 'Configure a provider to start chatting…'
-              : `Ask ${APP_NAME} to build, fix, or explain…`
+              : busy
+                ? 'Queue a follow-up — sends when this turn finishes…'
+                : `Ask ${APP_NAME} to build, fix, or explain…`
           }
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={onKeyDown}
@@ -531,14 +538,22 @@ export function Composer(props: ComposerProps): React.JSX.Element {
             </div>
 
             {busy ? (
-              <button
-                type="button"
-                className="icon-btn icon-btn-stop"
-                title="Stop"
-                onClick={props.onCancel}
-              >
-                <StopIcon />
-              </button>
+              <>
+                <span
+                  className="composer-spinner"
+                  role="status"
+                  aria-label="Working"
+                  title="Working…"
+                />
+                <button
+                  type="button"
+                  className="icon-btn icon-btn-stop"
+                  title="Stop"
+                  onClick={props.onCancel}
+                >
+                  <StopIcon />
+                </button>
+              </>
             ) : (
               <button
                 type="button"
