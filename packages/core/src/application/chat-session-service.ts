@@ -287,13 +287,15 @@ export class ChatSessionService {
     );
     const projectInstructions = await this.loadProjectInstructions();
     // `lazy_load_tools` is a one-way gate per session: once the model has called
-    // it, the full tool set stays loaded for every later turn instead of
+    // it, the real tool set stays loaded for every later turn instead of
     // collapsing back to the gateway and forcing it to re-load. The gateway
-    // stays in that set — the model already saw and called it.
+    // itself is dropped from that set — it has done its job, so re-advertising
+    // it would just waste tokens and let the model call a now-useless no-op.
     const toolsLoaded = hasLoadedTools(input.conversation.messages);
     // With lazy loading off, advertise every real tool from the first turn (no
     // gateway). With it on, the model sees only `lazy_load_tools` until it calls
-    // it, after which the full set (gateway included) stays loaded all session.
+    // it, after which the real tool set (gateway excluded) stays loaded all
+    // session.
     const lazyToolLoadingEnabled = this.getLazyToolLoadingEnabled();
     // Models known not to support tools are sent chat-only from the start; the
     // tool section is also dropped from the system prompt so we don't advertise
@@ -301,7 +303,7 @@ export class ChatSessionService {
     let toolDefinitions = !lazyToolLoadingEnabled
       ? eagerToolDefinitions
       : toolsLoaded
-        ? fullToolDefinitions
+        ? eagerToolDefinitions
         : initialToolDefinitions;
     let toolsEnabled =
       toolDefinitions.length > 0 &&
@@ -436,7 +438,9 @@ export class ChatSessionService {
         );
 
         if (call.name === ToolName.LazyLoadTools) {
-          toolDefinitions = fullToolDefinitions;
+          // Swap in the real tools for the rest of the turn — minus the gateway
+          // itself, which has served its purpose and shouldn't be re-advertised.
+          toolDefinitions = eagerToolDefinitions;
           toolsEnabled =
             toolDefinitions.length > 0 &&
             !this.toolUnsupportedModels.has(input.model);

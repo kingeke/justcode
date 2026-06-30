@@ -923,10 +923,9 @@ describe('ChatSessionService', () => {
     expect(seenRequests[0]).toEqual([
       expect.objectContaining({ name: 'lazy_load_tools' }),
     ]);
-    expect(seenRequests[1]?.map((tool) => tool.name)).toEqual([
-      'lazy_load_tools',
-      'write_file',
-    ]);
+    // After loading, the real tools are advertised — but not the now-spent
+    // lazy_load_tools gateway, which would just be a dead no-op to re-send.
+    expect(seenRequests[1]?.map((tool) => tool.name)).toEqual(['write_file']);
     expect(approvals).toEqual(['write_file']);
     expect(delegatedTool.executed).toEqual(['{"path":"a.txt","content":"hi"}']);
     expect(result.reply).toBe('All done.');
@@ -1003,7 +1002,7 @@ describe('ChatSessionService', () => {
     expect(result.reply).toBe('All done.');
   });
 
-  it('keeps the full tool set on later turns once lazy_load_tools has run', async () => {
+  it('keeps the real tool set (without the gateway) on later turns once lazy_load_tools has run', async () => {
     const repository = new InMemoryConversationRepository();
     const delegatedTool = new RecordingWriteTool();
     const lazyLoadTool = new LazyLoadToolsTool([
@@ -1057,8 +1056,9 @@ describe('ChatSessionService', () => {
       content: 'discover',
     });
 
-    // Reusing the same conversation, the next turn must advertise the full set
-    // up front instead of falling back to the lazy-loading gateway.
+    // Reusing the same conversation, the next turn must advertise the real tools
+    // up front instead of falling back to the lazy-loading gateway — and without
+    // re-sending the gateway itself, which has already done its job.
     await service.submitMessage({
       conversation: first.conversation,
       model: 'gpt',
@@ -1066,9 +1066,6 @@ describe('ChatSessionService', () => {
     });
 
     const followUpRequest = seenRequests[seenRequests.length - 1];
-    expect(followUpRequest?.map((tool) => tool.name)).toEqual([
-      'lazy_load_tools',
-      'write_file',
-    ]);
+    expect(followUpRequest?.map((tool) => tool.name)).toEqual(['write_file']);
   });
 });
