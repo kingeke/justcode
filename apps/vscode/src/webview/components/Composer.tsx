@@ -175,6 +175,11 @@ export function Composer(props: ComposerProps): React.JSX.Element {
       event.preventDefault();
       submit();
     }
+    // Esc interrupts the in-flight turn, mirroring the Stop button (and the CLI).
+    if (event.key === 'Escape' && busy) {
+      event.preventDefault();
+      props.onCancel();
+    }
   };
 
   // Pasting image bytes into the prompt stages them as chips above the textarea

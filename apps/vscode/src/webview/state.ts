@@ -418,14 +418,23 @@ export function reducer(state: ChatState, action: Action): ChatState {
       };
     }
 
-    case HostMessageType.Error:
+    case HostMessageType.Error: {
+      // An aborted turn still streamed real thinking/answer tokens. Those live in
+      // `thinking`/`streaming`, which the view only renders while `busy` — so
+      // flushing them into `liveTurnItems` keeps the partial response visible
+      // instead of vanishing the moment the turn stops (mirrors the CLI, which
+      // commits the interrupted partial). Plain errors keep the old behaviour.
+      const committed = action.aborted
+        ? flushStreaming(flushThinking(state))
+        : state;
       return {
-        ...state,
+        ...committed,
         busy: false,
         error: action.message,
         approval: undefined,
         input: undefined,
       };
+    }
 
     case LocalActionType.SelectModel:
       return {

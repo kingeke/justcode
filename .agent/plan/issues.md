@@ -13,7 +13,7 @@ This document tracks the issues so far.
 - show button to go to bottom when scrolled up
 - maybe make discover_tools optional via settings
 - aborting a requests removes all previous thinking and generated texts
-- ensure all tools ask for permission except if auto approvals are active
+- opening model picker removes inputted text
 
 # Instruction
 

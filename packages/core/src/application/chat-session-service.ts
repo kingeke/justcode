@@ -233,6 +233,16 @@ export class ChatSessionService {
     return createConversation(sessionId);
   }
 
+  /**
+   * Persists a conversation as-is. A turn normally saves itself when it
+   * completes; this lets a host commit out-of-band state — e.g. the partial
+   * messages of a turn the user interrupted, which never reaches the in-turn
+   * save — so the interrupted exchange survives a reload.
+   */
+  public async saveConversation(conversation: Conversation): Promise<void> {
+    await this.repository.save(conversation);
+  }
+
   public async listSessions(): Promise<ConversationSummary[]> {
     return this.repository.list();
   }

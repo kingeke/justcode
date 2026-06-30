@@ -8,7 +8,7 @@ import {
   type Conversation,
 } from '@core/domain/conversation';
 import { APP_NAME } from '@core/branding';
-import type { MessageRole } from '@core/domain/message';
+import { createMessage, type MessageRole } from '@core/domain/message';
 import type {
   ModelInfo,
   ModelReasoning,
@@ -624,6 +624,15 @@ export class ChatBridge {
       if (firstTokenMs === null) firstTokenMs = Date.now();
     };
 
+    // Accumulate the streamed answer/thinking so an interrupted turn can keep the
+    // partial response. The service only returns (and persists) `working` on
+    // success — on abort it throws mid-loop, so without this the user's prompt
+    // and the model's partial answer are lost from the next turn and the saved
+    // session. Mirrors the CLI, which appends the captured partial in memory.
+    let streamedContent = '';
+    let streamedThinking = '';
+    let thinkingStartMs = 0;
+
     try {
       const reasoningEffort = this.effectiveEffortForActiveModel();
       const result = await services.chatSessionService.submitMessage({
@@ -647,10 +656,13 @@ export class ChatBridge {
         drainSteering: () => this.drainSteering(),
         onToken: (token) => {
           markFirstToken();
+          streamedContent += token;
           this.post({ type: HostMessageType.Token, token });
         },
         onThinkingToken: (token) => {
           markFirstToken();
+          if (thinkingStartMs === 0) thinkingStartMs = Date.now();
+          streamedThinking += token;
           this.post({ type: HostMessageType.Thinking, token });
         },
         onUsage: (stepUsage) => {
@@ -719,6 +731,67 @@ export class ChatBridge {
       });
     } catch (error) {
       const aborted = isAbortError(error);
+      if (aborted && this.conversation) {
+        // The service threw mid-turn without returning `working`, so fold the
+        // user prompt and whatever the model streamed before the interrupt into
+        // the conversation, then push the rebuilt transcript to the webview as a
+        // committed turn. Without this the partial lives only in the webview's
+        // transient `liveTurnItems`, which the next submit clears — so the
+        // interrupted answer would vanish the moment a new message is sent.
+        const userMessage = createMessage(
+          'user',
+          content,
+          new Date(),
+          undefined,
+          images?.length
+            ? {
+                images: images.map((image) => ({
+                  mediaType: image.mediaType,
+                  data: image.data,
+                })),
+              }
+            : undefined
+        );
+        const trimmedThinking = streamedThinking.trim();
+        const partialAssistant =
+          streamedContent.trim() || trimmedThinking
+            ? createMessage('assistant', streamedContent, new Date(), undefined, {
+                ...(trimmedThinking
+                  ? {
+                      thinking: {
+                        content: streamedThinking,
+                        durationMs:
+                          thinkingStartMs > 0 ? Date.now() - thinkingStartMs : 0,
+                      },
+                    }
+                  : {}),
+              })
+            : undefined;
+        this.conversation = {
+          ...this.conversation,
+          messages: [
+            ...this.conversation.messages,
+            userMessage,
+            ...(partialAssistant ? [partialAssistant] : []),
+          ],
+          updatedAt: new Date().toISOString(),
+        };
+        // Persist now so the interrupted exchange survives a reload even if no
+        // further turn is taken (a later turn would otherwise be the first save).
+        await services.chatSessionService.saveConversation(this.conversation);
+        this.post({
+          type: HostMessageType.TurnComplete,
+          messages: await toWebviewMessages(
+            this.conversation,
+            services,
+            this.toolViewsByCallId
+          ),
+          ...(this.cumulativeUsage.inputTokens > 0 ||
+          this.cumulativeUsage.outputTokens > 0
+            ? { usage: { ...this.cumulativeUsage } }
+            : {}),
+        });
+      }
       this.post({
         type: HostMessageType.Error,
         message: aborted ? 'Request cancelled.' : errorMessage(error),

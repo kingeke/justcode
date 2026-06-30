@@ -61,6 +61,53 @@ describe('webview chat state live turn ordering', () => {
     });
   });
 
+  it('keeps the partial thinking and answer visible when a turn is aborted', () => {
+    const withThinking = reducer(initialState, {
+      type: HostMessageType.Thinking,
+      token: 'partial reasoning',
+    });
+    const withStreaming = reducer(withThinking, {
+      type: HostMessageType.Token,
+      token: 'partial answer',
+    });
+
+    const aborted = reducer(withStreaming, {
+      type: HostMessageType.Error,
+      message: 'Request cancelled.',
+      aborted: true,
+    });
+
+    expect(aborted.busy).toBe(false);
+    expect(aborted.liveTurnItems).toEqual([
+      expect.objectContaining({
+        kind: LiveTurnItemKind.Thinking,
+        content: 'partial reasoning',
+      }),
+      expect.objectContaining({
+        kind: LiveTurnItemKind.Message,
+        content: 'partial answer',
+      }),
+    ]);
+    // The transient buffers are drained into the committed items, not dropped.
+    expect(aborted.thinking).toBe('');
+    expect(aborted.streaming).toBe('');
+  });
+
+  it('does not flush live buffers on a non-abort error', () => {
+    const withStreaming = reducer(initialState, {
+      type: HostMessageType.Token,
+      token: 'half a sentence',
+    });
+
+    const failed = reducer(withStreaming, {
+      type: HostMessageType.Error,
+      message: 'Something broke',
+    });
+
+    expect(failed.liveTurnItems).toEqual([]);
+    expect(failed.streaming).toBe('half a sentence');
+  });
+
   it('preserves completed thinking before the final assistant message', () => {
     const withThinking = reducer(initialState, {
       type: HostMessageType.Thinking,
