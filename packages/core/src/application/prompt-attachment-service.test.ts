@@ -162,6 +162,51 @@ describe('PromptAttachmentService', () => {
       { path: 'src/app.ts', content: '1 | console.log("app")' },
     ]);
   });
+
+  it('resolves @currentfile to the host editor file, by its real path', async () => {
+    const service = new PromptAttachmentService(
+      new InMemoryWorkspaceFiles({ 'src/app.ts': 'console.log("app")' }),
+      undefined,
+      () => 'src/app.ts'
+    );
+
+    const attachments = await service.resolveAttachments(
+      'Look at @currentfile'
+    );
+
+    expect(attachments).toEqual([
+      { path: 'src/app.ts', content: '1 | console.log("app")' },
+    ]);
+  });
+
+  it('drops @currentfile when no file is open', async () => {
+    const service = new PromptAttachmentService(
+      new InMemoryWorkspaceFiles({ 'src/app.ts': 'console.log("app")' }),
+      undefined,
+      () => undefined
+    );
+
+    expect(await service.resolveAttachments('Look at @currentfile')).toEqual(
+      []
+    );
+  });
+
+  it('offers @currentfile in the file list only when a file is open', async () => {
+    const files = { 'src/app.ts': '' };
+    const withFile = new PromptAttachmentService(
+      new InMemoryWorkspaceFiles(files),
+      undefined,
+      () => 'src/app.ts'
+    );
+    const withoutFile = new PromptAttachmentService(
+      new InMemoryWorkspaceFiles(files),
+      undefined,
+      () => undefined
+    );
+
+    expect(await withFile.listFiles()).toEqual(['currentfile', 'src/app.ts']);
+    expect(await withoutFile.listFiles()).toEqual(['src/app.ts']);
+  });
 });
 
 describe('prompt mention helpers', () => {

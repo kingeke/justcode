@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 
 import { APP_NAME } from '@core/branding';
+import { writeActiveFile } from '@runtime/workspace/active-file-store';
 import { ChatBridge } from '@ext/host/chat-bridge';
 import { SettingsPanel } from '@ext/host/settings-panel';
 import { WebviewMessageType, type WebviewToHost } from '@ext/shared/protocol';
@@ -60,11 +61,30 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     );
     this.bridge = bridge;
 
+    // Keep `@currentfile` pointed at the editor's active file. Seed with the
+    // file open now, then follow editor changes. A focus shift to the sidebar
+    // reports an undefined active editor; ignore that so the mention keeps
+    // referring to the last real file the user was looking at. Also publish it
+    // to the shared sidecar so a CLI in the same workspace resolves it too.
+    const workspaceRoot = resolveWorkspaceRoot();
+    const updateCurrentFile = (file: string | undefined): void => {
+      bridge.setCurrentFile(file);
+      writeActiveFile(workspaceRoot, file);
+    };
+    updateCurrentFile(activeWorkspaceFile());
+    const activeEditorSub = vscode.window.onDidChangeActiveTextEditor(
+      (editor) => {
+        const file = activeWorkspaceFile(editor);
+        if (file) updateCurrentFile(file);
+      }
+    );
+
     webview.onDidReceiveMessage((message: WebviewToHost) => {
       void bridge.handle(message);
     });
 
     webviewView.onDidDispose(() => {
+      activeEditorSub.dispose();
       bridge.dispose();
       if (this.bridge === bridge) {
         this.bridge = undefined;
@@ -134,6 +154,21 @@ function openConnectTerminal(): void {
 function resolveWorkspaceRoot(): string {
   const folder = vscode.workspace.workspaceFolders?.[0];
   return folder ? folder.uri.fsPath : process.cwd();
+}
+
+/**
+ * The active editor's file as a workspace-relative path, or undefined when no
+ * file-backed editor is active or it sits outside the workspace. Used to drive
+ * the `@currentfile` mention. Defaults to the current active editor.
+ */
+function activeWorkspaceFile(
+  editor: vscode.TextEditor | undefined = vscode.window.activeTextEditor
+): string | undefined {
+  const uri = editor?.document.uri;
+  if (!uri || uri.scheme !== 'file') return undefined;
+  const folder = vscode.workspace.getWorkspaceFolder(uri);
+  if (!folder) return undefined;
+  return vscode.workspace.asRelativePath(uri, false);
 }
 
 function createNonce(): string {

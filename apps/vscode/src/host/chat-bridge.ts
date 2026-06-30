@@ -138,6 +138,10 @@ export class ChatBridge {
   // The toggleable tool catalog, populated from the runtime once services exist;
   // sent to the webview in every snapshot so the manage-tools popup can render.
   private manageableTools: WebviewTool[] = [];
+  // Workspace-relative path of the file open in the editor, which `@currentfile`
+  // resolves to. Kept in sync by the view provider as the active editor changes;
+  // re-applied to the runtime whenever services are (re)created.
+  private currentFile: string | undefined;
   // The user's chosen reasoning effort per model, nested by provider id (e.g.
   // `{ openrouter: { "openai/gpt-5": "high" } }`). Mirrors the CLI's per-model
   // store; a model absent here uses its default effort.
@@ -403,6 +407,7 @@ export class ChatBridge {
     services.setLocalModelAutoRefresh(this.localModelAutoRefresh);
     services.setLazyToolLoading(this.lazyToolLoading);
     services.setDisabledTools(this.disabledTools);
+    services.setCurrentFile(this.currentFile);
     // Snapshot the catalog (name/label/category/description) for the popup; live
     // on/off state is tracked separately in `disabledTools`.
     this.manageableTools = services.manageableTools.map((tool) => ({
@@ -1426,6 +1431,16 @@ export class ChatBridge {
     // Clear the requested model so the new provider's default is resolved.
     this.activeModel = undefined;
     await this.sendReady();
+  }
+
+  /**
+   * Points `@currentfile` at the file open in the editor. Called by the view
+   * provider as the active editor changes; applied to the live runtime so the
+   * next completion/attachment uses it without waiting for a session reload.
+   */
+  public setCurrentFile(workspaceRelativePath: string | undefined): void {
+    this.currentFile = workspaceRelativePath;
+    this.services?.setCurrentFile(workspaceRelativePath);
   }
 
   /**

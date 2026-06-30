@@ -11,6 +11,13 @@ import {
 import type { MessageAttachment } from '@core/domain/message';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 
+/**
+ * The reserved `@currentfile` mention: a stand-in for the file open in the
+ * host's editor. It's offered in completions whenever a current file is known
+ * and resolved to that file's real path when attachments are gathered.
+ */
+export const CURRENT_FILE_MENTION = 'currentfile';
+
 const ACTIVE_MENTION_PATTERN = /(?:^|\s)@([^\s@]*)$/;
 const MENTION_PATTERN = /(?:^|\s)@([^\s@]+)/g;
 const TRAILING_PUNCTUATION_PATTERN = /[),.:;!?\]]+$/;
@@ -22,11 +29,20 @@ export class PromptAttachmentService {
   public constructor(
     private readonly workspaceFiles: WorkspaceFilePort,
     private readonly getMaxAttachmentLines: () => number = () =>
-      DEFAULT_MAX_READ_LINES
+      DEFAULT_MAX_READ_LINES,
+    /**
+     * Returns the workspace-relative path of the file currently open in the
+     * host's editor, or undefined when none is known (e.g. a bare CLI). Lets the
+     * `@currentfile` mention resolve to whatever the user is looking at.
+     */
+    private readonly getCurrentFile: () => string | undefined = () => undefined
   ) {}
 
   public async listFiles(): Promise<string[]> {
-    return this.workspaceFiles.listFiles();
+    const files = await this.workspaceFiles.listFiles();
+    // Offer `@currentfile` at the head of the list whenever a current file is
+    // known, so the completion picker surfaces it like any other path.
+    return this.getCurrentFile() ? [CURRENT_FILE_MENTION, ...files] : files;
   }
 
   /**
@@ -54,7 +70,20 @@ export class PromptAttachmentService {
         throw createAbortError();
       }
 
-      const { path, symbol } = parseMention(mention);
+      const parsed = parseMention(mention);
+      const { symbol } = parsed;
+      // `@currentfile` is a stand-in for the editor's open file: swap in its real
+      // path before reading. When nothing is open, drop the mention rather than
+      // trying to read a file literally named "currentfile".
+      let path = parsed.path;
+      if (path === CURRENT_FILE_MENTION) {
+        const currentFile = this.getCurrentFile();
+        if (!currentFile) {
+          resolved.push(undefined);
+          continue;
+        }
+        path = currentFile;
+      }
 
       try {
         const text = await this.workspaceFiles.readFile(path);

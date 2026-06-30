@@ -3,7 +3,7 @@ import React from 'react';
 import { version as appVersion } from '../../../../package.json';
 import { createInterface } from 'node:readline/promises';
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import {
   deleteDebugLog,
   setDebugLogDirectory,
@@ -11,6 +11,7 @@ import {
 import { cacheDirectory } from '@core/application/cache-dir';
 import type { ProviderId } from '@core/ports/provider-catalog';
 import { createRuntimeServices } from '@runtime/bootstrap/create-services';
+import { readActiveFile } from '@runtime/workspace/active-file-store';
 import { DEFAULT_MAX_READ_LINES } from '@runtime/tools/read-file-tool';
 import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
 import { loadAppConfig, parseProviderId } from '@runtime/config/app-config';
@@ -146,6 +147,20 @@ export function normalizeArgv(argv: readonly string[]): string[] {
   });
 }
 
+/**
+ * The file `@currentfile` should resolve to in the CLI, from the optional
+ * JUSTCODE_CURRENT_FILE env var (an editor-integrated terminal can set it).
+ * Normalized to a path relative to the working directory; ignored when it's
+ * blank or points outside the workspace.
+ */
+function resolveEnvCurrentFile(): string | undefined {
+  const raw = process.env.JUSTCODE_CURRENT_FILE?.trim();
+  if (!raw) return undefined;
+  const rel = isAbsolute(raw) ? relative(process.cwd(), raw) : raw;
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) return undefined;
+  return rel;
+}
+
 async function confirmReset(): Promise<boolean> {
   process.stdout.write(
     'This will permanently reset JustCode to defaults and clear connected providers, pulled models, and sessions. This is irreversible.\n'
@@ -192,6 +207,11 @@ async function runChat(options: SharedOptions): Promise<void> {
     ...(savedConfig.cache?.maxHistoryMessages !== undefined
       ? { maxHistoryMessages: savedConfig.cache.maxHistoryMessages }
       : {}),
+    // A bare terminal has no "open file" of its own, so resolve `@currentfile`
+    // live: prefer what the JustCode VSCode extension publishes for this
+    // workspace, then an explicit JUSTCODE_CURRENT_FILE override.
+    getCurrentFile: () =>
+      readActiveFile(process.cwd()) ?? resolveEnvCurrentFile(),
   });
 
   // Merge into the persisted config so each write preserves the other fields.

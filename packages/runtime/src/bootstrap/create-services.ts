@@ -77,6 +77,12 @@ export interface RuntimeServices {
    * chat session reads the names per request through its getter.
    */
   setDisabledTools: (names: string[]) => void;
+  /**
+   * Set the workspace-relative path of the file open in the host's editor (or
+   * undefined when none), which the `@currentfile` mention resolves to. Read per
+   * completion/attachment request, so updates take effect immediately.
+   */
+  setCurrentFile: (path: string | undefined) => void;
 }
 
 export interface CreateRuntimeOptions {
@@ -94,6 +100,19 @@ export interface CreateRuntimeOptions {
    * extension) pass the active workspace folder instead.
    */
   workspaceRoot?: string;
+  /**
+   * Workspace-relative path of the file open in the host's editor at startup,
+   * which `@currentfile` resolves to. Updated later via {@link
+   * RuntimeServices.setCurrentFile}.
+   */
+  currentFile?: string;
+  /**
+   * A live source for the `@currentfile` path, read per completion/attachment
+   * request. Takes precedence over {@link currentFile}/{@link
+   * RuntimeServices.setCurrentFile}; used by the CLI to read the editor's open
+   * file from the shared sidecar so it stays current without an event channel.
+   */
+  getCurrentFile?: () => string | undefined;
 }
 
 export async function createRuntimeServices(
@@ -117,6 +136,11 @@ export async function createRuntimeServices(
   const repository = new FileConversationRepository(config.sessionsDirectory);
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const workspaceFiles = new LocalWorkspaceFileService(workspaceRoot);
+  // Mutable so the host can update which file `@currentfile` points at as the
+  // user switches editor tabs; read per completion/attachment request. A live
+  // getter (the CLI's sidecar reader) overrides it when provided.
+  const currentFile = { path: options.currentFile };
+  const getCurrentFile = options.getCurrentFile ?? (() => currentFile.path);
   const readSettings = {
     maxReadLines: options.maxReadLines ?? DEFAULT_MAX_READ_LINES,
   };
@@ -197,7 +221,8 @@ export async function createRuntimeServices(
     listModelsService: new ListModelsService(provider),
     promptAttachmentService: new PromptAttachmentService(
       workspaceFiles,
-      () => readSettings.maxReadLines
+      () => readSettings.maxReadLines,
+      getCurrentFile
     ),
     toolRegistry,
     allProviders,
@@ -219,6 +244,9 @@ export async function createRuntimeServices(
     manageableTools,
     setDisabledTools: (names: string[]) => {
       disabledToolsSettings.names = names;
+    },
+    setCurrentFile: (path: string | undefined) => {
+      currentFile.path = path;
     },
   };
 }
