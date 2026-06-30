@@ -136,8 +136,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   const activeModelObj =
     props.models.find(
       (m) =>
-        m.id === props.activeModel &&
-        m.providerId === props.activeProviderId
+        m.id === props.activeModel && m.providerId === props.activeProviderId
     ) ?? props.models.find((m) => m.id === props.activeModel);
   const reasoning = activeModelObj?.reasoning;
   const reasoningLevels = reasoning?.effortLevels ?? [];
@@ -492,7 +491,9 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                     )}
                   </div>
                   <div className="settings-popup-row">
-                    <span className="settings-popup-label">Context Window</span>
+                    <span className="settings-popup-label">
+                      Max Context Window
+                    </span>
                     {editingHistoryLimit ? (
                       <input
                         className="settings-popup-input"
