@@ -157,6 +157,18 @@ export function JsonIcon({ size = 16 }: IconProps): React.JSX.Element {
   );
 }
 
+/**
+ * Chevrons folding toward a center line — toggles collapsing assistant
+ * responses so only the user's messages remain.
+ */
+export function CollapseIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M8 4l4 4 4-4M8 20l4-4 4 4M4 12h16" />
+    </svg>
+  );
+}
+
 /** Circular arrows — used for a manual model-list refresh. */
 export function RefreshIcon({ size = 16 }: IconProps): React.JSX.Element {
   return (

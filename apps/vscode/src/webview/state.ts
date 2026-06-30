@@ -83,6 +83,13 @@ export type ChatView = 'sessions' | 'chat' | 'model-picker';
 export interface ChatState {
   status: ChatStatus;
   view: ChatView;
+  /**
+   * When true, assistant responses (text, thinking, tool activity) are hidden so
+   * only the user's own messages show — handy for scanning back through what you
+   * asked without wading through long replies. A view-only preference: it lives
+   * in webview state and isn't persisted.
+   */
+  collapseResponses: boolean;
   sessions: WebviewSessionSummary[];
   hasConnectedProvider: boolean;
   // The fields below are cleared back to `undefined` on session resets, so they
@@ -160,6 +167,7 @@ export interface ChatState {
 export const initialState: ChatState = {
   status: ChatStatus.Loading,
   view: 'sessions',
+  collapseResponses: false,
   sessions: [],
   hasConnectedProvider: false,
   models: [],
@@ -206,6 +214,7 @@ export enum LocalActionType {
   SetReadLimit = 'setReadLimit',
   SetHistoryLimit = 'setHistoryLimit',
   SetView = 'setView',
+  ToggleCollapseResponses = 'toggleCollapseResponses',
   SetTitle = 'setTitle',
   QueueMessage = 'queueMessage',
   DequeueMessage = 'dequeueMessage',
@@ -239,6 +248,7 @@ export type LocalAction =
   | { type: LocalActionType.SetReadLimit; lines: number }
   | { type: LocalActionType.SetHistoryLimit; count: number }
   | { type: LocalActionType.SetView; view: ChatView }
+  | { type: LocalActionType.ToggleCollapseResponses }
   | { type: LocalActionType.SetTitle; title: string }
   | {
       type: LocalActionType.QueueMessage;
@@ -533,6 +543,9 @@ export function reducer(state: ChatState, action: Action): ChatState {
 
     case LocalActionType.SetView:
       return { ...state, view: action.view };
+
+    case LocalActionType.ToggleCollapseResponses:
+      return { ...state, collapseResponses: !state.collapseResponses };
 
     case LocalActionType.SetTitle:
       return { ...state, sessionTitle: action.title };

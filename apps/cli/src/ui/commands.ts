@@ -13,6 +13,7 @@ export enum CommandName {
   LazyToolLoading = 'toggle-lazy-tool-loading',
   ExpandTools = 'expand-tools',
   ManageTools = 'manage-tools',
+  CollapseResponses = 'collapse-responses',
   ConfigureMcpServers = 'configure-mcp-servers',
   ReadLimit = 'read-limit',
   ContextWindow = 'context-window',
@@ -81,6 +82,10 @@ export const COMMANDS: Command[] = [
   {
     name: CommandName.ManageTools,
     description: 'Turn individual tools on or off',
+  },
+  {
+    name: CommandName.CollapseResponses,
+    description: 'Toggle hiding model responses to scan just your messages',
   },
   {
     name: CommandName.ConfigureMcpServers,

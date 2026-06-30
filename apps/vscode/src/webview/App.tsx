@@ -23,6 +23,7 @@ import { SessionsView } from '@ext/webview/components/SessionsView';
 import { ModelPickerView } from '@ext/webview/components/ModelPickerView';
 import {
   ChevronDownIcon,
+  CollapseIcon,
   JsonIcon,
   PencilIcon,
 } from '@ext/webview/components/Icons';
@@ -319,6 +320,10 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.ViewChatLog });
   };
 
+  const toggleCollapseResponses = (): void => {
+    dispatch({ type: LocalActionType.ToggleCollapseResponses });
+  };
+
   const closeModelPicker = (): void => {
     dispatch({ type: LocalActionType.SetView, view: 'chat' });
   };
@@ -510,6 +515,19 @@ export function App(): React.JSX.Element {
         <span className="chat-title">{state.sessionTitle ?? 'New chat'}</span>
         <button
           type="button"
+          className={`icon-btn ${state.collapseResponses ? 'icon-btn-active' : ''}`}
+          title={
+            state.collapseResponses
+              ? 'Show responses'
+              : 'Collapse responses (show only my messages)'
+          }
+          aria-pressed={state.collapseResponses}
+          onClick={toggleCollapseResponses}
+        >
+          <CollapseIcon size={16} />
+        </button>
+        <button
+          type="button"
           className="icon-btn"
           title="View chat log (chat.json)"
           onClick={viewChatLog}
@@ -527,6 +545,11 @@ export function App(): React.JSX.Element {
           {state.notice ? <div className="notice">{state.notice}</div> : null}
 
           {state.messages.map((message, index) => {
+            // Collapse mode: show only the user's own messages so they can scan
+            // back through what they asked without the long replies in between.
+            if (state.collapseResponses && message.role !== WebviewRole.User) {
+              return null;
+            }
             const isLastMsg = index === state.messages.length - 1;
             const isLastAssistant =
               !state.busy &&
@@ -565,7 +588,7 @@ export function App(): React.JSX.Element {
             );
           })}
 
-          {state.liveTurnItems.map((item) => {
+          {(state.collapseResponses ? [] : state.liveTurnItems).map((item) => {
             switch (item.kind) {
               case LiveTurnItemKind.Thinking:
                 return (
@@ -605,7 +628,7 @@ export function App(): React.JSX.Element {
             }
           })}
 
-          {state.busy && state.thinking ? (
+          {!state.collapseResponses && state.busy && state.thinking ? (
             <ThinkingBlock
               thinking={state.thinking}
               durationMs={state.thinkingDurationMs}
@@ -614,7 +637,7 @@ export function App(): React.JSX.Element {
             />
           ) : null}
 
-          {state.busy && state.streaming ? (
+          {!state.collapseResponses && state.busy && state.streaming ? (
             <MessageView
               message={{
                 id: 'streaming',

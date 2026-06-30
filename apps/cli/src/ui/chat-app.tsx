@@ -703,6 +703,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const [expandTools, setExpandTools] = useState(
     props.initialExpandTools ?? true
   );
+  // View-only: hide model responses so the transcript shows just the user's
+  // messages, for scanning back through what was asked. Not persisted.
+  const [collapseResponses, setCollapseResponses] = useState(false);
   const maxReadLinesRef = useRef(
     props.initialMaxReadLines ?? DEFAULT_MAX_READ_LINES
   );
@@ -1723,6 +1726,17 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         return;
       }
 
+      case CommandName.CollapseResponses: {
+        const next = !collapseResponses;
+        setCollapseResponses(next);
+        setStatus(
+          next
+            ? 'Hiding model responses — showing only your messages'
+            : 'Showing model responses'
+        );
+        return;
+      }
+
       case CommandName.Thinking: {
         const next = !thinkingCollapsed;
         setThinkingCollapsed(next);
@@ -2571,6 +2585,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       >
         {conversation?.messages.length ? (
           conversation.messages.map((message) => {
+            // Collapse mode: render only the user's messages so the transcript
+            // is just what was asked, without the model's replies in between.
+            if (collapseResponses && message.role !== 'user') {
+              return null;
+            }
             const thinking =
               message.role === 'assistant'
                 ? (message.thinking ?? messageThinking[message.id])
@@ -2676,7 +2695,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         ) : (
           <text fg={MUTED}>No messages yet.</text>
         )}
-        {streamingThinking || streamingContent ? (
+        {!collapseResponses && (streamingThinking || streamingContent) ? (
           <box flexDirection="column">
             {streamingThinking ? (
               <box flexDirection="column">
