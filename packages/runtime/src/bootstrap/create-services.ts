@@ -3,6 +3,10 @@ import { ChatSessionService } from '@core/application/chat-session-service';
 import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
 import { ListModelsService } from '@core/application/list-models-service';
 import { ToolRegistry } from '@core/application/tool-registry';
+import {
+  TOOL_DISPLAY,
+  type ManageableToolInfo,
+} from '@core/domain/tool-metadata';
 import { type ProviderClient } from '@core/ports/chat-model';
 import { ProviderId } from '@core/ports/provider-catalog';
 import { WriteFileTool } from '@runtime/tools/write-file-tool';
@@ -62,6 +66,17 @@ export interface RuntimeServices {
    * chat session reads the flag per request through its getter.
    */
   setLazyToolLoading: (enabled: boolean) => void;
+  /**
+   * The tools the user may turn on or off, in display order, each carrying its
+   * current enabled state. Built from the live registry so the UI and the model
+   * always agree on what exists.
+   */
+  manageableTools: ManageableToolInfo[];
+  /**
+   * Replace the set of disabled tool names. Takes effect on the next turn — the
+   * chat session reads the names per request through its getter.
+   */
+  setDisabledTools: (names: string[]) => void;
 }
 
 export interface CreateRuntimeOptions {
@@ -112,6 +127,9 @@ export async function createRuntimeServices(
   // Mutable so a runtime toggle reaches the chat session: the service reads
   // `lazyToolLoadingSettings.enabled` per turn through the getter below.
   const lazyToolLoadingSettings = { enabled: config.lazyToolLoading };
+  // Mutable so a runtime toggle reaches the chat session, which reads the set
+  // per turn through `getDisabledToolNames` below.
+  const disabledToolsSettings = { names: config.disabledTools };
   const runtimeTools = [
     new WriteFileTool(workspaceFiles),
     new EditFileTool(workspaceFiles),
@@ -131,6 +149,25 @@ export async function createRuntimeServices(
       ...tool.definition,
       requiresApproval: tool.requiresApproval,
     })
+  );
+  // The user-facing catalog: each toggleable tool in display order, joined to
+  // its live description and seeded with its on/off state from the saved config.
+  const definitionsByName = new Map(
+    runtimeTools.map((tool) => [tool.definition.name, tool.definition])
+  );
+  const initialDisabled = new Set(disabledToolsSettings.names);
+  const manageableTools: ManageableToolInfo[] = TOOL_DISPLAY.flatMap(
+    (display) => {
+      const definition = definitionsByName.get(display.name);
+      if (!definition) return [];
+      return [
+        {
+          ...display,
+          description: definition.description,
+          enabled: !initialDisabled.has(display.name),
+        },
+      ];
+    }
   );
   const lazyLoadToolsTool = new LazyLoadToolsTool(lazyLoadableTools);
   const toolRegistry = new ToolRegistry(
@@ -155,6 +192,7 @@ export async function createRuntimeServices(
       systemPrompt: config.systemPrompt,
       getMaxHistoryMessages: () => historySettings.maxHistoryMessages,
       getLazyToolLoadingEnabled: () => lazyToolLoadingSettings.enabled,
+      getDisabledToolNames: () => disabledToolsSettings.names,
     }),
     listModelsService: new ListModelsService(provider),
     promptAttachmentService: new PromptAttachmentService(
@@ -177,6 +215,10 @@ export async function createRuntimeServices(
     lazyToolLoading: lazyToolLoadingSettings.enabled,
     setLazyToolLoading: (enabled: boolean) => {
       lazyToolLoadingSettings.enabled = enabled;
+    },
+    manageableTools,
+    setDisabledTools: (names: string[]) => {
+      disabledToolsSettings.names = names;
     },
   };
 }

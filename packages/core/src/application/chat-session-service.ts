@@ -162,6 +162,13 @@ export interface ChatSessionOptions {
    * first turn, skipping lazy loading. Falls back to enabled when unset.
    */
   getLazyToolLoadingEnabled?: () => boolean;
+  /**
+   * Returns the names of tools the user has turned off. Disabled tools are
+   * filtered from what's advertised to the model each turn (so it never sees or
+   * loads them) and refused if the model somehow calls one anyway. Falls back to
+   * none disabled when unset.
+   */
+  getDisabledToolNames?: () => string[];
 }
 
 export class ChatSessionService {
@@ -177,6 +184,7 @@ export class ChatSessionService {
   private readonly describeToolsInSystemPrompt: boolean;
   private readonly getMaxHistoryMessages: () => number;
   private readonly getLazyToolLoadingEnabled: () => boolean;
+  private readonly getDisabledToolNames: () => string[];
   /** Models that rejected tools once; we send their requests chat-only after. */
   private readonly toolUnsupportedModels = new Set<string>();
   /**
@@ -202,6 +210,7 @@ export class ChatSessionService {
       options.getMaxHistoryMessages ?? (() => DEFAULT_MAX_HISTORY_MESSAGES);
     this.getLazyToolLoadingEnabled =
       options.getLazyToolLoadingEnabled ?? (() => true);
+    this.getDisabledToolNames = options.getDisabledToolNames ?? (() => []);
     for (const tool of this.toolRegistry?.definitions() ?? []) {
       this.advertisedToolsByName.set(tool.name, tool);
     }
@@ -297,14 +306,28 @@ export class ChatSessionService {
     // model calls it; once it does, the real tool set (gateway excluded) stays
     // loaded for the rest of the session.
     const lazyToolLoadingEnabled = this.getLazyToolLoadingEnabled();
+    // Drop any tool the user has turned off so the model never sees it (and, in
+    // lazy mode, can't load it). Applied both here and when the gateway swaps in
+    // the real toolset mid-turn, so a disabled tool never slips back in.
+    const disabledToolNames = new Set(this.getDisabledToolNames());
+    const withoutDisabledTools = <T extends { name: string }>(
+      definitions: T[]
+    ): T[] =>
+      disabledToolNames.size > 0
+        ? definitions.filter(
+            (definition) => !disabledToolNames.has(definition.name)
+          )
+        : definitions;
     // Models known not to support tools are sent chat-only from the start; the
     // tool section is also dropped from the system prompt so we don't advertise
     // tools the model can't call.
-    let toolDefinitions = !lazyToolLoadingEnabled
-      ? eagerToolDefinitions
-      : toolsLoaded
+    let toolDefinitions = withoutDisabledTools(
+      !lazyToolLoadingEnabled
         ? eagerToolDefinitions
-        : initialToolDefinitions;
+        : toolsLoaded
+          ? eagerToolDefinitions
+          : initialToolDefinitions
+    );
     let toolsEnabled =
       toolDefinitions.length > 0 &&
       !this.toolUnsupportedModels.has(input.model);
@@ -351,9 +374,16 @@ export class ChatSessionService {
       );
       // Tell the model that older turns were trimmed and how to recover them, so
       // it can page back via `view_history` instead of assuming they're gone.
+      // Only point the model at `view_history` when it's actually advertised:
+      // the user may have turned it off, in which case the recovery hint would
+      // just steer it toward a tool that gets refused.
+      const canRecoverHistory =
+        omittedCount > 0 &&
+        toolsEnabled &&
+        !disabledToolNames.has(ToolName.ViewHistory);
       const systemMessage = createMessage(
         'system',
-        omittedCount > 0 && toolsEnabled
+        canRecoverHistory
           ? `${systemPrompt}\n\nNote: the ${omittedCount} oldest message(s) of this ${working.length}-message conversation were omitted from this request to save tokens. They are still available — call the \`view_history\` tool with a "start" (and optional "end") index to read any of them (index 0 = oldest message).`
           : systemPrompt
       );
@@ -439,8 +469,9 @@ export class ChatSessionService {
 
         if (call.name === ToolName.LazyLoadTools) {
           // Swap in the real tools for the rest of the turn — minus the gateway
-          // itself, which has served its purpose and shouldn't be re-advertised.
-          toolDefinitions = eagerToolDefinitions;
+          // itself, which has served its purpose and shouldn't be re-advertised,
+          // and minus any tool the user has turned off.
+          toolDefinitions = withoutDisabledTools(eagerToolDefinitions);
           toolsEnabled =
             toolDefinitions.length > 0 &&
             !this.toolUnsupportedModels.has(input.model);
@@ -505,6 +536,14 @@ export class ChatSessionService {
     const tool = this.toolRegistry?.get(call.name);
     if (!tool) {
       return { content: `Unknown tool: ${call.name}`, isError: true };
+    }
+    // The tool was advertised on an earlier turn but the user has since turned it
+    // off: refuse rather than run it, and tell the model it's no longer available.
+    if (this.getDisabledToolNames().includes(call.name)) {
+      return {
+        content: `The ${call.name} tool is currently disabled and cannot be used.`,
+        isError: true,
+      };
     }
 
     const effectiveToolName = call.name;

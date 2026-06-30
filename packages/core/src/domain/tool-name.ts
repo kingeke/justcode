@@ -13,8 +13,8 @@ export enum ToolName {
   Grep = 'grep',
   Glob = 'glob',
   Bash = 'bash',
-  TodoWrite = 'todo_write',
-  WebFetch = 'web_fetch',
-  WebSearch = 'web_search',
+  TodoWrite = 'todowrite',
+  WebFetch = 'webfetch',
+  WebSearch = 'websearch',
   Question = 'question',
 }

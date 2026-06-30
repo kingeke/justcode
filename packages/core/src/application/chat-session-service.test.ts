@@ -931,6 +931,83 @@ describe('ChatSessionService', () => {
     expect(result.reply).toBe('All done.');
   });
 
+  it('excludes a disabled tool when lazy loading swaps in the real toolset', async () => {
+    const repository = new InMemoryConversationRepository();
+    const writeTool = new RecordingWriteTool();
+    // A second, enabled tool so the post-load request isn't empty — the disabled
+    // one must drop out while this one survives.
+    const readTool: Tool = {
+      definition: {
+        name: 'read_file',
+        description: 'reads a file',
+        parameters: { type: 'object' },
+      },
+      requiresApproval: false,
+      describe: () => ({ title: 'read' }),
+      execute: async () => ({ content: 'read the file' }),
+    };
+    const lazyLoadTool = new LazyLoadToolsTool([
+      {
+        ...writeTool.definition,
+        requiresApproval: writeTool.requiresApproval,
+      },
+      { ...readTool.definition, requiresApproval: readTool.requiresApproval },
+    ]);
+    const seenRequests: Array<ChatRequest['tools']> = [];
+    let turn = 0;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat(request: ChatRequest): Promise<ChatResult> {
+        seenRequests.push(request.tools);
+        turn += 1;
+        // First the model loads the toolset via the gateway, then it stops.
+        if (turn === 1) {
+          return {
+            content: '',
+            toolCalls: [
+              { id: 'call-discover', name: 'lazy_load_tools', arguments: '{}' },
+            ],
+          };
+        }
+        return { content: 'Done.' };
+      },
+      async listModels() {
+        return [
+          { id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai },
+        ];
+      },
+      getDefaultModel() {
+        return 'gpt';
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry: new ToolRegistry(
+        [lazyLoadTool, writeTool, readTool],
+        [
+          {
+            ...lazyLoadTool.definition,
+            requiresApproval: lazyLoadTool.requiresApproval,
+          },
+        ]
+      ),
+      getDisabledToolNames: () => ['write_file'],
+    });
+
+    await service.submitMessage({
+      conversation: createConversation('session-1'),
+      model: 'gpt',
+      content: 'do something',
+      requestApproval: async () => true,
+    });
+
+    // The request right after the gateway runs carries the real toolset minus
+    // the disabled write_file (and minus the spent gateway).
+    const postLoad = seenRequests[1]?.map((tool) => tool.name);
+    expect(postLoad).toContain('read_file');
+    expect(postLoad).not.toContain('write_file');
+    expect(postLoad).not.toContain('lazy_load_tools');
+  });
+
   it('advertises the full tool set from the first turn when lazy loading is off', async () => {
     const repository = new InMemoryConversationRepository();
     const delegatedTool = new RecordingWriteTool();
@@ -1000,6 +1077,78 @@ describe('ChatSessionService', () => {
     );
     expect(delegatedTool.executed).toEqual(['{"path":"a.txt","content":"hi"}']);
     expect(result.reply).toBe('All done.');
+  });
+
+  it('does not advertise a disabled tool, and refuses it if the model calls it anyway', async () => {
+    const repository = new InMemoryConversationRepository();
+    const delegatedTool = new RecordingWriteTool();
+    const lazyLoadTool = new LazyLoadToolsTool([
+      {
+        ...delegatedTool.definition,
+        requiresApproval: delegatedTool.requiresApproval,
+      },
+    ]);
+    const seenRequests: Array<ChatRequest['tools']> = [];
+    let turn = 0;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat(request: ChatRequest): Promise<ChatResult> {
+        seenRequests.push(request.tools);
+        turn += 1;
+        // The model calls the disabled tool anyway (e.g. it saw it on an earlier
+        // turn); the service should refuse rather than run it.
+        if (turn === 1) {
+          return {
+            content: '',
+            toolCalls: [
+              {
+                id: 'call-write',
+                name: 'write_file',
+                arguments: '{"path":"a.txt","content":"hi"}',
+              },
+            ],
+          };
+        }
+        return { content: 'Understood.' };
+      },
+      async listModels() {
+        return [
+          { id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai },
+        ];
+      },
+      getDefaultModel() {
+        return 'gpt';
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry: new ToolRegistry(
+        [lazyLoadTool, delegatedTool],
+        [
+          {
+            ...lazyLoadTool.definition,
+            requiresApproval: lazyLoadTool.requiresApproval,
+          },
+        ]
+      ),
+      getLazyToolLoadingEnabled: () => false,
+      getDisabledToolNames: () => ['write_file'],
+    });
+
+    const result = await service.submitMessage({
+      conversation: createConversation('session-1'),
+      model: 'gpt',
+      content: 'create a.txt',
+      requestApproval: async () => true,
+    });
+
+    // The disabled tool is never advertised (here it was the only one, so the
+    // request carries no tools at all)...
+    expect((seenRequests[0] ?? []).map((tool) => tool.name)).not.toContain(
+      'write_file'
+    );
+    // ...and a stray call to it is refused without executing the tool.
+    expect(delegatedTool.executed).toEqual([]);
+    expect(result.reply).toBe('Understood.');
   });
 
   it('keeps the real tool set (without the gateway) on later turns once lazy_load_tools has run', async () => {

@@ -73,6 +73,7 @@ import {
   type WebviewProviderError,
   type WebviewReasoningChoice,
   type WebviewReasoningEffort,
+  type WebviewTool,
   type WebviewToolView,
   type WebviewUsage,
 } from '@ext/shared/protocol';
@@ -131,6 +132,12 @@ export class ChatBridge {
   // the full tool set by calling lazy_load_tools. When false, all tools are sent
   // up front. Applied to the live runtime via `setLazyToolLoading`.
   private lazyToolLoading = true;
+  // Names of tools the user has turned off. Applied to the live runtime via
+  // `setDisabledTools` so toggling takes effect on the next turn without a reload.
+  private disabledTools: string[] = [];
+  // The toggleable tool catalog, populated from the runtime once services exist;
+  // sent to the webview in every snapshot so the manage-tools popup can render.
+  private manageableTools: WebviewTool[] = [];
   // The user's chosen reasoning effort per model, nested by provider id (e.g.
   // `{ openrouter: { "openai/gpt-5": "high" } }`). Mirrors the CLI's per-model
   // store; a model absent here uses its default effort.
@@ -265,6 +272,9 @@ export class ChatBridge {
       case WebviewMessageType.ToggleLazyToolLoading:
         await this.toggleLazyToolLoading();
         return;
+      case WebviewMessageType.SetDisabledTools:
+        await this.setDisabledTools(message.names);
+        return;
       case WebviewMessageType.RevertFile:
         await this.revertFile(message.path, message.oldText, message.created);
         return;
@@ -340,6 +350,7 @@ export class ChatBridge {
     this.thinkingCollapsed = globalConfig.thinkingCollapsed ?? false;
     this.localModelAutoRefresh = globalConfig.localModelAutoRefresh ?? true;
     this.lazyToolLoading = globalConfig.lazyToolLoading ?? true;
+    this.disabledTools = globalConfig.disabledTools ?? [];
     // The config stores the same string values under @core's ReasoningEffort
     // enum type; the webview protocol re-declares them as string literals.
     this.reasoningEffortByModel = (globalConfig.reasoningEffortByModel ??
@@ -378,6 +389,8 @@ export class ChatBridge {
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         lazyToolLoading: this.lazyToolLoading,
+        manageableTools: this.manageableTools,
+        disabledTools: this.disabledTools,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles: {},
       });
@@ -389,6 +402,15 @@ export class ChatBridge {
     services.setMaxHistoryMessages(this.maxHistoryMessages);
     services.setLocalModelAutoRefresh(this.localModelAutoRefresh);
     services.setLazyToolLoading(this.lazyToolLoading);
+    services.setDisabledTools(this.disabledTools);
+    // Snapshot the catalog (name/label/category/description) for the popup; live
+    // on/off state is tracked separately in `disabledTools`.
+    this.manageableTools = services.manageableTools.map((tool) => ({
+      name: tool.name,
+      label: tool.label,
+      category: tool.category,
+      summary: tool.summary,
+    }));
 
     // With no configured provider the session is backed by a NullProvider whose
     // model listing is empty; surface a notice instead of letting startSession
@@ -408,6 +430,8 @@ export class ChatBridge {
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         lazyToolLoading: this.lazyToolLoading,
+        manageableTools: this.manageableTools,
+        disabledTools: this.disabledTools,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles: {},
       });
@@ -463,6 +487,8 @@ export class ChatBridge {
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         lazyToolLoading: this.lazyToolLoading,
+        manageableTools: this.manageableTools,
+        disabledTools: this.disabledTools,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles,
         ...(session.conversation.title !== undefined
@@ -518,6 +544,8 @@ export class ChatBridge {
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         lazyToolLoading: this.lazyToolLoading,
+        manageableTools: this.manageableTools,
+        disabledTools: this.disabledTools,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles,
         ...(conversation.title !== undefined
@@ -1259,6 +1287,19 @@ export class ChatBridge {
     });
   }
 
+  private async setDisabledTools(names: string[]): Promise<void> {
+    this.disabledTools = names;
+    // Apply to the live runtime so it takes effect on the next turn without a
+    // reload — the chat session reads the set per request through its getter.
+    this.services?.setDisabledTools(names);
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      disabledTools: names,
+    });
+  }
+
   private async setReadLimit(lines: number): Promise<void> {
     this.maxReadLines = lines;
     const services = this.services;
@@ -1445,6 +1486,8 @@ export class ChatBridge {
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         lazyToolLoading: this.lazyToolLoading,
+        manageableTools: this.manageableTools,
+        disabledTools: this.disabledTools,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles: {},
       });

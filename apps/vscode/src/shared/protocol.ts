@@ -47,6 +47,7 @@ export enum WebviewMessageType {
   ToggleThinkingCollapsed = 'toggleThinkingCollapsed',
   ToggleLocalModelAutoRefresh = 'toggleLocalModelAutoRefresh',
   ToggleLazyToolLoading = 'toggleLazyToolLoading',
+  SetDisabledTools = 'setDisabledTools',
   ListSessions = 'listSessions',
   OpenSession = 'openSession',
   DeleteSession = 'deleteSession',
@@ -254,6 +255,15 @@ export interface WebviewStats {
   avgTokensPerSecond: number;
 }
 
+/** A toggleable tool, for the manage-tools popup. State lives in `disabledTools`. */
+export interface WebviewTool {
+  name: string;
+  label: string;
+  category: string;
+  /** A short, one-line gist of what the tool does (shown on hover). */
+  summary: string;
+}
+
 // --- Host -> Webview -------------------------------------------------------
 
 /** Full snapshot of session state; sent on init and after a session reset. */
@@ -284,6 +294,10 @@ export interface ReadyMessage {
    * full tool set is advertised to the model from the first turn.
    */
   lazyToolLoading: boolean;
+  /** The catalog of toggleable tools, grouped by category, for the manage-tools UI. */
+  manageableTools: WebviewTool[];
+  /** Names of tools the user has turned off; empty means all enabled. */
+  disabledTools: string[];
   /**
    * The user's chosen reasoning effort per model, nested by provider id, e.g.
    * `{ openrouter: { "openai/gpt-5": "high" } }`. A model absent from the map
@@ -605,6 +619,13 @@ export interface ToggleLazyToolLoadingMessage {
   type: WebviewMessageType.ToggleLazyToolLoading;
 }
 
+/** The user changed which tools are turned off in the manage-tools popup. */
+export interface SetDisabledToolsMessage {
+  type: WebviewMessageType.SetDisabledTools;
+  /** The full set of disabled tool names after the change. */
+  names: string[];
+}
+
 /**
  * The user asked to undo a file's session changes from the changes panel. The
  * host restores `oldText` (the pre-session baseline), or deletes the file when
@@ -687,6 +708,7 @@ export type WebviewToHost =
   | ToggleThinkingCollapsedMessage
   | ToggleLocalModelAutoRefreshMessage
   | ToggleLazyToolLoadingMessage
+  | SetDisabledToolsMessage
   | RevertFileMessage
   | SaveResolvedFilesMessage
   | SyncSteeringQueueMessage

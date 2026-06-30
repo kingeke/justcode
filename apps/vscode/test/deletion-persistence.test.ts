@@ -31,6 +31,9 @@ describe('deletion persistence through a turn', () => {
       maxHistoryMessages: 50,
       thinkingCollapsed: false,
       localModelAutoRefresh: true,
+      lazyToolLoading: true,
+      manageableTools: [],
+      disabledTools: [],
       reasoningEffortByModel: {},
       resolvedFiles: {},
     });

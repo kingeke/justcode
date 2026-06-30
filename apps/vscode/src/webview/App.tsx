@@ -360,6 +360,11 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.ToggleLazyToolLoading });
   };
 
+  const setDisabledTools = (names: string[]): void => {
+    dispatch({ type: LocalActionType.SetDisabledTools, names });
+    postToHost({ type: WebviewMessageType.SetDisabledTools, names });
+  };
+
   const setReadLimit = (lines: number): void => {
     dispatch({ type: LocalActionType.SetReadLimit, lines });
     postToHost({ type: WebviewMessageType.SetReadLimit, lines });
@@ -770,6 +775,9 @@ export function App(): React.JSX.Element {
         thinkingCollapsed={state.thinkingCollapsed}
         localModelAutoRefresh={state.localModelAutoRefresh}
         lazyToolLoading={state.lazyToolLoading}
+        manageableTools={state.manageableTools}
+        disabledTools={state.disabledTools}
+        onSetDisabledTools={setDisabledTools}
         onToggleAutoApprove={toggleAutoApprove}
         onToggleExpandTools={toggleExpandTools}
         onToggleThinkingCollapsed={toggleThinkingCollapsed}

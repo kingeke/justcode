@@ -14,6 +14,7 @@ import type {
   WebviewModel,
   WebviewReasoningChoice,
   WebviewStats,
+  WebviewTool,
   WebviewUsage,
 } from '@ext/shared/protocol';
 import {
@@ -21,6 +22,7 @@ import {
   SendIcon,
   SlidersIcon,
   StopIcon,
+  ToolIcon,
 } from '@ext/webview/components/Icons';
 
 /**
@@ -105,6 +107,12 @@ export interface ComposerProps {
   /** When true, lazy tool loading is on (off = all tools up front). */
   lazyToolLoading: boolean;
   onToggleLazyToolLoading: () => void;
+  /** The toggleable tools, grouped by category, for the manage-tools popup. */
+  manageableTools: WebviewTool[];
+  /** Names of tools currently turned off. */
+  disabledTools: string[];
+  /** Persist a new full set of disabled tool names. */
+  onSetDisabledTools: (names: string[]) => void;
 }
 
 /**
@@ -131,7 +139,13 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   }, [value, images, onDraftChange]);
   const [showSettings, setShowSettings] = React.useState(false);
   const [showReasoning, setShowReasoning] = React.useState(false);
+  const [showTools, setShowTools] = React.useState(false);
+  // Category headings folded shut in the manage-tools popup (tool rows hidden).
+  const [collapsedCategories, setCollapsedCategories] = React.useState<
+    Set<string>
+  >(new Set());
   const reasoningRef = React.useRef<HTMLDivElement>(null);
+  const toolsRef = React.useRef<HTMLDivElement>(null);
   const [readLimitDraft, setReadLimitDraft] = React.useState('');
   const [editingReadLimit, setEditingReadLimit] = React.useState(false);
   const [historyLimitDraft, setHistoryLimitDraft] = React.useState('');
@@ -167,6 +181,79 @@ export function Composer(props: ComposerProps): React.JSX.Element {
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [showReasoning]);
+
+  // Close the manage-tools popup when clicking outside it.
+  React.useEffect(() => {
+    if (!showTools) return;
+    const onPointerDown = (e: PointerEvent): void => {
+      if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) {
+        setShowTools(false);
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [showTools]);
+
+  // Group the tools by category, preserving first-seen order, for the popup.
+  const toolCategories = React.useMemo<
+    { category: string; tools: WebviewTool[] }[]
+  >(() => {
+    const order: string[] = [];
+    const byCategory = new Map<string, WebviewTool[]>();
+    for (const tool of props.manageableTools) {
+      if (!byCategory.has(tool.category)) {
+        byCategory.set(tool.category, []);
+        order.push(tool.category);
+      }
+      byCategory.get(tool.category)?.push(tool);
+    }
+    return order.map((category) => ({
+      category,
+      tools: byCategory.get(category) ?? [],
+    }));
+  }, [props.manageableTools]);
+
+  const disabledSet = React.useMemo(
+    () => new Set(props.disabledTools),
+    [props.disabledTools]
+  );
+
+  // Apply a change to the disabled set and push the full new list to the host.
+  const applyDisabled = (next: Set<string>): void => {
+    props.onSetDisabledTools(
+      props.manageableTools
+        .filter((tool) => next.has(tool.name))
+        .map((tool) => tool.name)
+    );
+  };
+
+  const toggleTool = (name: string): void => {
+    const next = new Set(disabledSet);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    applyDisabled(next);
+  };
+
+  // A category header turns its whole group on, unless every tool is already on
+  // — then it turns them all off, so a second click undoes the first.
+  const toggleCategory = (tools: WebviewTool[]): void => {
+    const allOn = tools.every((tool) => !disabledSet.has(tool.name));
+    const next = new Set(disabledSet);
+    for (const tool of tools) {
+      if (allOn) next.add(tool.name);
+      else next.delete(tool.name);
+    }
+    applyDisabled(next);
+  };
+
+  const toggleCollapse = (category: string): void => {
+    setCollapsedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+  };
 
   // The active model and its reasoning capability, used to offer a thinking-
   // level picker only for models the provider reports as reasoning-capable.
@@ -581,6 +668,100 @@ export function Composer(props: ComposerProps): React.JSX.Element {
           </div>
 
           <div className="toolbar-right">
+            <div className="settings-popup-anchor" ref={toolsRef}>
+              {showTools ? (
+                <div className="settings-popup tools-popup">
+                  <div className="settings-popup-section">
+                    <div className="settings-popup-heading">Tools</div>
+                    {props.manageableTools.length === 0 ? (
+                      <div className="settings-popup-row">
+                        <span className="settings-popup-label">
+                          No tools available
+                        </span>
+                      </div>
+                    ) : (
+                      toolCategories.map(({ category, tools }) => {
+                        const allOn = tools.every(
+                          (tool) => !disabledSet.has(tool.name)
+                        );
+                        const someOn = tools.some(
+                          (tool) => !disabledSet.has(tool.name)
+                        );
+                        const collapsed = collapsedCategories.has(category);
+                        return (
+                          <div key={category} className="tools-group">
+                            <div className="tools-category">
+                              <button
+                                type="button"
+                                className="tools-caret-btn"
+                                onClick={() => toggleCollapse(category)}
+                                title={collapsed ? 'Expand' : 'Collapse'}
+                                aria-expanded={!collapsed}
+                              >
+                                {collapsed ? '▸' : '▾'}
+                              </button>
+                              <button
+                                type="button"
+                                className="tools-category-toggle"
+                                onClick={() => toggleCategory(tools)}
+                                title={allOn ? 'Turn all off' : 'Turn all on'}
+                              >
+                                <span
+                                  className={`tools-check ${
+                                    allOn
+                                      ? 'tools-check-on'
+                                      : someOn
+                                        ? 'tools-check-partial'
+                                        : ''
+                                  }`}
+                                >
+                                  {allOn ? '✓' : someOn ? '–' : ''}
+                                </span>
+                                <span className="tools-category-label">
+                                  {category}
+                                </span>
+                              </button>
+                            </div>
+                            {collapsed
+                              ? null
+                              : tools.map((tool) => {
+                                  const on = !disabledSet.has(tool.name);
+                                  return (
+                                    <button
+                                      key={tool.name}
+                                      type="button"
+                                      className="tools-item"
+                                      onClick={() => toggleTool(tool.name)}
+                                      title={tool.summary}
+                                    >
+                                      <span
+                                        className={`tools-check ${on ? 'tools-check-on' : ''}`}
+                                      >
+                                        {on ? '✓' : ''}
+                                      </span>
+                                      <span className="tools-item-label">
+                                        {tool.label}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className={`icon-btn ${showTools ? 'icon-btn-active' : ''}`}
+                title="Manage tools"
+                onClick={() => setShowTools((s) => !s)}
+              >
+                <ToolIcon size={14} />
+              </button>
+            </div>
+
             <div className="settings-popup-anchor" ref={settingsRef}>
               {showSettings ? (
                 <div className="settings-popup">

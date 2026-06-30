@@ -38,6 +38,12 @@ export interface GlobalConfig {
   lazyToolLoading?: boolean;
   /** When true, finished tool calls render their full input/output inline. */
   expandTools?: boolean;
+  /**
+   * Names of tools the user has turned off (e.g. `["websearch"]`). Absent or
+   * empty means every tool is enabled. Storing the disabled set (rather than the
+   * enabled one) keeps newly added tools on by default.
+   */
+  disabledTools?: string[];
   /** Tunables for how much context the agent reads and sends. */
   cache?: {
     /** Max lines returned by a single file read before it is paged. */

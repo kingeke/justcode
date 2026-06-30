@@ -13,6 +13,7 @@ function baseConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     systemPrompt: '',
     localModelAutoRefresh: true,
     lazyToolLoading: true,
+    disabledTools: [],
     openai: {
       apiKey: undefined,
       baseUrl: 'https://api.openai.com/v1',

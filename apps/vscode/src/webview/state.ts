@@ -11,6 +11,7 @@ import {
   type WebviewProviderError,
   type WebviewReasoningChoice,
   type WebviewSessionSummary,
+  type WebviewTool,
   type WebviewToolView,
   type WebviewUsage,
   type WebviewStats,
@@ -121,6 +122,10 @@ export interface ChatState {
   localModelAutoRefresh: boolean;
   /** Whether lazy tool loading is on (off = send all tools up front). */
   lazyToolLoading: boolean;
+  /** The catalog of toggleable tools, for the manage-tools popup. */
+  manageableTools: WebviewTool[];
+  /** Names of tools the user has turned off; empty means all enabled. */
+  disabledTools: string[];
   /**
    * The user's chosen reasoning effort per model, nested by provider id. A model
    * absent from the map uses its default effort; `'off'` disables reasoning.
@@ -173,6 +178,8 @@ export const initialState: ChatState = {
   thinkingCollapsed: false,
   localModelAutoRefresh: true,
   lazyToolLoading: true,
+  manageableTools: [],
+  disabledTools: [],
   reasoningEffortByModel: {},
   resolvedFiles: {},
   queuedMessages: [],
@@ -192,6 +199,7 @@ export enum LocalActionType {
   ToggleThinkingCollapsed = 'toggleThinkingCollapsed',
   ToggleLocalModelAutoRefresh = 'toggleLocalModelAutoRefresh',
   ToggleLazyToolLoading = 'toggleLazyToolLoading',
+  SetDisabledTools = 'setDisabledTools',
   SetReadLimit = 'setReadLimit',
   SetHistoryLimit = 'setHistoryLimit',
   SetView = 'setView',
@@ -224,6 +232,7 @@ export type LocalAction =
   | { type: LocalActionType.ToggleThinkingCollapsed }
   | { type: LocalActionType.ToggleLocalModelAutoRefresh }
   | { type: LocalActionType.ToggleLazyToolLoading }
+  | { type: LocalActionType.SetDisabledTools; names: string[] }
   | { type: LocalActionType.SetReadLimit; lines: number }
   | { type: LocalActionType.SetHistoryLimit; count: number }
   | { type: LocalActionType.SetView; view: ChatView }
@@ -281,6 +290,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
         thinkingCollapsed: action.thinkingCollapsed,
         localModelAutoRefresh: action.localModelAutoRefresh,
         lazyToolLoading: action.lazyToolLoading,
+        manageableTools: action.manageableTools,
+        disabledTools: action.disabledTools,
         reasoningEffortByModel: action.reasoningEffortByModel,
         sessionTitle: action.sessionTitle,
         // Restore the resolutions saved for this session so a resumed chat keeps
@@ -498,6 +509,9 @@ export function reducer(state: ChatState, action: Action): ChatState {
 
     case LocalActionType.ToggleLazyToolLoading:
       return { ...state, lazyToolLoading: !state.lazyToolLoading };
+
+    case LocalActionType.SetDisabledTools:
+      return { ...state, disabledTools: action.names };
 
     case LocalActionType.SetReadLimit:
       return { ...state, maxReadLines: action.lines };

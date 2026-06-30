@@ -48,6 +48,7 @@ import type {
 } from '@core/application/chat-session-service';
 import type { UserQuestionRequest } from '@core/ports/tool';
 import type { Conversation } from '@core/domain/conversation';
+import type { ManageableToolInfo } from '@core/domain/tool-metadata';
 import { createMessage, type MessageImage } from '@core/domain/message';
 import { DEFAULT_SYSTEM_PROMPT } from '@core/application/system-prompt';
 import type {
@@ -81,6 +82,7 @@ import {
 } from '@cli/ui/connect-picker.js';
 import { ModelPicker } from '@cli/ui/model-picker.js';
 import { ReasoningPicker } from '@cli/ui/reasoning-picker.js';
+import { ToolsPicker } from '@cli/ui/tools-picker.js';
 import { ResetPicker } from '@cli/ui/reset-picker.js';
 import { ClearSessionsPicker } from '@cli/ui/clear-sessions-picker.js';
 import { SessionPicker } from '@cli/ui/session-picker.js';
@@ -147,6 +149,12 @@ interface ChatAppProps {
   onLocalModelAutoRefreshChange?: (enabled: boolean) => void;
   initialLazyToolLoading?: boolean;
   onLazyToolLoadingChange?: (enabled: boolean) => void;
+  /** The toggleable tools and their startup state, for the manage-tools modal. */
+  manageableTools?: ManageableToolInfo[];
+  /** Names of tools turned off at startup. */
+  initialDisabledTools?: string[];
+  /** Persist (and apply) a new disabled-tools set. */
+  onDisabledToolsChange?: (names: string[]) => void;
   initialExpandTools?: boolean;
   onExpandToolsChange?: (expand: boolean) => void;
   initialMaxReadLines?: number;
@@ -685,6 +693,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const [lazyToolLoading, setLazyToolLoading] = useState(
     props.initialLazyToolLoading ?? true
   );
+  const [disabledTools, setDisabledTools] = useState<string[]>(
+    props.initialDisabledTools ?? []
+  );
+  const [showToolsPicker, setShowToolsPicker] = useState(false);
   const [expandTools, setExpandTools] = useState(
     props.initialExpandTools ?? true
   );
@@ -1081,7 +1093,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       showModelPicker ||
       showConnectPicker ||
       showSessionPicker ||
-      showReasoningPicker
+      showReasoningPicker ||
+      showToolsPicker
     )
       return;
 
@@ -1681,6 +1694,15 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         setStatus(
           next ? 'Showing full tool output inline' : 'Collapsing tool output'
         );
+        return;
+      }
+
+      case CommandName.ManageTools: {
+        if (!props.manageableTools?.length) {
+          setStatus('No tools available to manage');
+          return;
+        }
+        setShowToolsPicker(true);
         return;
       }
 
@@ -2347,6 +2369,30 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           );
         }}
         onCancel={() => setShowReasoningPicker(false)}
+      />
+    );
+  }
+
+  if (showToolsPicker && props.manageableTools?.length) {
+    const tools = props.manageableTools.map((tool) => ({
+      ...tool,
+      enabled: !disabledTools.includes(tool.name),
+    }));
+    return (
+      <ToolsPicker
+        tools={tools}
+        onConfirm={(disabledNames) => {
+          setShowToolsPicker(false);
+          setDisabledTools(disabledNames);
+          props.onDisabledToolsChange?.(disabledNames);
+          const offCount = disabledNames.length;
+          setStatus(
+            offCount === 0
+              ? 'All tools enabled'
+              : `${offCount} tool${offCount === 1 ? '' : 's'} disabled`
+          );
+        }}
+        onCancel={() => setShowToolsPicker(false)}
       />
     );
   }

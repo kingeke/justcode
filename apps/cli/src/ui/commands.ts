@@ -12,6 +12,7 @@ export enum CommandName {
   LocalRefresh = 'local-model-refresh',
   LazyToolLoading = 'toggle-lazy-tool-loading',
   ExpandTools = 'expand-tools',
+  ManageTools = 'manage-tools',
   ReadLimit = 'read-limit',
   ContextWindow = 'context-window',
   Config = 'config',
@@ -75,6 +76,10 @@ export const COMMANDS: Command[] = [
   {
     name: CommandName.ExpandTools,
     description: 'Toggle showing full tool input/output inline by default',
+  },
+  {
+    name: CommandName.ManageTools,
+    description: 'Turn individual tools on or off',
   },
   {
     name: CommandName.ReadLimit,

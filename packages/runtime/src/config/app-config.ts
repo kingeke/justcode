@@ -32,6 +32,8 @@ export interface AppConfig {
    * false, all tools are advertised from the first turn.
    */
   lazyToolLoading: boolean;
+  /** Names of tools the user has turned off; empty means all enabled. */
+  disabledTools: string[];
   openai: {
     apiKey: string | undefined;
     baseUrl: string;
@@ -115,6 +117,7 @@ export async function loadAppConfig(
     systemPrompt: configWithDefaults.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
     localModelAutoRefresh: configWithDefaults.localModelAutoRefresh ?? true,
     lazyToolLoading: configWithDefaults.lazyToolLoading ?? true,
+    disabledTools: configWithDefaults.disabledTools ?? [],
     openai: {
       apiKey: configWithDefaults.providers?.openai?.apiKey,
       baseUrl:

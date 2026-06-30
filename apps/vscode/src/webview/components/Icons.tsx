@@ -63,6 +63,14 @@ export function SlidersIcon({ size = 16 }: IconProps): React.JSX.Element {
   );
 }
 
+export function ToolIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M14.7 6.3a4 4 0 0 0-5.3 5.3l-6 6 2.7 2.7 6-6a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.7-.7-.7-2.7 2.5-2.5z" />
+    </svg>
+  );
+}
+
 export function SendIcon({ size = 16 }: IconProps): React.JSX.Element {
   return (
     <svg {...svgProps(size)} aria-hidden="true">

@@ -6,11 +6,11 @@ This document tracks the issues so far.
 - @currentfile
 - add custom mcp servers?
 - add way for user to turn off tools
+- sort file picker
 
 - CLI
 
 - VSCODE EXTENSION
-- maybe make discover_tools optional via settings
 
 # Instruction
 

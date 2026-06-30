@@ -78,6 +78,9 @@ describe('queued messages', () => {
       maxHistoryMessages: 50,
       thinkingCollapsed: false,
       localModelAutoRefresh: true,
+      lazyToolLoading: true,
+      manageableTools: [],
+      disabledTools: [],
       reasoningEffortByModel: {},
       resolvedFiles: {},
     });
