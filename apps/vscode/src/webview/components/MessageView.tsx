@@ -16,10 +16,13 @@ export function MessageView({
   message,
   expandTools = false,
   onOpenFile,
+  onOpenImage,
 }: {
   message: WebviewMessage;
   expandTools?: boolean;
   onOpenFile?: (path: string) => void;
+  /** Opens a full-size preview of a transcript image (data URL). */
+  onOpenImage?: (src: string) => void;
 }): React.JSX.Element {
   if (message.role === WebviewRole.Tool) {
     return (
@@ -80,7 +83,29 @@ export function MessageView({
 
   return (
     <div className={`msg msg-${message.role}`}>
-      <pre className="msg-content">{message.content}</pre>
+      <div className="msg-body">
+        {message.images?.length ? (
+          <div className="msg-images">
+            {message.images.map((image, index) => {
+              const src = `data:${image.mediaType};base64,${image.data}`;
+              return (
+                <button
+                  key={index}
+                  type="button"
+                  className="msg-image-btn"
+                  title="Click to preview"
+                  onClick={() => onOpenImage?.(src)}
+                >
+                  <img className="msg-image" src={src} alt="Attached image" />
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+        {message.content ? (
+          <pre className="msg-content">{message.content}</pre>
+        ) : null}
+      </div>
     </div>
   );
 }

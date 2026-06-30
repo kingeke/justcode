@@ -74,6 +74,39 @@ new`);
     expect(markup).toContain('Edited README.md (1 occurrence replaced).');
   });
 
+  it('renders image thumbnails on a user message', () => {
+    const markup = renderToStaticMarkup(
+      <MessageView
+        message={{
+          id: 'u1',
+          role: WebviewRole.User,
+          content: 'look at this',
+          images: [{ mediaType: 'image/png', data: 'AAAA' }],
+        }}
+      />
+    );
+
+    expect(markup).toContain('msg-image');
+    expect(markup).toContain('data:image/png;base64,AAAA');
+    expect(markup).toContain('look at this');
+  });
+
+  it('renders an image-only user message without an empty text block', () => {
+    const markup = renderToStaticMarkup(
+      <MessageView
+        message={{
+          id: 'u2',
+          role: WebviewRole.User,
+          content: '',
+          images: [{ mediaType: 'image/png', data: 'BBBB' }],
+        }}
+      />
+    );
+
+    expect(markup).toContain('data:image/png;base64,BBBB');
+    expect(markup).not.toContain('msg-content');
+  });
+
   it('renders input preview for whitelisted historical tools', () => {
     const markup = renderToStaticMarkup(
       <MessageView

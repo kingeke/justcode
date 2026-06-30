@@ -49,6 +49,7 @@ import {
   WebviewMessageType,
   WebviewRole,
   type HostToWebview,
+  type WebviewImage,
   type WebviewMessage,
   type WebviewStats,
   type WebviewToHost,
@@ -153,7 +154,7 @@ export class ChatBridge {
         await this.sendSessionsList();
         return;
       case WebviewMessageType.Submit:
-        await this.submit(message.content);
+        await this.submit(message.content, message.images);
         return;
       case WebviewMessageType.Cancel:
         this.abortController?.abort();
@@ -427,7 +428,10 @@ export class ChatBridge {
   }
 
   /** Runs one agent turn, streaming tokens, tool activity, and approvals. */
-  private async submit(content: string): Promise<void> {
+  private async submit(
+    content: string,
+    images?: WebviewImage[]
+  ): Promise<void> {
     if (this.abortController) {
       this.post({
         type: HostMessageType.Error,
@@ -462,6 +466,14 @@ export class ChatBridge {
         conversation: this.conversation,
         model: this.activeModel,
         content,
+        ...(images?.length
+          ? {
+              images: images.map((image) => ({
+                mediaType: image.mediaType,
+                data: image.data,
+              })),
+            }
+          : {}),
         // The webview-flavored choice carries the same string values as @core's
         // ReasoningEffortChoice; bridge the nominal enum/literal mismatch here.
         ...(reasoningEffort
@@ -1181,6 +1193,14 @@ export async function toWebviewMessages(
         ? { toolView: toolViewsByCallId.get(message.toolCallId) }
         : {}),
       ...(message.thinking ? { thinking: message.thinking } : {}),
+      ...(message.role === 'user' && message.images?.length
+        ? {
+            images: message.images.map((image) => ({
+              mediaType: image.mediaType,
+              data: image.data,
+            })),
+          }
+        : {}),
     });
   }
   return result;

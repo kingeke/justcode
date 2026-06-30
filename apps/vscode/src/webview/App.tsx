@@ -4,6 +4,7 @@ import { APP_NAME } from '@core/branding';
 import {
   WebviewMessageType,
   WebviewRole,
+  type WebviewImage,
   type WebviewModel,
   type WebviewReasoningChoice,
 } from '@ext/shared/protocol';
@@ -26,6 +27,8 @@ import { deriveChangedFiles, type ChangedFile } from '@ext/webview/changes';
 
 export function App(): React.JSX.Element {
   const [state, dispatch] = React.useReducer(reducer, initialState);
+  // The image (data URL) shown full-size in the preview modal, or null when closed.
+  const [previewImage, setPreviewImage] = React.useState<string | null>(null);
   const transcriptRef = React.useRef<HTMLDivElement>(null);
   // Whether new content should auto-scroll. True while the user is parked at the
   // bottom; flips to false the moment they scroll up to read earlier output, so
@@ -39,6 +42,16 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.Init });
     return unsubscribe;
   }, []);
+
+  // Escape closes the image preview modal.
+  React.useEffect(() => {
+    if (!previewImage) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setPreviewImage(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [previewImage]);
 
   // Track whether the user is pinned to the bottom. A small threshold absorbs
   // sub-pixel rounding and the height growth from a token that lands between the
@@ -57,12 +70,16 @@ export function App(): React.JSX.Element {
     if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [state.messages, state.streaming, state.thinking, state.tools]);
 
-  const submit = (content: string): void => {
+  const submit = (content: string, images: WebviewImage[]): void => {
     // Sending a new message should always snap to it, even if the user had
     // scrolled up while reading the previous turn.
     stickToBottomRef.current = true;
-    dispatch({ type: LocalActionType.OptimisticSubmit, content });
-    postToHost({ type: WebviewMessageType.Submit, content });
+    dispatch({ type: LocalActionType.OptimisticSubmit, content, images });
+    postToHost({
+      type: WebviewMessageType.Submit,
+      content,
+      ...(images.length ? { images } : {}),
+    });
   };
 
   const cancel = (): void => {
@@ -347,6 +364,7 @@ export function App(): React.JSX.Element {
                 message={message}
                 expandTools={state.expandTools}
                 onOpenFile={openFile}
+                onOpenImage={setPreviewImage}
               />
             </React.Fragment>
           );
@@ -464,6 +482,7 @@ export function App(): React.JSX.Element {
         onCancel={cancel}
         onNewSession={newSession}
         onOpenModelPicker={openModelPicker}
+        onOpenImage={setPreviewImage}
         reasoningEffortByModel={state.reasoningEffortByModel}
         onSetReasoningEffort={setReasoningEffort}
         thinkingCollapsed={state.thinkingCollapsed}
@@ -475,6 +494,29 @@ export function App(): React.JSX.Element {
         onSetReadLimit={setReadLimit}
         onSetHistoryLimit={setHistoryLimit}
       />
+
+      {previewImage ? (
+        <div
+          className="image-preview-overlay"
+          onClick={() => setPreviewImage(null)}
+          role="presentation"
+        >
+          <button
+            type="button"
+            className="image-preview-close"
+            title="Close (Esc)"
+            onClick={() => setPreviewImage(null)}
+          >
+            ×
+          </button>
+          <img
+            className="image-preview-img"
+            src={previewImage}
+            alt="Image preview"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

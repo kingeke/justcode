@@ -66,6 +66,26 @@ export enum ToolPhase {
   End = 'end',
 }
 
+/**
+ * An image the user pasted into the composer, awaiting send. `data` is the
+ * base64-encoded bytes with no `data:` URI prefix (mirrors `@core` MessageImage);
+ * `id` and `name` are webview-only, for keying and labelling the chip.
+ */
+export interface WebviewImage {
+  /** Stable id for keying and removing the chip. */
+  id: string;
+  /** MIME type, e.g. "image/png". */
+  mediaType: string;
+  /** Base64-encoded bytes, no `data:` URI prefix. */
+  data: string;
+}
+
+/** An image carried on a transcript message, for rendering a thumbnail. */
+export interface WebviewMessageImage {
+  mediaType: string;
+  data: string;
+}
+
 /** A session summary for the sessions-list screen. */
 export interface WebviewSessionSummary {
   sessionId: string;
@@ -174,6 +194,8 @@ export interface WebviewMessage {
     content: string;
     durationMs: number;
   };
+  /** Images attached to a user message, rendered as thumbnails. */
+  images?: WebviewMessageImage[];
 }
 
 export interface WebviewUsage {
@@ -360,6 +382,8 @@ export interface InitMessage {
 export interface SubmitMessage {
   type: WebviewMessageType.Submit;
   content: string;
+  /** Images pasted into the composer, sent alongside the prompt. */
+  images?: WebviewImage[];
 }
 
 /** The user asked to abort the in-flight turn. */

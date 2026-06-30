@@ -50,6 +50,15 @@ body {
   margin-bottom: 10px;
 }
 
+/* Holds a message's images and text in a vertical stack so they don't lay out
+   as flex-row siblings of the bubble. */
+.msg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
 .msg-content {
   margin: 0;
   white-space: pre-wrap;
@@ -63,8 +72,12 @@ body {
   justify-content: flex-end;
 }
 
-.msg-user .msg-content {
+.msg-user .msg-body {
+  align-items: flex-end;
   max-width: 80%;
+}
+
+.msg-user .msg-content {
   padding: 7px 10px;
   border-radius: 14px 14px 4px 14px;
   background: var(--vscode-button-background, #0e639c);
@@ -76,7 +89,7 @@ body {
   justify-content: flex-start;
 }
 
-.msg-assistant .msg-content {
+.msg-assistant .msg-body {
   max-width: 92%;
 }
 
@@ -1030,6 +1043,143 @@ textarea:focus {
 
 .composer-input:focus {
   outline: none;
+}
+
+/* --- Pasted image attachments -------------------------------------------- */
+
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.composer-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 4px;
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.3));
+  border-radius: 6px;
+  background: var(--vscode-editorWidget-background, transparent);
+  font-size: 12px;
+  max-width: 200px;
+}
+
+.composer-attachment-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.composer-attachment-remove:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15));
+}
+
+.composer-attachment-thumb-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.composer-attachment-thumb {
+  width: 20px;
+  height: 20px;
+  object-fit: cover;
+  border-radius: 3px;
+}
+
+/* --- Image preview modal -------------------------------------------------- */
+
+.image-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.image-preview-img {
+  max-width: 90%;
+  max-height: 90%;
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  cursor: default;
+}
+
+.image-preview-close {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.image-preview-close:hover {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.composer-attachment-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Image thumbnails on a user message in the transcript. */
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+  justify-content: flex-end;
+}
+
+.msg-image-btn {
+  padding: 0;
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.3));
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+  line-height: 0;
+}
+
+.msg-image-btn:hover {
+  border-color: var(--vscode-focusBorder, #3794ff);
+}
+
+.msg-image {
+  display: block;
+  width: 140px;
+  height: 140px;
+  object-fit: cover;
 }
 
 .composer-toolbar {

@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { APP_NAME } from '@core/branding';
 import type {
+  WebviewImage,
   WebviewModel,
   WebviewReasoningChoice,
   WebviewStats,
@@ -13,6 +14,32 @@ import {
   SlidersIcon,
   StopIcon,
 } from '@ext/webview/components/Icons';
+
+/**
+ * Reads a pasted image File into the base64 form the wire expects (no `data:`
+ * URI prefix). Resolves null if the file can't be read.
+ */
+function readImageFile(
+  file: File
+): Promise<{ mediaType: string; data: string } | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== 'string') {
+        resolve(null);
+        return;
+      }
+      const comma = result.indexOf(',');
+      resolve({
+        mediaType: file.type || 'image/png',
+        data: comma >= 0 ? result.slice(comma + 1) : result,
+      });
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
 
 export interface ComposerProps {
   busy: boolean;
@@ -36,10 +63,12 @@ export interface ComposerProps {
     model: WebviewModel,
     effort: WebviewReasoningChoice
   ) => void;
-  onSubmit: (content: string) => void;
+  onSubmit: (content: string, images: WebviewImage[]) => void;
   onCancel: () => void;
   onNewSession: () => void;
   onOpenModelPicker: () => void;
+  /** Opens a full-size preview of a staged image (data URL). */
+  onOpenImage?: (src: string) => void;
   onToggleAutoWrites: () => void;
   onToggleExpandTools: () => void;
   onSetReadLimit: (lines: number) => void;
@@ -62,6 +91,7 @@ export interface ComposerProps {
 export function Composer(props: ComposerProps): React.JSX.Element {
   const { busy, disabled } = props;
   const [value, setValue] = React.useState('');
+  const [images, setImages] = React.useState<WebviewImage[]>([]);
   const [showSettings, setShowSettings] = React.useState(false);
   const [showReasoning, setShowReasoning] = React.useState(false);
   const reasoningRef = React.useRef<HTMLDivElement>(null);
@@ -132,9 +162,12 @@ export function Composer(props: ComposerProps): React.JSX.Element {
 
   const submit = (): void => {
     const trimmed = value.trim();
-    if (!trimmed || busy || disabled) return;
-    props.onSubmit(trimmed);
+    // An image-only message is valid (just a pasted screenshot), so allow a
+    // send when there's no prose but at least one image is staged.
+    if ((!trimmed && images.length === 0) || busy || disabled) return;
+    props.onSubmit(trimmed, images);
     setValue('');
+    setImages([]);
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -143,6 +176,45 @@ export function Composer(props: ComposerProps): React.JSX.Element {
       submit();
     }
   };
+
+  // Pasting image bytes into the prompt stages them as chips above the textarea
+  // and sends them as proper image blocks rather than inserting anything inline.
+  const onPaste = async (
+    event: React.ClipboardEvent<HTMLTextAreaElement>
+  ): Promise<void> => {
+    const items = event.clipboardData.items;
+    const files: File[] = [];
+    // DataTransferItemList is array-like but not reliably iterable, so index it.
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      if (item && item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    }
+    if (files.length === 0) return;
+    // Keep the textarea from also inserting a file path / nothing for the paste.
+    event.preventDefault();
+    const read = await Promise.all(files.map(readImageFile));
+    const staged = read.filter(
+      (r): r is { mediaType: string; data: string } => r !== null
+    );
+    if (staged.length === 0) return;
+    setImages((prev) => [
+      ...prev,
+      ...staged.map((image, i) => ({
+        id: `img-${Date.now()}-${prev.length + i}`,
+        ...image,
+      })),
+    ]);
+  };
+
+  const removeImage = (id: string): void => {
+    setImages((prev) => prev.filter((image) => image.id !== id));
+  };
+
+  const imageLabel = (index: number): string =>
+    index === 0 ? 'Pasted Image' : `Pasted Image ${index + 1}`;
 
   const commitReadLimit = (): void => {
     const parsed = parseInt(readLimitDraft, 10);
@@ -184,6 +256,40 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   return (
     <div className="composer-area">
       <div className={`composer ${disabled ? 'composer-disabled' : ''}`}>
+        {images.length > 0 ? (
+          <div className="composer-attachments">
+            {images.map((image, index) => {
+              const src = `data:${image.mediaType};base64,${image.data}`;
+              return (
+                <div key={image.id} className="composer-attachment">
+                  <button
+                    type="button"
+                    className="composer-attachment-remove"
+                    title="Remove image"
+                    onClick={() => removeImage(image.id)}
+                  >
+                    ×
+                  </button>
+                  <button
+                    type="button"
+                    className="composer-attachment-thumb-btn"
+                    title="Click to preview"
+                    onClick={() => props.onOpenImage?.(src)}
+                  >
+                    <img
+                      className="composer-attachment-thumb"
+                      src={src}
+                      alt={imageLabel(index)}
+                    />
+                  </button>
+                  <span className="composer-attachment-label">
+                    {imageLabel(index)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
         <textarea
           className="composer-input"
           value={value}
@@ -196,6 +302,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
           }
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
         />
 
         <div className="composer-toolbar">
@@ -437,7 +544,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                 type="button"
                 className="icon-btn icon-btn-send"
                 title="Send (Enter)"
-                disabled={disabled || !value.trim()}
+                disabled={disabled || (!value.trim() && images.length === 0)}
                 onClick={submit}
               >
                 <SendIcon />

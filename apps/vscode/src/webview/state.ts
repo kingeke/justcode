@@ -5,6 +5,7 @@ import {
   type ApprovalRequestMessage,
   type HostToWebview,
   type UserInputRequestMessage,
+  type WebviewImage,
   type WebviewMessage,
   type WebviewModel,
   type WebviewReasoningChoice,
@@ -169,7 +170,11 @@ export enum LocalActionType {
 }
 
 export type LocalAction =
-  | { type: LocalActionType.OptimisticSubmit; content: string }
+  | {
+      type: LocalActionType.OptimisticSubmit;
+      content: string;
+      images: WebviewImage[];
+    }
   | { type: LocalActionType.DismissApproval }
   | { type: LocalActionType.DismissInput }
   | { type: LocalActionType.SelectModel; modelId: string; providerId: string }
@@ -262,6 +267,14 @@ export function reducer(state: ChatState, action: Action): ChatState {
             id: `local-${Date.now()}`,
             role: WebviewRole.User,
             content: action.content,
+            ...(action.images.length
+              ? {
+                  images: action.images.map((image) => ({
+                    mediaType: image.mediaType,
+                    data: image.data,
+                  })),
+                }
+              : {}),
           },
         ],
         busy: true,

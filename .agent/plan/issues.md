@@ -7,7 +7,6 @@ This document tracks the issues so far.
 - CLI
 
 - VSCODE EXTENSION
-- add images
 - send queued messages
 - @ files and methods
 - show button to go to bottom when scrolled up
