@@ -32,6 +32,7 @@ describe('deletion persistence through a turn', () => {
       thinkingCollapsed: false,
       localModelAutoRefresh: true,
       reasoningEffortByModel: {},
+      resolvedFiles: {},
     });
 
     state = reducer(state, {

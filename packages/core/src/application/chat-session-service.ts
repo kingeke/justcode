@@ -407,6 +407,23 @@ export class ChatSessionService {
       updatedAt: new Date().toISOString(),
     };
 
+    // A title may have been persisted out of band since this turn started —
+    // typically background title generation (from this or a previous message)
+    // finishing mid-turn. The in-memory `input.conversation` wouldn't carry it,
+    // so saving as-is would wipe the freshly written title. Carry it forward.
+    if (!updatedConversation.title) {
+      try {
+        const persisted = await this.repository.load(
+          updatedConversation.sessionId
+        );
+        if (persisted.title) {
+          updatedConversation.title = persisted.title;
+        }
+      } catch {
+        // Couldn't read the persisted title — save without it rather than fail.
+      }
+    }
+
     await this.repository.save(updatedConversation);
 
     // Title generation is a separate model call. Run it in the background so it

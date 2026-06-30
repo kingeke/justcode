@@ -79,6 +79,7 @@ describe('queued messages', () => {
       thinkingCollapsed: false,
       localModelAutoRefresh: true,
       reasoningEffortByModel: {},
+      resolvedFiles: {},
     });
 
     expect(state.queuedMessages).toHaveLength(0);

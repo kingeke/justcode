@@ -60,6 +60,7 @@ import type {
 import type { GlobalConfig } from '@runtime/persistence/global-config';
 import { mergeProviderConfig } from '@runtime/persistence/global-config';
 import { resetAppState } from '@runtime/persistence/reset-app-state';
+import { clearModelsCache } from '@providers/http/models-cache';
 import { renderDiff } from '@cli/ui/render-diff.js';
 import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
 import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
@@ -426,6 +427,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   >([]);
   const [sessionSummariesLoading, setSessionSummariesLoading] = useState(false);
   const [allModels, setAllModels] = useState<ModelInfo[]>([]);
+  // Bumped by /refresh-models to force the model-list effect to re-fetch after
+  // the on-disk cache has been cleared.
+  const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [currentSessionId, setCurrentSessionId] = useState(props.sessionId);
   const [session, setSession] = useState<StartSessionResult | null>(null);
   const [activeModel, setActiveModel] = useState<string>('');
@@ -1407,7 +1411,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         startTransition(() => setAllModels(models));
       }
     );
-  }, [availableProviders]);
+    // modelsRefreshKey is intentionally a dep: bumping it re-fetches the lists.
+  }, [availableProviders, modelsRefreshKey]);
 
   useEffect(() => {
     if (!showSessionPicker) return;
@@ -1537,6 +1542,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     switch (name) {
       case CommandName.Models:
         setShowModelPicker(true);
+        return;
+
+      case CommandName.RefreshModels:
+        setStatus('Refreshing models…');
+        void clearModelsCache().then(() => {
+          setModelsRefreshKey((key) => key + 1);
+          setStatus('Models refreshed');
+        });
         return;
 
       case CommandName.Sessions:

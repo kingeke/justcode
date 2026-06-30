@@ -40,8 +40,15 @@ import {
   createRuntimeServices,
   type RuntimeServices,
 } from '@runtime/bootstrap/create-services';
+import { sessionFilePath } from '@runtime/persistence/file-conversation-repository';
+import { clearModelsCache } from '@providers/http/models-cache';
 
 import { parseRemovedPaths } from '@ext/host/parse-removed-paths';
+import {
+  readResolvedFiles,
+  writeResolvedFiles,
+  deleteResolvedFiles,
+} from '@ext/host/resolved-files-store';
 
 import {
   HostMessageType,
@@ -188,6 +195,19 @@ export class ChatBridge {
       case WebviewMessageType.SelectProvider:
         await this.selectProvider(message.providerId);
         return;
+      case WebviewMessageType.RefreshModels:
+        await this.refreshModels();
+        return;
+      case WebviewMessageType.ViewChatLog:
+        await this.viewChatLog();
+        return;
+      case WebviewMessageType.SaveResolvedFiles:
+        await writeResolvedFiles(
+          cacheDirectory(),
+          this.sessionId,
+          message.resolved
+        );
+        return;
       case WebviewMessageType.NewSession:
         await this.resetSession();
         return;
@@ -285,6 +305,7 @@ export class ChatBridge {
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         reasoningEffortByModel: this.reasoningEffortByModel,
+        resolvedFiles: {},
       });
       return;
     }
@@ -312,6 +333,7 @@ export class ChatBridge {
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         reasoningEffortByModel: this.reasoningEffortByModel,
+        resolvedFiles: {},
       });
       return;
     }
@@ -344,6 +366,10 @@ export class ChatBridge {
       // a follow-up `ModelsUpdate` once the background fetch settles.
       this.models = session.availableModels;
 
+      // Restore the changes-panel resolutions saved for this session so resuming
+      // a chat doesn't resurface edits the user already kept/undid.
+      const resolvedFiles = await readResolvedFiles(configDir, this.sessionId);
+
       this.post({
         type: HostMessageType.Ready,
         providerId: services.providerId,
@@ -361,6 +387,7 @@ export class ChatBridge {
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         reasoningEffortByModel: this.reasoningEffortByModel,
+        resolvedFiles,
         ...(session.conversation.title !== undefined
           ? { sessionTitle: session.conversation.title }
           : {}),
@@ -382,8 +409,41 @@ export class ChatBridge {
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         reasoningEffortByModel: this.reasoningEffortByModel,
+        resolvedFiles: {},
       });
     }
+  }
+
+  /**
+   * Manually re-fetches every provider's model list: clears the on-disk cache so
+   * the daily-cached entries are skipped, then re-lists. Backs the refresh button
+   * in the model picker. Seeds with no existing models so a removed model
+   * actually disappears from the refreshed list.
+   */
+  private async refreshModels(): Promise<void> {
+    const services = this.services;
+    if (!services) return;
+    await clearModelsCache();
+    await this.refreshAllModels(services, []);
+  }
+
+  /**
+   * Opens the current session's persisted conversation file (its `chat.json`) in
+   * an editor tab. The file lives in the cache dir, outside the workspace, so it
+   * bypasses {@link openFile}'s workspace bounds check and goes straight to the
+   * injected opener.
+   */
+  private async viewChatLog(): Promise<void> {
+    const services = await this.ensureServices();
+    const path = sessionFilePath(services.sessionsDirectory, this.sessionId);
+    if (!existsSync(path)) {
+      this.post({
+        type: HostMessageType.Error,
+        message: 'No chat log yet — send a message first.',
+      });
+      return;
+    }
+    this.onOpenFile?.(path);
   }
 
   /**
@@ -502,12 +562,27 @@ export class ChatBridge {
           requestApproval: (request) => this.requestApproval(request),
         }),
         requestUserInput: (request) => this.requestUserInput(request),
-        onTitle: (_sessionId, title) =>
-          this.post({ type: HostMessageType.TitleUpdate, title }),
+        onTitle: (_sessionId, title) => {
+          // Fold the generated title into the in-memory conversation so the next
+          // turn's save preserves it. Without this, the following submit writes
+          // this title-less conversation back over the persisted file, and the
+          // title is lost when the chat is reopened.
+          if (this.conversation) {
+            this.conversation = { ...this.conversation, title };
+          }
+          this.post({ type: HostMessageType.TitleUpdate, title });
+        },
       });
 
       const endMs = Date.now();
-      this.conversation = result.conversation;
+      // The title is async metadata delivered via onTitle, so a turn result can
+      // come back title-less even after one was generated. Keep the title we
+      // already have rather than letting the fresh result drop it (mirrors the
+      // CLI), so the next save persists it.
+      this.conversation =
+        result.conversation.title || !this.conversation?.title
+          ? result.conversation
+          : { ...result.conversation, title: this.conversation.title };
 
       // Usage was already folded in live via onUsage above; don't add it again.
 
@@ -761,6 +836,7 @@ export class ChatBridge {
       this.post({ type: HostMessageType.Error, message: errorMessage(error) });
       return;
     }
+    await deleteResolvedFiles(cacheDirectory(), sessionId);
 
     // If the deleted session was the one loaded, drop it so reopening the chat
     // starts fresh rather than resurrecting the cleared conversation.
@@ -794,6 +870,9 @@ export class ChatBridge {
       summaries.map((s) =>
         services.chatSessionService.clearSession(s.sessionId)
       )
+    );
+    await Promise.allSettled(
+      summaries.map((s) => deleteResolvedFiles(cacheDirectory(), s.sessionId))
     );
 
     // The open session was almost certainly among those cleared; start fresh so
@@ -1074,6 +1153,7 @@ export class ChatBridge {
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         reasoningEffortByModel: this.reasoningEffortByModel,
+        resolvedFiles: {},
       });
       return;
     }
@@ -1192,8 +1272,10 @@ export async function toWebviewMessages(
       ...(message.role === 'tool' && message.name
         ? { toolName: message.name }
         : {}),
-      ...(message.role === 'tool' && message.toolCallId
-        ? { toolView: toolViewsByCallId.get(message.toolCallId) }
+      ...(message.role === 'tool' &&
+      message.toolCallId &&
+      toolViewsByCallId.has(message.toolCallId)
+        ? { toolView: toolViewsByCallId.get(message.toolCallId)! }
         : {}),
       ...(message.thinking ? { thinking: message.thinking } : {}),
       ...(message.role === 'user' && message.images?.length

@@ -22,6 +22,7 @@ import { ApprovalPrompt, InputPrompt } from '@ext/webview/components/Prompts';
 import { Composer } from '@ext/webview/components/Composer';
 import { SessionsView } from '@ext/webview/components/SessionsView';
 import { ModelPickerView } from '@ext/webview/components/ModelPickerView';
+import { JsonIcon } from '@ext/webview/components/Icons';
 import { ChangesPanel } from '@ext/webview/components/ChangesPanel';
 import { deriveChangedFiles, type ChangedFile } from '@ext/webview/changes';
 
@@ -47,6 +48,21 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.Init });
     return unsubscribe;
   }, []);
+
+  // Persist changes-panel resolutions to the host whenever they change, so they
+  // survive reopening the chat. Skips the first render (nothing resolved yet) to
+  // avoid clobbering a session's saved map with an empty one before Ready lands.
+  const resolvedHydrated = React.useRef(false);
+  React.useEffect(() => {
+    if (!resolvedHydrated.current) {
+      resolvedHydrated.current = true;
+      return;
+    }
+    postToHost({
+      type: WebviewMessageType.SaveResolvedFiles,
+      resolved: state.resolvedFiles,
+    });
+  }, [state.resolvedFiles]);
 
   // Escape closes the image preview modal.
   React.useEffect(() => {
@@ -221,6 +237,14 @@ export function App(): React.JSX.Element {
     dispatch({ type: LocalActionType.SetView, view: 'model-picker' });
   };
 
+  const refreshModels = (): void => {
+    postToHost({ type: WebviewMessageType.RefreshModels });
+  };
+
+  const viewChatLog = (): void => {
+    postToHost({ type: WebviewMessageType.ViewChatLog });
+  };
+
   const closeModelPicker = (): void => {
     dispatch({ type: LocalActionType.SetView, view: 'chat' });
   };
@@ -372,6 +396,7 @@ export function App(): React.JSX.Element {
         }}
         onClose={closeModelPicker}
         onConnectProvider={connectProvider}
+        onRefresh={refreshModels}
       />
     );
   }
@@ -388,6 +413,14 @@ export function App(): React.JSX.Element {
           ← Back
         </button>
         <span className="chat-title">{state.sessionTitle ?? 'New chat'}</span>
+        <button
+          type="button"
+          className="icon-btn"
+          title="View chat log (chat.json)"
+          onClick={viewChatLog}
+        >
+          <JsonIcon size={16} />
+        </button>
       </div>
 
       <div

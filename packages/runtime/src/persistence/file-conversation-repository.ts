@@ -92,8 +92,16 @@ export class FileConversationRepository implements ConversationRepository {
   }
 
   private getFilePath(sessionId: string): string {
-    return join(this.sessionsDirectory, `${sanitizeSessionId(sessionId)}.json`);
+    return sessionFilePath(this.sessionsDirectory, sessionId);
   }
+}
+
+/** Absolute path to a session's persisted conversation file (its `chat.json`). */
+export function sessionFilePath(
+  sessionsDirectory: string,
+  sessionId: string
+): string {
+  return join(sessionsDirectory, `${sanitizeSessionId(sessionId)}.json`);
 }
 
 function sanitizeSessionId(sessionId: string): string {

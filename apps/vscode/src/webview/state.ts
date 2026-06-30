@@ -259,8 +259,9 @@ export function reducer(state: ChatState, action: Action): ChatState {
         localModelAutoRefresh: action.localModelAutoRefresh,
         reasoningEffortByModel: action.reasoningEffortByModel,
         sessionTitle: action.sessionTitle,
-        // A fresh session/snapshot starts with an empty changes panel.
-        resolvedFiles: {},
+        // Restore the resolutions saved for this session so a resumed chat keeps
+        // already-kept/undone files dismissed instead of resurfacing them.
+        resolvedFiles: action.resolvedFiles,
         revertError: undefined,
         // A new session/snapshot drops anything that was queued.
         queuedMessages: [],

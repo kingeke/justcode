@@ -34,6 +34,10 @@ import type { AppConfig } from '@runtime/config/app-config';
 export interface RuntimeServices {
   /** Active provider, or undefined when nothing has been connected yet. */
   providerId: ProviderId | undefined;
+  /** Directory holding persisted session files, for locating a chat's `chat.json`. */
+  sessionsDirectory: string;
+  /** Workspace root the tools resolve paths against. */
+  workspaceRoot: string;
   chatSessionService: ChatSessionService;
   listModelsService: ListModelsService;
   promptAttachmentService: PromptAttachmentService;
@@ -132,6 +136,8 @@ export async function createRuntimeServices(
 
   return {
     providerId,
+    sessionsDirectory: config.sessionsDirectory,
+    workspaceRoot,
     chatSessionService: new ChatSessionService(repository, provider, {
       toolRegistry,
       workspaceRoot,

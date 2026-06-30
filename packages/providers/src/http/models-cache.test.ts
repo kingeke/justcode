@@ -6,7 +6,10 @@ import { join } from 'node:path';
 import type { ModelInfo, ProviderClient } from '@core/ports/chat-model';
 import { ProviderId } from '@core/ports/provider-catalog';
 
-import { withModelsCache } from '@providers/http/models-cache';
+import {
+  clearModelsCache,
+  withModelsCache,
+} from '@providers/http/models-cache';
 
 /** A provider stub whose `listModels` resolves after a tick, so concurrent
  * cache-miss writers genuinely overlap. */
@@ -91,6 +94,26 @@ describe('models cache', () => {
     await cached.listModels();
 
     expect(fetches).toBe(1);
+  });
+
+  it('refetches after the cache is cleared', async () => {
+    let fetches = 0;
+    const inner: ProviderClient = {
+      providerId: ProviderId.OpenRouter,
+      sendChat: async () => ({ content: '' }),
+      getDefaultModel: () => undefined,
+      listModels: async () => {
+        fetches += 1;
+        return [model('openai/gpt-5', ProviderId.OpenRouter)];
+      },
+    };
+    const cached = withModelsCache(inner, { local: false });
+
+    await cached.listModels(); // fetch + cache
+    await clearModelsCache(); // drop the cache
+    await cached.listModels(); // cache miss → refetch
+
+    expect(fetches).toBe(2);
   });
 
   it('refetches a local provider on every call while auto-refresh is on', async () => {

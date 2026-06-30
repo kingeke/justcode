@@ -130,3 +130,25 @@ export function UndoIcon({ size = 16 }: IconProps): React.JSX.Element {
     </svg>
   );
 }
+
+/** Curly braces — used for "view chat log" (the raw chat.json). */
+export function JsonIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M8 4a3 3 0 0 0-3 3v2a2 2 0 0 1-2 2 2 2 0 0 1 2 2v2a3 3 0 0 0 3 3" />
+      <path d="M16 4a3 3 0 0 1 3 3v2a2 2 0 0 0 2 2 2 2 0 0 0-2 2v2a3 3 0 0 1-3 3" />
+    </svg>
+  );
+}
+
+/** Circular arrows — used for a manual model-list refresh. */
+export function RefreshIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M20 11a8 8 0 0 0-14-4.5L4 8" />
+      <path d="M4 4v4h4" />
+      <path d="M4 13a8 8 0 0 0 14 4.5L20 16" />
+      <path d="M20 20v-4h-4" />
+    </svg>
+  );
+}

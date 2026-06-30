@@ -1,6 +1,7 @@
 export enum CommandName {
   Connect = 'connect',
   Models = 'models',
+  RefreshModels = 'refresh-models',
   Sessions = 'sessions',
   NewSession = 'new-session',
   Clear = 'clear',
@@ -29,6 +30,10 @@ export const COMMANDS: Command[] = [
   {
     name: CommandName.Models,
     description: 'Browse and switch the active model',
+  },
+  {
+    name: CommandName.RefreshModels,
+    description: 'Re-fetch every provider model list, bypassing the cache',
   },
   {
     name: CommandName.Sessions,

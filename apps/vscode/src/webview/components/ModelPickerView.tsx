@@ -1,7 +1,7 @@
 import * as React from 'react';
 
 import type { WebviewModel } from '@ext/shared/protocol';
-import { PlusIcon } from '@ext/webview/components/Icons';
+import { PlusIcon, RefreshIcon } from '@ext/webview/components/Icons';
 
 // ── Sort ─────────────────────────────────────────────────────────────────────
 
@@ -101,6 +101,8 @@ interface ModelPickerViewProps {
   onSelect: (model: WebviewModel) => void;
   onClose: () => void;
   onConnectProvider: () => void;
+  /** Re-fetches every provider's model list (bypasses the cache). */
+  onRefresh: () => void;
 }
 
 export function ModelPickerView({
@@ -110,15 +112,30 @@ export function ModelPickerView({
   onSelect,
   onClose,
   onConnectProvider,
+  onRefresh,
 }: ModelPickerViewProps): React.JSX.Element {
   const [query, setQuery] = React.useState('');
   const [sortMode, setSortMode] = React.useState<SortMode>('provider');
   const [sortDir, setSortDir] = React.useState<SortDir>('asc');
+  const [refreshing, setRefreshing] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Spin the refresh icon briefly on click; the new list arrives via a
+  // ModelsUpdate that re-renders `models`, so this is a short visual cue only.
+  React.useEffect(() => {
+    if (!refreshing) return;
+    const timer = setTimeout(() => setRefreshing(false), 1200);
+    return () => clearTimeout(timer);
+  }, [refreshing]);
+
+  const handleRefresh = (): void => {
+    setRefreshing(true);
+    onRefresh();
+  };
 
   const filtered = query.trim()
     ? models.filter((m) => {
@@ -187,6 +204,14 @@ export function ModelPickerView({
           onClick={onConnectProvider}
         >
           <PlusIcon />
+        </button>
+        <button
+          type="button"
+          className={`icon-btn ${refreshing ? 'icon-btn-spinning' : ''}`}
+          title="Refresh models"
+          onClick={handleRefresh}
+        >
+          <RefreshIcon />
         </button>
       </div>
 

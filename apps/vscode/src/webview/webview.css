@@ -852,12 +852,19 @@ textarea:focus {
 }
 
 .chat-title {
+  flex: 1;
+  min-width: 0;
   font-size: 12px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   opacity: 0.85;
+}
+
+/* Spin an icon button's glyph (e.g. the model-list refresh) while it's active. */
+.icon-btn-spinning svg {
+  animation: composer-spin 0.8s linear infinite;
 }
 
 /* --- Model picker --------------------------------------------------------- */

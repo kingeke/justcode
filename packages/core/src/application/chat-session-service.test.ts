@@ -265,6 +265,30 @@ describe('ChatSessionService', () => {
     expect(repository.conversation.messages).toHaveLength(2);
   });
 
+  it('preserves a title persisted out of band when a later turn saves', async () => {
+    const repository = new InMemoryConversationRepository();
+    const service = new ChatSessionService(repository, createProviderStub());
+
+    const started = await service.startSession({ sessionId: 'session-1' });
+
+    // Simulate background title generation (from a previous message) having
+    // written a title to disk that the in-memory conversation doesn't carry.
+    repository.conversation = {
+      ...repository.conversation,
+      title: 'Persisted Title',
+    };
+
+    await service.submitMessage({
+      conversation: started.conversation, // no title in memory
+      model: started.activeModel,
+      content: 'second message',
+    });
+
+    // The save must keep the out-of-band title rather than wiping it.
+    expect(repository.conversation.title).toBe('Persisted Title');
+    expect(repository.conversation.messages).toHaveLength(2);
+  });
+
   it('persists assistant thinking with the assistant message', async () => {
     const repository = new InMemoryConversationRepository();
     const provider: ProviderClient = {

@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
@@ -25,6 +25,19 @@ type ModelsCacheFile = Record<string, CachedProviderModels>;
 // setup file take effect even though this module is imported afterwards.
 const cacheDir = (): string => cacheDirectory();
 const cacheFile = (): string => join(cacheDir(), 'models.json');
+
+/**
+ * Deletes the on-disk model-list cache so the next `listModels()` refetches from
+ * every provider. Backs a manual "refresh models" action. Best-effort: a missing
+ * or unremovable file is ignored.
+ */
+export async function clearModelsCache(): Promise<void> {
+  try {
+    await rm(cacheFile(), { force: true });
+  } catch {
+    // Nothing to clear, or the file couldn't be removed — refetch anyway.
+  }
+}
 
 async function readCacheFile(): Promise<ModelsCacheFile> {
   try {

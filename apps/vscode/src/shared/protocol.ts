@@ -34,6 +34,7 @@ export enum WebviewMessageType {
   UserInputResponse = 'userInputResponse',
   SelectModel = 'selectModel',
   SetReasoningEffort = 'setReasoningEffort',
+  RefreshModels = 'refreshModels',
   SelectProvider = 'selectProvider',
   NewSession = 'newSession',
   ToggleAutoWrites = 'toggleAutoWrites',
@@ -50,6 +51,8 @@ export enum WebviewMessageType {
   OpenSettings = 'openSettings',
   RevertFile = 'revertFile',
   OpenFile = 'openFile',
+  ViewChatLog = 'viewChatLog',
+  SaveResolvedFiles = 'saveResolvedFiles',
 }
 
 /** Roles the transcript renders. Mirrors the persisted message roles. */
@@ -164,6 +167,18 @@ export interface WebviewProvider {
   authMethods: AuthMethod[];
 }
 
+/**
+ * A file the user kept or undid in the changes panel, persisted per session so
+ * reopening a chat doesn't resurface already-reviewed edits. Mirrors the
+ * webview's `ResolvedFile`.
+ */
+export interface WebviewResolvedFile {
+  /** Edit count at which it was resolved; a later edit unhides the file. */
+  editCount: number;
+  /** On-disk content the resolution left behind, used as the next baseline. */
+  baseline: string;
+}
+
 /** Before/after text for a file a tool is about to change. */
 export interface WebviewDiff {
   path: string;
@@ -248,6 +263,11 @@ export interface ReadyMessage {
     string,
     Record<string, WebviewReasoningChoice | undefined> | undefined
   >;
+  /**
+   * Files the user already kept/undid in this session's changes panel, restored
+   * so resuming a chat doesn't resurface reviewed edits. Keyed by workspace path.
+   */
+  resolvedFiles: Record<string, WebviewResolvedFile>;
   sessionTitle?: string | undefined;
 }
 
@@ -422,6 +442,16 @@ export interface SetReasoningEffortMessage {
   effort: WebviewReasoningChoice;
 }
 
+/** The user asked to re-fetch every provider's model list, bypassing the cache. */
+export interface RefreshModelsMessage {
+  type: WebviewMessageType.RefreshModels;
+}
+
+/** The user asked to open the raw chat.json for the current session in an editor. */
+export interface ViewChatLogMessage {
+  type: WebviewMessageType.ViewChatLog;
+}
+
 /** The user switched the active provider; the host re-lists its models. */
 export interface SelectProviderMessage {
   type: WebviewMessageType.SelectProvider;
@@ -512,6 +542,15 @@ export interface RevertFileMessage {
   created: boolean;
 }
 
+/**
+ * The user's changes-panel resolutions changed (kept/undid a file); persist the
+ * full map for the current session so it survives a reload.
+ */
+export interface SaveResolvedFilesMessage {
+  type: WebviewMessageType.SaveResolvedFiles;
+  resolved: Record<string, WebviewResolvedFile>;
+}
+
 /** The user ctrl/cmd-clicked a changed file to open it in the editor. */
 export interface OpenFileMessage {
   type: WebviewMessageType.OpenFile;
@@ -527,6 +566,8 @@ export type WebviewToHost =
   | UserInputResponseMessage
   | SelectModelMessage
   | SetReasoningEffortMessage
+  | RefreshModelsMessage
+  | ViewChatLogMessage
   | SelectProviderMessage
   | NewSessionMessage
   | ListSessionsMessage
@@ -542,4 +583,5 @@ export type WebviewToHost =
   | ToggleThinkingCollapsedMessage
   | ToggleLocalModelAutoRefreshMessage
   | RevertFileMessage
+  | SaveResolvedFilesMessage
   | OpenFileMessage;
