@@ -3,9 +3,9 @@
 This document tracks the issues so far.
 
 - Both
-- @currentfile
 - add custom mcp servers?
 - add ask mode, build mode, plan mode, custom mode
+- model kind of confused about currentFile
 
 - CLI
 
@@ -13,4 +13,5 @@ This document tracks the issues so far.
 
 # Instruction
 
-Once an issue is fixed delete from the line
+so i checked my cache and i'm seeing stuff like active-files.json,
+resolved-files.json and tool-view.json what are all these exactly???

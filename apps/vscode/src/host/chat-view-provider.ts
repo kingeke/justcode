@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 
 import { APP_NAME } from '@core/branding';
-import { writeActiveFile } from '@runtime/workspace/active-file-store';
 import { ChatBridge } from '@ext/host/chat-bridge';
 import { SettingsPanel } from '@ext/host/settings-panel';
 import { WebviewMessageType, type WebviewToHost } from '@ext/shared/protocol';
@@ -64,18 +63,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     // Keep `@currentfile` pointed at the editor's active file. Seed with the
     // file open now, then follow editor changes. A focus shift to the sidebar
     // reports an undefined active editor; ignore that so the mention keeps
-    // referring to the last real file the user was looking at. Also publish it
-    // to the shared sidecar so a CLI in the same workspace resolves it too.
-    const workspaceRoot = resolveWorkspaceRoot();
-    const updateCurrentFile = (file: string | undefined): void => {
-      bridge.setCurrentFile(file);
-      writeActiveFile(workspaceRoot, file);
-    };
-    updateCurrentFile(activeWorkspaceFile());
+    // referring to the last real file the user was looking at.
+    bridge.setCurrentFile(activeWorkspaceFile());
     const activeEditorSub = vscode.window.onDidChangeActiveTextEditor(
       (editor) => {
         const file = activeWorkspaceFile(editor);
-        if (file) updateCurrentFile(file);
+        if (file) bridge.setCurrentFile(file);
       }
     );
 

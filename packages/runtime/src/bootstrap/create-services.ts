@@ -100,19 +100,6 @@ export interface CreateRuntimeOptions {
    * extension) pass the active workspace folder instead.
    */
   workspaceRoot?: string;
-  /**
-   * Workspace-relative path of the file open in the host's editor at startup,
-   * which `@currentfile` resolves to. Updated later via {@link
-   * RuntimeServices.setCurrentFile}.
-   */
-  currentFile?: string;
-  /**
-   * A live source for the `@currentfile` path, read per completion/attachment
-   * request. Takes precedence over {@link currentFile}/{@link
-   * RuntimeServices.setCurrentFile}; used by the CLI to read the editor's open
-   * file from the shared sidecar so it stays current without an event channel.
-   */
-  getCurrentFile?: () => string | undefined;
 }
 
 export async function createRuntimeServices(
@@ -136,11 +123,11 @@ export async function createRuntimeServices(
   const repository = new FileConversationRepository(config.sessionsDirectory);
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const workspaceFiles = new LocalWorkspaceFileService(workspaceRoot);
-  // Mutable so the host can update which file `@currentfile` points at as the
-  // user switches editor tabs; read per completion/attachment request. A live
-  // getter (the CLI's sidecar reader) overrides it when provided.
-  const currentFile = { path: options.currentFile };
-  const getCurrentFile = options.getCurrentFile ?? (() => currentFile.path);
+  // Mutable so the host (the VSCode extension) can update which file
+  // `@currentfile` points at as the user switches editor tabs; read per
+  // completion/attachment request. The CLI never sets it, so `@currentfile`
+  // simply isn't offered there.
+  const currentFile: { path: string | undefined } = { path: undefined };
   const readSettings = {
     maxReadLines: options.maxReadLines ?? DEFAULT_MAX_READ_LINES,
   };
@@ -222,7 +209,7 @@ export async function createRuntimeServices(
     promptAttachmentService: new PromptAttachmentService(
       workspaceFiles,
       () => readSettings.maxReadLines,
-      getCurrentFile
+      () => currentFile.path
     ),
     toolRegistry,
     allProviders,
