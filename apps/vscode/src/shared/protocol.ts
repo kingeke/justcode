@@ -23,6 +23,8 @@ export enum HostMessageType {
   ModelsUpdate = 'modelsUpdate',
   FileReverted = 'fileReverted',
   SteeringConsumed = 'steeringConsumed',
+  WorkspaceFiles = 'workspaceFiles',
+  FileSymbols = 'fileSymbols',
   Error = 'error',
 }
 
@@ -55,6 +57,8 @@ export enum WebviewMessageType {
   ViewChatLog = 'viewChatLog',
   SaveResolvedFiles = 'saveResolvedFiles',
   SyncSteeringQueue = 'syncSteeringQueue',
+  RequestWorkspaceFiles = 'requestWorkspaceFiles',
+  RequestFileSymbols = 'requestFileSymbols',
 }
 
 /** Roles the transcript renders. Mirrors the persisted message roles. */
@@ -413,6 +417,29 @@ export interface SteeringConsumedMessage {
   content: string;
 }
 
+/**
+ * The workspace's files, sent in response to {@link RequestWorkspaceFilesMessage}
+ * so the composer can offer `@file` completions. The webview caches and filters
+ * this list locally, mirroring the CLI.
+ */
+export interface WorkspaceFilesMessage {
+  type: HostMessageType.WorkspaceFiles;
+  /** Workspace-relative paths. */
+  files: string[];
+}
+
+/**
+ * The symbols (functions/methods/classes) declared in a file, sent in response
+ * to {@link RequestFileSymbolsMessage} so the composer can offer `@path::method`
+ * completions. Empty when the file can't be read or has no detectable symbols.
+ */
+export interface FileSymbolsMessage {
+  type: HostMessageType.FileSymbols;
+  /** Workspace-relative path the symbols belong to (echoes the request). */
+  path: string;
+  symbols: string[];
+}
+
 export type HostToWebview =
   | ReadyMessage
   | ModelsUpdateMessage
@@ -427,6 +454,8 @@ export type HostToWebview =
   | TurnCompleteMessage
   | FileRevertedMessage
   | SteeringConsumedMessage
+  | WorkspaceFilesMessage
+  | FileSymbolsMessage
   | ErrorMessage;
 
 // --- Webview -> Host -------------------------------------------------------
@@ -607,6 +636,21 @@ export interface SyncSteeringQueueMessage {
   messages: { id: string; content: string }[];
 }
 
+/**
+ * Asks the host for the workspace file list, to drive `@file` completions. Sent
+ * the first time the user opens an `@` mention; the result is cached webview-side.
+ */
+export interface RequestWorkspaceFilesMessage {
+  type: WebviewMessageType.RequestWorkspaceFiles;
+}
+
+/** Asks the host for a file's symbols, to drive `@path::method` completions. */
+export interface RequestFileSymbolsMessage {
+  type: WebviewMessageType.RequestFileSymbols;
+  /** Workspace-relative path to read symbols from. */
+  path: string;
+}
+
 export type WebviewToHost =
   | InitMessage
   | SubmitMessage
@@ -634,4 +678,6 @@ export type WebviewToHost =
   | RevertFileMessage
   | SaveResolvedFilesMessage
   | SyncSteeringQueueMessage
+  | RequestWorkspaceFilesMessage
+  | RequestFileSymbolsMessage
   | OpenFileMessage;

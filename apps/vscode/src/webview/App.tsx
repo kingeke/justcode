@@ -197,6 +197,14 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.Cancel });
   };
 
+  const requestWorkspaceFiles = (): void => {
+    postToHost({ type: WebviewMessageType.RequestWorkspaceFiles });
+  };
+
+  const requestFileSymbols = (path: string): void => {
+    postToHost({ type: WebviewMessageType.RequestFileSymbols, path });
+  };
+
   const respondApproval = (id: string, approved: boolean): void => {
     postToHost({ type: WebviewMessageType.ApprovalResponse, id, approved });
     dispatch({ type: LocalActionType.DismissApproval });
@@ -696,6 +704,10 @@ export function App(): React.JSX.Element {
         maxHistoryMessages={state.maxHistoryMessages}
         onSubmit={submit}
         onCancel={cancel}
+        workspaceFiles={state.workspaceFiles}
+        fileSymbols={state.fileSymbols}
+        onRequestWorkspaceFiles={requestWorkspaceFiles}
+        onRequestFileSymbols={requestFileSymbols}
         onNewSession={newSession}
         onOpenModelPicker={openModelPicker}
         onOpenImage={setPreviewImage}

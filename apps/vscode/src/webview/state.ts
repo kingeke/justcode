@@ -139,6 +139,13 @@ export interface ChatState {
   revertError?: string | undefined;
   /** Messages submitted mid-turn, sent once the active turn finishes. */
   queuedMessages: QueuedMessage[];
+  /**
+   * Workspace files for the composer's `@file` completions, fetched lazily from
+   * the host the first time an `@` mention opens and filtered locally after.
+   */
+  workspaceFiles: string[];
+  /** A file's symbols for `@path::method` completions, cached by path. */
+  fileSymbols: Record<string, string[]>;
 }
 
 export const initialState: ChatState = {
@@ -166,6 +173,8 @@ export const initialState: ChatState = {
   reasoningEffortByModel: {},
   resolvedFiles: {},
   queuedMessages: [],
+  workspaceFiles: [],
+  fileSymbols: {},
 };
 
 /** Local-only actions, distinct from host messages, for optimistic UI updates. */
@@ -417,6 +426,15 @@ export function reducer(state: ChatState, action: Action): ChatState {
         input: undefined,
       };
     }
+
+    case HostMessageType.WorkspaceFiles:
+      return { ...state, workspaceFiles: action.files };
+
+    case HostMessageType.FileSymbols:
+      return {
+        ...state,
+        fileSymbols: { ...state.fileSymbols, [action.path]: action.symbols },
+      };
 
     case HostMessageType.Error: {
       // An aborted turn still streamed real thinking/answer tokens. Those live in

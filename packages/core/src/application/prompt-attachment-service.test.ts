@@ -189,10 +189,10 @@ describe('prompt mention helpers', () => {
     ).toEqual(['apps/cli/src/index.tsx']);
   });
 
-  it('applies the selected suggestion to the current mention', () => {
+  it('applies the selected suggestion to the current mention, with a trailing space', () => {
     expect(
       applyMentionSuggestion('Review @apps/cli/s', 'apps/cli/src/index.tsx')
-    ).toBe('Review @apps/cli/src/index.tsx');
+    ).toBe('Review @apps/cli/src/index.tsx ');
   });
 
   it('parses a mention into its path and optional symbol', () => {
@@ -245,12 +245,12 @@ describe('prompt mention helpers', () => {
     ).toEqual(['findOne', 'findMany', 'create']);
   });
 
-  it('applies a selected symbol to the active mention', () => {
+  it('applies a selected symbol to the active mention, with a trailing space', () => {
     expect(
       applySymbolSuggestion(
         'look at @reports.repository.ts::find',
         'findMultipleBoq'
       )
-    ).toBe('look at @reports.repository.ts::findMultipleBoq');
+    ).toBe('look at @reports.repository.ts::findMultipleBoq ');
   });
 });

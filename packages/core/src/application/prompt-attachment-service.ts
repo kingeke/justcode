@@ -207,11 +207,15 @@ export function filterSymbolSuggestions(
     .map(({ symbol }) => symbol);
 }
 
-/** Replaces the partial `::query` at the end of the prompt with `::symbol`. */
+/**
+ * Replaces the partial `::query` at the end of the prompt with `::symbol`,
+ * adding a trailing space so the caret lands ready for the next word instead of
+ * merging it into the mention.
+ */
 export function applySymbolSuggestion(content: string, symbol: string): string {
   return content.replace(
     /(@[^\s@]*?::)[^\s@:]*$/,
-    `$1${symbol.replaceAll('$', '$$$$')}`
+    `$1${symbol.replaceAll('$', '$$$$')} `
   );
 }
 
@@ -291,13 +295,18 @@ function calculateMatchScore(filePath: string, query: string): number {
   return score;
 }
 
+/**
+ * Replaces the partial `@query` at the end of the prompt with the full `@path`,
+ * adding a trailing space so the caret is ready for the next word. (This ends
+ * the mention, so chaining `::method` means deleting the space first.)
+ */
 export function applyMentionSuggestion(
   content: string,
   suggestedPath: string
 ): string {
   return content.replace(
     /(^|\s)@[^\s@]*$/,
-    `$1@${suggestedPath.replaceAll('$', '$$$$')}`
+    `$1@${suggestedPath.replaceAll('$', '$$$$')} `
   );
 }
 

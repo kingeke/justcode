@@ -8,7 +8,11 @@ import {
   type Conversation,
 } from '@core/domain/conversation';
 import { APP_NAME } from '@core/branding';
-import { createMessage, type MessageRole } from '@core/domain/message';
+import {
+  createMessage,
+  type MessageAttachment,
+  type MessageRole,
+} from '@core/domain/message';
 import type {
   ModelInfo,
   ModelReasoning,
@@ -266,6 +270,36 @@ export class ChatBridge {
         // the full current snapshot on every change (queue/edit/delete).
         this.steeringQueue = message.messages;
         return;
+      case WebviewMessageType.RequestWorkspaceFiles:
+        await this.sendWorkspaceFiles();
+        return;
+      case WebviewMessageType.RequestFileSymbols:
+        await this.sendFileSymbols(message.path);
+        return;
+    }
+  }
+
+  /** Serves the workspace file list for the composer's `@file` completions. */
+  private async sendWorkspaceFiles(): Promise<void> {
+    try {
+      const services = await this.ensureServices();
+      const files = await services.promptAttachmentService.listFiles();
+      this.post({ type: HostMessageType.WorkspaceFiles, files });
+    } catch {
+      // A failed listing just means no completions; the user can still type the
+      // path by hand, so swallow it rather than surfacing an error.
+      this.post({ type: HostMessageType.WorkspaceFiles, files: [] });
+    }
+  }
+
+  /** Serves a file's symbols for the composer's `@path::method` completions. */
+  private async sendFileSymbols(path: string): Promise<void> {
+    try {
+      const services = await this.ensureServices();
+      const symbols = await services.promptAttachmentService.listSymbols(path);
+      this.post({ type: HostMessageType.FileSymbols, path, symbols });
+    } catch {
+      this.post({ type: HostMessageType.FileSymbols, path, symbols: [] });
     }
   }
 
@@ -635,10 +669,23 @@ export class ChatBridge {
 
     try {
       const reasoningEffort = this.effectiveEffortForActiveModel();
+      // Resolve any `@file` / `@path::method` mentions into file-content
+      // attachments before the turn, so the model sees the referenced code
+      // (matches the CLI). Failures here shouldn't sink the turn.
+      let attachments: MessageAttachment[] | undefined = undefined;
+      try {
+        attachments = await services.promptAttachmentService.resolveAttachments(
+          content,
+          abortController.signal
+        );
+      } catch {
+        attachments = undefined;
+      }
       const result = await services.chatSessionService.submitMessage({
         conversation: this.conversation,
         model: this.activeModel,
         content,
+        ...(attachments?.length ? { attachments } : {}),
         ...(images?.length
           ? {
               images: images.map((image) => ({

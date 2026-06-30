@@ -1179,6 +1179,54 @@ textarea:focus {
   border-color: var(--vscode-focusBorder);
 }
 
+/* The @file / @method completions dropdown, floated above the prompt box. */
+.composer-mentions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, #555));
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background, var(--vscode-input-background));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.composer-mention {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.composer-mention-active {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+}
+
+.composer-mention-symbol {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer-mention-path {
+  flex-shrink: 0;
+  opacity: 0.6;
+  font-size: 11px;
+}
+
 /* While a turn is in flight, a bright blue arc travels around the composer's
    edge — a "thinking" affordance. The arc is a conic gradient rotated via the
    --composer-angle custom property, clipped to a 1.5px ring with a mask, and

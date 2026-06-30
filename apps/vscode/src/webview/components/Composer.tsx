@@ -1,6 +1,14 @@
 import * as React from 'react';
 
 import { APP_NAME } from '@core/branding';
+import {
+  applyMentionSuggestion,
+  applySymbolSuggestion,
+  filterMentionSuggestions,
+  filterSymbolSuggestions,
+  getActiveMentionQuery,
+  getActiveSymbolMention,
+} from '@core/application/prompt-attachment-service';
 import type {
   WebviewImage,
   WebviewModel,
@@ -65,6 +73,14 @@ export interface ComposerProps {
   ) => void;
   onSubmit: (content: string, images: WebviewImage[]) => void;
   onCancel: () => void;
+  /** Workspace files for `@file` completions (fetched lazily, filtered locally). */
+  workspaceFiles: string[];
+  /** A file's symbols for `@path::method` completions, cached by path. */
+  fileSymbols: Record<string, string[]>;
+  /** Ask the host for the workspace file list (first time an `@` mention opens). */
+  onRequestWorkspaceFiles: () => void;
+  /** Ask the host for a file's symbols (first time a `@path::` mention opens). */
+  onRequestFileSymbols: (path: string) => void;
   onNewSession: () => void;
   onOpenModelPicker: () => void;
   /** Opens a full-size preview of a staged image (data URL). */
@@ -92,6 +108,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   const { busy, disabled } = props;
   const [value, setValue] = React.useState('');
   const [images, setImages] = React.useState<WebviewImage[]>([]);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const [showSettings, setShowSettings] = React.useState(false);
   const [showReasoning, setShowReasoning] = React.useState(false);
   const reasoningRef = React.useRef<HTMLDivElement>(null);
@@ -170,7 +187,120 @@ export function Composer(props: ComposerProps): React.JSX.Element {
     setImages([]);
   };
 
+  // --- @file / @path::method completions ----------------------------------
+  // A trailing `@path::query` switches completion from files to that file's
+  // symbols; otherwise a trailing `@query` completes file paths. Both are
+  // derived from the prompt text each render and filtered locally against the
+  // host-provided lists, mirroring the CLI.
+  const [mentionIndex, setMentionIndex] = React.useState(0);
+  const [mentionDismissed, setMentionDismissed] = React.useState(false);
+
+  const symbolMention = React.useMemo(
+    () => getActiveSymbolMention(value),
+    [value]
+  );
+  const fileQuery = React.useMemo(
+    () => (symbolMention ? undefined : getActiveMentionQuery(value)),
+    [value, symbolMention]
+  );
+  const mentionSuggestions = React.useMemo<string[]>(() => {
+    if (symbolMention) {
+      return filterSymbolSuggestions(
+        props.fileSymbols[symbolMention.path] ?? [],
+        symbolMention.query
+      );
+    }
+    if (fileQuery !== undefined) {
+      return filterMentionSuggestions(props.workspaceFiles, fileQuery);
+    }
+    return [];
+  }, [symbolMention, fileQuery, props.fileSymbols, props.workspaceFiles]);
+
+  const mentionActive = symbolMention !== undefined || fileQuery !== undefined;
+  const mentionOpen =
+    mentionActive && !mentionDismissed && mentionSuggestions.length > 0;
+  const activeMentionIndex = Math.min(
+    mentionIndex,
+    Math.max(0, mentionSuggestions.length - 1)
+  );
+
+  // Refetch each time a mention *opens* (file list) or its path changes (symbol
+  // list), rather than once per session, so files/methods created since the last
+  // mention show up. We don't refetch on every keystroke within one open mention
+  // — the loaded list is filtered locally — to avoid re-walking the workspace per
+  // character; reopening `@` (or switching the `::` file) picks up new entries.
+  const fileMentionWasActiveRef = React.useRef(false);
+  const lastSymbolPathRef = React.useRef<string | null>(null);
+  const { onRequestWorkspaceFiles, onRequestFileSymbols } = props;
+  React.useEffect(() => {
+    const active = fileQuery !== undefined;
+    if (active && !fileMentionWasActiveRef.current) {
+      onRequestWorkspaceFiles();
+    }
+    fileMentionWasActiveRef.current = active;
+  }, [fileQuery, onRequestWorkspaceFiles]);
+  React.useEffect(() => {
+    const path = symbolMention?.path ?? null;
+    if (path && path !== lastSymbolPathRef.current) {
+      onRequestFileSymbols(path);
+    }
+    lastSymbolPathRef.current = path;
+  }, [symbolMention, onRequestFileSymbols]);
+
+  // Reset the highlighted row whenever the active query changes.
+  const mentionKey = symbolMention
+    ? `symbol:${symbolMention.path}:${symbolMention.query}`
+    : fileQuery !== undefined
+      ? `file:${fileQuery}`
+      : '';
+  React.useEffect(() => {
+    setMentionIndex(0);
+  }, [mentionKey]);
+
+  const changeValue = (next: string): void => {
+    setValue(next);
+    // Any edit re-opens a dropdown the user had dismissed with Esc.
+    setMentionDismissed(false);
+  };
+
+  const applyMention = (suggestion: string): void => {
+    const next = symbolMention
+      ? applySymbolSuggestion(value, suggestion)
+      : applyMentionSuggestion(value, suggestion);
+    changeValue(next);
+    textareaRef.current?.focus();
+  };
+
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    // While the completions dropdown is open it owns the arrow keys, Enter/Tab
+    // (apply), and Esc (dismiss) — so they don't submit or cancel the turn.
+    if (mentionOpen) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setMentionIndex((i) => (i + 1) % mentionSuggestions.length);
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setMentionIndex(
+          (i) =>
+            (i - 1 + mentionSuggestions.length) % mentionSuggestions.length
+        );
+        return;
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        const choice = mentionSuggestions[activeMentionIndex];
+        if (choice) applyMention(choice);
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setMentionDismissed(true);
+        return;
+      }
+    }
+
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       submit();
@@ -299,7 +429,40 @@ export function Composer(props: ComposerProps): React.JSX.Element {
             })}
           </div>
         ) : null}
+        {mentionOpen ? (
+          <ul className="composer-mentions" role="listbox">
+            {mentionSuggestions.map((suggestion, index) => (
+              <li
+                key={suggestion}
+                role="option"
+                aria-selected={index === activeMentionIndex}
+                className={`composer-mention ${
+                  index === activeMentionIndex ? 'composer-mention-active' : ''
+                }`}
+                // onMouseDown (not onClick) so the textarea keeps focus and the
+                // blur doesn't fire before the selection is applied.
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  applyMention(suggestion);
+                }}
+                onMouseEnter={() => setMentionIndex(index)}
+              >
+                {symbolMention ? (
+                  <>
+                    <span className="composer-mention-symbol">{suggestion}</span>
+                    <span className="composer-mention-path">
+                      {symbolMention.path}
+                    </span>
+                  </>
+                ) : (
+                  suggestion
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <textarea
+          ref={textareaRef}
           className="composer-input"
           value={value}
           rows={2}
@@ -311,7 +474,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                 ? 'Queue a follow-up — sends when this turn finishes…'
                 : `Ask ${APP_NAME} to build, fix, or explain…`
           }
-          onChange={(event) => setValue(event.target.value)}
+          onChange={(event) => changeValue(event.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
         />
