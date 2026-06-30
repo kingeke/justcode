@@ -510,136 +510,138 @@ export function App(): React.JSX.Element {
       </div>
 
       <div className="transcript-wrap">
-      <div
-        className="transcript"
-        ref={transcriptRef}
-        onScroll={onTranscriptScroll}
-      >
-        {state.notice ? <div className="notice">{state.notice}</div> : null}
+        <div
+          className="transcript"
+          ref={transcriptRef}
+          onScroll={onTranscriptScroll}
+        >
+          {state.notice ? <div className="notice">{state.notice}</div> : null}
 
-        {state.messages.map((message, index) => {
-          const isLastMsg = index === state.messages.length - 1;
-          const isLastAssistant =
-            !state.busy && isLastMsg && message.role === WebviewRole.Assistant;
-          const thinkingItems =
-            message.role === WebviewRole.Assistant && message.thinking
-              ? [
-                  {
-                    id: `${message.id}-thinking`,
-                    content: message.thinking.content,
-                    durationMs: message.thinking.durationMs,
-                  },
-                ]
-              : isLastAssistant
-                ? state.completedThinkingItems
-                : [];
-          return (
-            <React.Fragment key={message.id}>
-              {thinkingItems.map((item) => (
-                <ThinkingBlock
-                  key={item.id}
-                  thinking={item.content}
-                  durationMs={item.durationMs}
-                  collapsed={state.thinkingCollapsed}
-                  busy={false}
-                />
-              ))}
-              <MessageView
-                message={message}
-                expandTools={state.expandTools}
-                onOpenFile={openFile}
-                onOpenImage={setPreviewImage}
-              />
-            </React.Fragment>
-          );
-        })}
-
-        {state.liveTurnItems.map((item) => {
-          switch (item.kind) {
-            case LiveTurnItemKind.Thinking:
-              return (
-                <ThinkingBlock
-                  key={item.id}
-                  thinking={item.content}
-                  durationMs={item.durationMs}
-                  collapsed={state.thinkingCollapsed}
-                  busy={false}
-                />
-              );
-            case LiveTurnItemKind.Message:
-              return (
+          {state.messages.map((message, index) => {
+            const isLastMsg = index === state.messages.length - 1;
+            const isLastAssistant =
+              !state.busy &&
+              isLastMsg &&
+              message.role === WebviewRole.Assistant;
+            const thinkingItems =
+              message.role === WebviewRole.Assistant && message.thinking
+                ? [
+                    {
+                      id: `${message.id}-thinking`,
+                      content: message.thinking.content,
+                      durationMs: message.thinking.durationMs,
+                    },
+                  ]
+                : isLastAssistant
+                  ? state.completedThinkingItems
+                  : [];
+            return (
+              <React.Fragment key={message.id}>
+                {thinkingItems.map((item) => (
+                  <ThinkingBlock
+                    key={item.id}
+                    thinking={item.content}
+                    durationMs={item.durationMs}
+                    collapsed={state.thinkingCollapsed}
+                    busy={false}
+                  />
+                ))}
                 <MessageView
-                  key={item.id}
-                  message={{
-                    id: item.id,
-                    role: WebviewRole.Assistant,
-                    content: item.content,
-                  }}
-                  expandTools={state.expandTools}
-                />
-              );
-            case LiveTurnItemKind.Tool: {
-              const tool = state.tools.find(
-                (entry) => entry.toolCallId === item.toolCallId
-              );
-              return tool ? (
-                <ToolActivityView
-                  key={item.id}
-                  tools={[tool]}
+                  message={message}
                   expandTools={state.expandTools}
                   onOpenFile={openFile}
+                  onOpenImage={setPreviewImage}
                 />
-              ) : null;
+              </React.Fragment>
+            );
+          })}
+
+          {state.liveTurnItems.map((item) => {
+            switch (item.kind) {
+              case LiveTurnItemKind.Thinking:
+                return (
+                  <ThinkingBlock
+                    key={item.id}
+                    thinking={item.content}
+                    durationMs={item.durationMs}
+                    collapsed={state.thinkingCollapsed}
+                    busy={false}
+                  />
+                );
+              case LiveTurnItemKind.Message:
+                return (
+                  <MessageView
+                    key={item.id}
+                    message={{
+                      id: item.id,
+                      role: WebviewRole.Assistant,
+                      content: item.content,
+                    }}
+                    expandTools={state.expandTools}
+                  />
+                );
+              case LiveTurnItemKind.Tool: {
+                const tool = state.tools.find(
+                  (entry) => entry.toolCallId === item.toolCallId
+                );
+                return tool ? (
+                  <ToolActivityView
+                    key={item.id}
+                    tools={[tool]}
+                    expandTools={state.expandTools}
+                    onOpenFile={openFile}
+                  />
+                ) : null;
+              }
             }
-          }
-        })}
+          })}
 
-        {state.busy && state.thinking ? (
-          <ThinkingBlock
-            thinking={state.thinking}
-            durationMs={state.thinkingDurationMs}
-            collapsed={false}
-            busy={true}
-          />
-        ) : null}
+          {state.busy && state.thinking ? (
+            <ThinkingBlock
+              thinking={state.thinking}
+              durationMs={state.thinkingDurationMs}
+              collapsed={false}
+              busy={true}
+            />
+          ) : null}
 
-        {state.busy && state.streaming ? (
-          <MessageView
-            message={{
-              id: 'streaming',
-              role: WebviewRole.Assistant,
-              content: state.streaming,
-            }}
-            expandTools={state.expandTools}
-          />
-        ) : null}
+          {state.busy && state.streaming ? (
+            <MessageView
+              message={{
+                id: 'streaming',
+                role: WebviewRole.Assistant,
+                content: state.streaming,
+              }}
+              expandTools={state.expandTools}
+            />
+          ) : null}
 
-        {state.busy &&
-        !state.streaming &&
-        !state.thinking &&
-        !state.approval ? (
-          <div className="working">Tinkering…</div>
-        ) : null}
+          {state.busy &&
+          !state.streaming &&
+          !state.thinking &&
+          !state.approval ? (
+            <div className="working">Tinkering…</div>
+          ) : null}
 
-        {state.approval ? (
-          <ApprovalPrompt
-            request={state.approval}
-            onRespond={(approved) =>
-              respondApproval(state.approval!.id, approved)
-            }
-            onApproveAll={() => approveAllTools(state.approval!.id)}
-          />
-        ) : null}
+          {state.approval ? (
+            <ApprovalPrompt
+              request={state.approval}
+              onRespond={(approved) =>
+                respondApproval(state.approval!.id, approved)
+              }
+              onApproveAll={() => approveAllTools(state.approval!.id)}
+            />
+          ) : null}
 
-        {state.input ? (
-          <InputPrompt
-            request={state.input}
-            onRespond={(value) => respondInput(state.input!.id, value)}
-          />
-        ) : null}
+          {state.input ? (
+            <InputPrompt
+              request={state.input}
+              onRespond={(value) => respondInput(state.input!.id, value)}
+            />
+          ) : null}
 
-        {state.error ? <div className="error">{state.error}</div> : null}
-      </div>
+          {state.error ? <div className="error">{state.error}</div> : null}
+        </div>
         {showJumpToBottom ? (
           <button
             type="button"

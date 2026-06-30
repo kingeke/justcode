@@ -488,7 +488,8 @@ export class ChatBridge {
             {
               providerId: services.providerId,
               providerName:
-                PROVIDER_BY_ID[services.providerId]?.name ?? services.providerId,
+                PROVIDER_BY_ID[services.providerId]?.name ??
+                services.providerId,
               message: errorMessage(error),
             },
           ]
@@ -815,17 +816,25 @@ export class ChatBridge {
         const trimmedThinking = streamedThinking.trim();
         const partialAssistant =
           streamedContent.trim() || trimmedThinking
-            ? createMessage('assistant', streamedContent, new Date(), undefined, {
-                ...(trimmedThinking
-                  ? {
-                      thinking: {
-                        content: streamedThinking,
-                        durationMs:
-                          thinkingStartMs > 0 ? Date.now() - thinkingStartMs : 0,
-                      },
-                    }
-                  : {}),
-              })
+            ? createMessage(
+                'assistant',
+                streamedContent,
+                new Date(),
+                undefined,
+                {
+                  ...(trimmedThinking
+                    ? {
+                        thinking: {
+                          content: streamedThinking,
+                          durationMs:
+                            thinkingStartMs > 0
+                              ? Date.now() - thinkingStartMs
+                              : 0,
+                        },
+                      }
+                    : {}),
+                }
+              )
             : undefined;
         this.conversation = {
           ...this.conversation,
@@ -941,7 +950,10 @@ export class ChatBridge {
     } else if (isError && cached) {
       // Keep the start view's diff (the card still shows what was attempted) but
       // record that it errored so the changes panel excludes it.
-      this.toolViewsByCallId.set(event.toolCallId, { ...cached, isError: true });
+      this.toolViewsByCallId.set(event.toolCallId, {
+        ...cached,
+        isError: true,
+      });
     }
     // Persist views that carry a diff so the changes panel and tool cards keep
     // their diffs across a webview/host reload — the pre-edit text can't be

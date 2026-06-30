@@ -57,7 +57,10 @@ export async function readGlobalConfig(
     };
     // Migrate the pre-rename key: `autoApplyWrites` became `autoApprove` once
     // the toggle started gating every tool action, not just file writes.
-    if (parsed.autoApplyWrites !== undefined && parsed.autoApprove === undefined) {
+    if (
+      parsed.autoApplyWrites !== undefined &&
+      parsed.autoApprove === undefined
+    ) {
       parsed.autoApprove = parsed.autoApplyWrites;
     }
     delete parsed.autoApplyWrites;

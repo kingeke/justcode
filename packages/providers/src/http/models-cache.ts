@@ -112,7 +112,11 @@ export function withModelsCache(
     autoRefreshLocal?: () => boolean;
   }
 ): ProviderClient {
-  return new CachingModelsClient(inner, options.local, options.autoRefreshLocal);
+  return new CachingModelsClient(
+    inner,
+    options.local,
+    options.autoRefreshLocal
+  );
 }
 
 class CachingModelsClient implements ProviderClient {

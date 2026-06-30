@@ -332,6 +332,13 @@ function isToolsUnsupportedError(error: unknown): boolean {
   }
 
   const body = error.responseText.toLowerCase();
+  // Some models reject tools only on /chat/completions and tell us to use
+  // /responses instead (see isUnsupportedApiForModelError). That's a routing
+  // problem, not a missing capability — the model DOES support tools — so don't
+  // misclassify it here and permanently flag the model tool-unsupported.
+  if (recommendsResponsesApi(body)) {
+    return false;
+  }
   return (
     body.includes('does not support tools') ||
     body.includes('does not support tool') ||
@@ -350,9 +357,23 @@ function isUnsupportedApiForModelError(error: unknown): boolean {
     return false;
   }
 
-  const body = error.responseText.toLowerCase();
+  return recommendsResponsesApi(error.responseText.toLowerCase());
+}
+
+/**
+ * True when a 400 body says the request can't be served on /chat/completions and
+ * points to the Responses API instead. Covers both the bare
+ * `unsupported_api_for_model` case and the more specific one where only a feature
+ * combination is rejected (e.g. Copilot's "Function tools with reasoning_effort
+ * are not supported for gpt-5.4 in /v1/chat/completions. Please use /v1/responses
+ * instead.") — in every case the fix is to retry on /responses.
+ */
+function recommendsResponsesApi(lowerCaseBody: string): boolean {
   return (
-    body.includes('unsupported_api_for_model') ||
-    body.includes('not accessible via the /chat/completions')
+    lowerCaseBody.includes('unsupported_api_for_model') ||
+    lowerCaseBody.includes('not accessible via the /chat/completions') ||
+    lowerCaseBody.includes('use /v1/responses') ||
+    lowerCaseBody.includes('use the /responses') ||
+    lowerCaseBody.includes('/responses instead')
   );
 }

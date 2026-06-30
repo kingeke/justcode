@@ -1644,7 +1644,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         setAutoApprove(next);
         autoApproveRef.current = next;
         props.onAutoApproveChange?.(next);
-        setStatus(next ? 'Auto-approving all actions' : 'Confirming each action');
+        setStatus(
+          next ? 'Auto-approving all actions' : 'Confirming each action'
+        );
         return;
       }
 
@@ -2170,6 +2172,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           };
         });
         setStatus('Ready');
+        // Flip `isSending` off inside the same transition that commits the final
+        // conversation, so they land in one render. If this were left to the
+        // urgent `finally` below, React would apply it before this low-priority
+        // commit, briefly exposing isSending=false against the stale (pre-commit)
+        // conversation — and the post-turn queue-flush effect would then submit a
+        // queued message against that stale snapshot, dropping the just-finished
+        // reply and floating the new message up out of order.
+        setIsSending(false);
         if (assistantMessages.length && thinkingSegments.length) {
           const anchored: Record<
             string,
@@ -2286,11 +2296,13 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         setError(getErrorMessage(caughtError));
         setStatus('Request failed');
       }
+      // Urgent, same as the conversation update on the error/abort paths above, so
+      // they commit together — isSending never flips against a stale conversation.
+      setIsSending(false);
     } finally {
       // Keep liveToolDiffs: they're keyed by tool-call id, which the committed
       // messages share, so a write/edit keeps showing its diff in the
       // transcript after the turn (cleared only when the session resets).
-      setIsSending(false);
       activeRequestControllerRef.current = null;
     }
   };

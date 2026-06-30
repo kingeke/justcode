@@ -293,9 +293,9 @@ export class ChatSessionService {
     // it would just waste tokens and let the model call a now-useless no-op.
     const toolsLoaded = hasLoadedTools(input.conversation.messages);
     // With lazy loading off, advertise every real tool from the first turn (no
-    // gateway). With it on, the model sees only `lazy_load_tools` until it calls
-    // it, after which the real tool set (gateway excluded) stays loaded all
-    // session.
+    // gateway). With it on: the gateway is advertised on every request until the
+    // model calls it; once it does, the real tool set (gateway excluded) stays
+    // loaded for the rest of the session.
     const lazyToolLoadingEnabled = this.getLazyToolLoadingEnabled();
     // Models known not to support tools are sent chat-only from the start; the
     // tool section is also dropped from the system prompt so we don't advertise

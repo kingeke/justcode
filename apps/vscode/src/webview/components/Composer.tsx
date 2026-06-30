@@ -303,8 +303,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
       if (event.key === 'ArrowUp') {
         event.preventDefault();
         setMentionIndex(
-          (i) =>
-            (i - 1 + mentionSuggestions.length) % mentionSuggestions.length
+          (i) => (i - 1 + mentionSuggestions.length) % mentionSuggestions.length
         );
         return;
       }
@@ -469,7 +468,9 @@ export function Composer(props: ComposerProps): React.JSX.Element {
               >
                 {symbolMention ? (
                   <>
-                    <span className="composer-mention-symbol">{suggestion}</span>
+                    <span className="composer-mention-symbol">
+                      {suggestion}
+                    </span>
                     <span className="composer-mention-path">
                       {symbolMention.path}
                     </span>
@@ -588,7 +589,9 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                       Context Management
                     </div>
                     <div className="settings-popup-row">
-                      <span className="settings-popup-label">Max file read</span>
+                      <span className="settings-popup-label">
+                        Max file read
+                      </span>
                       {editingReadLimit ? (
                         <input
                           className="settings-popup-input"
@@ -671,9 +674,13 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                   </div>
 
                   <div className="settings-popup-section">
-                    <div className="settings-popup-heading">General Settings</div>
+                    <div className="settings-popup-heading">
+                      General Settings
+                    </div>
                     <div className="settings-popup-row">
-                      <span className="settings-popup-label">Auto approvals</span>
+                      <span className="settings-popup-label">
+                        Auto approvals
+                      </span>
                       <button
                         type="button"
                         className={`toggle-btn ${props.autoApprove ? 'toggle-on' : ''}`}
@@ -689,7 +696,9 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                       </button>
                     </div>
                     <div className="settings-popup-row">
-                      <span className="settings-popup-label">Show thinking</span>
+                      <span className="settings-popup-label">
+                        Show thinking
+                      </span>
                       <button
                         type="button"
                         className={`toggle-btn ${!props.thinkingCollapsed ? 'toggle-on' : ''}`}

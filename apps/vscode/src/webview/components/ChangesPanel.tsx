@@ -63,7 +63,9 @@ export function ChangesPanel({
             {files.length} file{files.length === 1 ? '' : 's'} changed
           </span>
           <span className="changes-stat changes-added">+{totals.added}</span>
-          <span className="changes-stat changes-removed">−{totals.removed}</span>
+          <span className="changes-stat changes-removed">
+            −{totals.removed}
+          </span>
         </button>
         <div className="changes-actions">
           <button
@@ -131,7 +133,9 @@ export function ChangesPanel({
                   </button>
                 )}
                 <span className="changes-dir">{dirname(file.path)}</span>
-                <span className="changes-stat changes-added">+{file.added}</span>
+                <span className="changes-stat changes-added">
+                  +{file.added}
+                </span>
                 <span className="changes-stat changes-removed">
                   −{file.removed}
                 </span>

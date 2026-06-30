@@ -70,8 +70,7 @@ export const COMMANDS: Command[] = [
   },
   {
     name: CommandName.LazyToolLoading,
-    description:
-      'Toggle lazy tool loading (off sends all tools by default)',
+    description: 'Toggle lazy tool loading (off sends all tools by default)',
   },
   {
     name: CommandName.ExpandTools,

@@ -85,7 +85,8 @@ export function deriveChangedFiles(
   const fold = (diff: WebviewDiff | undefined): void => {
     if (!diff) return;
     const existing = byPath.get(diff.path);
-    const deletedFrom = diff.newText === '' && diff.oldText !== '' ? diff.oldText : '';
+    const deletedFrom =
+      diff.newText === '' && diff.oldText !== '' ? diff.oldText : '';
     if (existing) {
       existing.current = diff.newText;
       existing.count += 1;

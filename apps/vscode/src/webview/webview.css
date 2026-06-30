@@ -63,12 +63,17 @@ body {
   cursor: pointer;
   opacity: 0.92;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-  transition: opacity 0.1s ease, background 0.1s ease;
+  transition:
+    opacity 0.1s ease,
+    background 0.1s ease;
 }
 
 .jump-to-bottom-btn:hover {
   opacity: 1;
-  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+  background: var(
+    --vscode-toolbar-hoverBackground,
+    var(--vscode-list-hoverBackground)
+  );
 }
 
 .transcript {
@@ -548,7 +553,10 @@ body {
   font-size: 11px;
   border-radius: 3px;
   border: 1px solid var(--vscode-button-border, transparent);
-  background: var(--vscode-button-secondaryBackground, rgba(127, 127, 127, 0.2));
+  background: var(
+    --vscode-button-secondaryBackground,
+    rgba(127, 127, 127, 0.2)
+  );
   color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
   cursor: pointer;
 }
@@ -1233,7 +1241,10 @@ textarea:focus {
   overflow-y: auto;
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, #555));
   border-radius: 8px;
-  background: var(--vscode-editorWidget-background, var(--vscode-input-background));
+  background: var(
+    --vscode-editorWidget-background,
+    var(--vscode-input-background)
+  );
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 

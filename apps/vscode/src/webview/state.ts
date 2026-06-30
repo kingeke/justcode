@@ -228,7 +228,11 @@ export type LocalAction =
   | { type: LocalActionType.SetHistoryLimit; count: number }
   | { type: LocalActionType.SetView; view: ChatView }
   | { type: LocalActionType.SetTitle; title: string }
-  | { type: LocalActionType.QueueMessage; content: string; images: WebviewImage[] }
+  | {
+      type: LocalActionType.QueueMessage;
+      content: string;
+      images: WebviewImage[];
+    }
   | { type: LocalActionType.DequeueMessage; id: string }
   | { type: LocalActionType.UpdateQueuedMessage; id: string; content: string }
   | { type: LocalActionType.ClearQueue }
@@ -302,9 +306,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
       const consumed = new Set(action.ids);
       return {
         ...state,
-        queuedMessages: state.queuedMessages.filter(
-          (m) => !consumed.has(m.id)
-        ),
+        queuedMessages: state.queuedMessages.filter((m) => !consumed.has(m.id)),
         messages: [
           ...state.messages,
           {

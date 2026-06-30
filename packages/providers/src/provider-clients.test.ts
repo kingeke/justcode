@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
 import { OllamaProvider } from '@providers/ollama/ollama-provider';
 import { OpenRouterProvider } from '@providers/openrouter/openrouter-provider';
+import { OpenAiCompatibleProvider } from '@providers/openai-compatible/openai-compatible-provider';
 import { ProviderId } from '@core/ports/provider-catalog';
 import { ReasoningEffort } from '@core/ports/chat-model';
 import type { ChatMessage } from '@core/domain/message';
@@ -16,7 +17,9 @@ function userMessage(content: string): ChatMessage {
 }
 
 /** The JSON request body the fetch mock was called with. */
-function sentBody(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknown> {
+function sentBody(
+  fetchMock: ReturnType<typeof vi.fn>
+): Record<string, unknown> {
   const init = fetchMock.mock.calls.at(-1)?.[1] as { body?: string };
   return JSON.parse(init?.body ?? '{}') as Record<string, unknown>;
 }
@@ -116,9 +119,11 @@ describe('provider clients', () => {
   });
 
   it('sends reasoning_effort for a chosen level', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      createJsonResponse({ choices: [{ message: { content: 'hi' } }] })
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        createJsonResponse({ choices: [{ message: { content: 'hi' } }] })
+      );
     vi.stubGlobal('fetch', fetchMock);
 
     await new OllamaProvider('http://127.0.0.1:11434').sendChat({
@@ -131,9 +136,11 @@ describe('provider clients', () => {
   });
 
   it("sends reasoning_effort 'none' when the choice is off", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      createJsonResponse({ choices: [{ message: { content: 'hi' } }] })
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        createJsonResponse({ choices: [{ message: { content: 'hi' } }] })
+      );
     vi.stubGlobal('fetch', fetchMock);
 
     await new OllamaProvider('http://127.0.0.1:11434').sendChat({
@@ -181,6 +188,75 @@ describe('provider clients', () => {
         providerId: ProviderId.OpenRouter,
       },
     ]);
+  });
+
+  it('retries on /responses (keeping tools) when /chat/completions says to use the Responses API', async () => {
+    // Copilot rejects function tools + reasoning_effort on /chat/completions for
+    // some GPT-5 models and points to /responses. The model still supports tools,
+    // so we must route there — not flag it tool-unsupported and drop tools.
+    const sseBody = [
+      'data: {"type":"response.output_text.delta","delta":"hi there"}',
+      '',
+      'data: {"type":"response.completed","response":{"usage":{"input_tokens":5,"output_tokens":2}}}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n');
+
+    const fetchMock = vi.fn(async (url: string, _init?: { body?: string }) => {
+      if (url.endsWith('/chat/completions')) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              message:
+                'Function tools with reasoning_effort are not supported for gpt-5.4 in /v1/chat/completions. Please use /v1/responses instead.',
+              code: 'invalid_request_body',
+            },
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } }
+        );
+      }
+      return new Response(sseBody, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAiCompatibleProvider({
+      providerId: ProviderId.Copilot,
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'token',
+    });
+
+    const result = await provider.sendChat({
+      model: 'gpt-5.4',
+      messages: [userMessage('hey')],
+      reasoningEffort: ReasoningEffort.Medium,
+      tools: [
+        {
+          name: 'lazy_load_tools',
+          description: 'load tools',
+          parameters: {
+            type: 'object',
+            properties: {},
+            additionalProperties: false,
+          },
+        },
+      ],
+    });
+
+    expect(result.content).toBe('hi there');
+    const urls = fetchMock.mock.calls.map((call) => call[0] as string);
+    expect(urls.some((url) => url.endsWith('/chat/completions'))).toBe(true);
+    const responsesCall = fetchMock.mock.calls.find((call) =>
+      (call[0] as string).endsWith('/responses')
+    );
+    expect(responsesCall).toBeDefined();
+    const responsesBody = JSON.parse(responsesCall?.[1]?.body ?? '{}') as {
+      tools?: unknown[];
+    };
+    expect(responsesBody.tools?.length).toBe(1);
   });
 
   it('writes request and response logs to debug.log', async () => {

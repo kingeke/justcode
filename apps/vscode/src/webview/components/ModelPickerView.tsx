@@ -1,9 +1,6 @@
 import * as React from 'react';
 
-import type {
-  WebviewModel,
-  WebviewProviderError,
-} from '@ext/shared/protocol';
+import type { WebviewModel, WebviewProviderError } from '@ext/shared/protocol';
 import { PlusIcon, RefreshIcon } from '@ext/webview/components/Icons';
 
 // ── Sort ─────────────────────────────────────────────────────────────────────

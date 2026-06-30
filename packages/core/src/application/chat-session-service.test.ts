@@ -1068,4 +1068,64 @@ describe('ChatSessionService', () => {
     const followUpRequest = seenRequests[seenRequests.length - 1];
     expect(followUpRequest?.map((tool) => tool.name)).toEqual(['write_file']);
   });
+
+  it('re-advertises the gateway on every turn until the model calls it', async () => {
+    const repository = new InMemoryConversationRepository();
+    const delegatedTool = new RecordingWriteTool();
+    const lazyLoadTool = new LazyLoadToolsTool([
+      {
+        ...delegatedTool.definition,
+        requiresApproval: delegatedTool.requiresApproval,
+      },
+    ]);
+    const seenRequests: Array<ChatRequest['tools']> = [];
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat(request: ChatRequest): Promise<ChatResult> {
+        // The model never calls lazy_load_tools — it just answers each turn.
+        seenRequests.push(request.tools);
+        return { content: 'Sure.' };
+      },
+      async listModels() {
+        return [
+          { id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai },
+        ];
+      },
+      getDefaultModel() {
+        return 'gpt';
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry: new ToolRegistry(
+        [lazyLoadTool, delegatedTool],
+        [
+          {
+            ...lazyLoadTool.definition,
+            requiresApproval: lazyLoadTool.requiresApproval,
+          },
+        ]
+      ),
+    });
+
+    const first = await service.submitMessage({
+      conversation: createConversation('session-1'),
+      model: 'gpt',
+      content: 'hello',
+    });
+    // Second turn on the same conversation: the model still hasn't loaded tools,
+    // so the gateway must be offered again so it can still opt in later.
+    await service.submitMessage({
+      conversation: first.conversation,
+      model: 'gpt',
+      content: 'still hello',
+    });
+
+    // Both requests advertised the gateway, since it was never called.
+    expect(seenRequests[0]?.map((tool) => tool.name)).toEqual([
+      'lazy_load_tools',
+    ]);
+    expect(
+      seenRequests[seenRequests.length - 1]?.map((tool) => tool.name)
+    ).toEqual(['lazy_load_tools']);
+  });
 });

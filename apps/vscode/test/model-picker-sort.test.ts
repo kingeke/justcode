@@ -3,10 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { WebviewModel } from '@ext/shared/protocol';
 import { sortModels } from '@ext/webview/components/ModelPickerView';
 
-function model(
-  id: string,
-  fields: Partial<WebviewModel> = {}
-): WebviewModel {
+function model(id: string, fields: Partial<WebviewModel> = {}): WebviewModel {
   return {
     id,
     displayName: id,
