@@ -49,6 +49,11 @@ import {
   writeResolvedFiles,
   deleteResolvedFiles,
 } from '@ext/host/resolved-files-store';
+import {
+  readToolViews,
+  writeToolViews,
+  deleteToolViews,
+} from '@ext/host/tool-views-store';
 
 import {
   HostMessageType,
@@ -300,6 +305,18 @@ export class ChatBridge {
       string,
       Record<string, WebviewReasoningChoice | undefined> | undefined
     >;
+
+    // Seed the in-memory view cache from disk so a resumed session keeps its
+    // captured diffs. After a reload the cache is empty and the diff can't be
+    // recomputed (the file is already edited), so without this the changes panel
+    // and tool cards would come back blank. Live captures win over the restored
+    // ones, so only fill ids we don't already hold.
+    const persistedViews = await readToolViews(configDir, this.sessionId);
+    for (const [callId, view] of persistedViews) {
+      if (!this.toolViewsByCallId.has(callId)) {
+        this.toolViewsByCallId.set(callId, view);
+      }
+    }
 
     let services: RuntimeServices;
     try {
@@ -770,17 +787,38 @@ export class ChatBridge {
       }
     }
 
+    const isError = event.phase === 'end' && (event.result?.isError ?? false);
+    // A rejected/failed call never touched disk, so its diff is only a preview.
+    // Flag it so the post-turn rebuild (and thus the changes panel) can tell it
+    // apart from an applied edit.
+    if (isError) view.isError = true;
+
     // Capture the live view (the start phase carries the pre-edit diff) so the
     // post-turn transcript rebuild can reuse it instead of recomputing against
     // the already-edited file, which would drop the diff entirely. A bash
     // deletion diff is only known on `end`, so let that overwrite the cached
     // start view.
+    const cached = this.toolViewsByCallId.get(event.toolCallId);
     if (
       event.phase === 'start' ||
-      !this.toolViewsByCallId.has(event.toolCallId) ||
+      !cached ||
       (event.phase === 'end' && view.diff)
     ) {
       this.toolViewsByCallId.set(event.toolCallId, view);
+    } else if (isError && cached) {
+      // Keep the start view's diff (the card still shows what was attempted) but
+      // record that it errored so the changes panel excludes it.
+      this.toolViewsByCallId.set(event.toolCallId, { ...cached, isError: true });
+    }
+    // Persist views that carry a diff so the changes panel and tool cards keep
+    // their diffs across a webview/host reload — the pre-edit text can't be
+    // recomputed once the file has changed on disk.
+    if (this.toolViewsByCallId.get(event.toolCallId)?.diff) {
+      void writeToolViews(
+        cacheDirectory(),
+        this.sessionId,
+        this.toolViewsByCallId
+      );
     }
     this.post({
       type: HostMessageType.ToolActivity,
@@ -929,6 +967,7 @@ export class ChatBridge {
       return;
     }
     await deleteResolvedFiles(cacheDirectory(), sessionId);
+    await deleteToolViews(cacheDirectory(), sessionId);
 
     // If the deleted session was the one loaded, drop it so reopening the chat
     // starts fresh rather than resurrecting the cleared conversation.
@@ -965,6 +1004,9 @@ export class ChatBridge {
     );
     await Promise.allSettled(
       summaries.map((s) => deleteResolvedFiles(cacheDirectory(), s.sessionId))
+    );
+    await Promise.allSettled(
+      summaries.map((s) => deleteToolViews(cacheDirectory(), s.sessionId))
     );
 
     // The open session was almost certainly among those cleared; start fresh so
@@ -1255,6 +1297,28 @@ export class ChatBridge {
   }
 }
 
+/**
+ * A tool result whose content marks it as not-applied: the user rejected it, or
+ * it threw. Matches the sentinels `ChatSessionService` writes. Used on resume,
+ * when the live error flag wasn't captured, so the changes panel still excludes
+ * a rejected/failed edit's preview diff.
+ */
+function isErrorToolResultContent(content: string): boolean {
+  return (
+    content === 'The user rejected this tool call.' ||
+    content.startsWith('Tool failed:')
+  );
+}
+
+/** Flags a rebuilt tool view as errored when its result content says so. */
+function markToolViewError(
+  view: WebviewToolView,
+  resultContent: string
+): WebviewToolView {
+  if (view.isError || !isErrorToolResultContent(resultContent)) return view;
+  return { ...view, isError: true };
+}
+
 function toProviderError(
   provider: ProviderClient,
   reason: unknown
@@ -1379,7 +1443,12 @@ export async function toWebviewMessages(
       ...(message.role === 'tool' &&
       message.toolCallId &&
       toolViewsByCallId.has(message.toolCallId)
-        ? { toolView: toolViewsByCallId.get(message.toolCallId)! }
+        ? {
+            toolView: markToolViewError(
+              toolViewsByCallId.get(message.toolCallId)!,
+              message.content
+            ),
+          }
         : {}),
       ...(message.thinking ? { thinking: message.thinking } : {}),
       ...(message.role === 'user' && message.images?.length

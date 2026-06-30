@@ -59,7 +59,14 @@ export interface ResolvedFile {
 export function deriveChangedFiles(
   messages: WebviewMessage[],
   liveTools: ToolActivity[],
-  resolved: ReadonlyMap<string, ResolvedFile>
+  resolved: ReadonlyMap<string, ResolvedFile>,
+  /**
+   * Workspace path of the edit currently awaiting approval, if any. Its diff is
+   * only a preview until the user accepts, so it's held out of the panel — once
+   * accepted the approval clears and the diff folds in; once rejected the tool's
+   * error flag keeps it out.
+   */
+  pendingApprovalPath?: string
 ): ChangedFile[] {
   const order: string[] = [];
   const byPath = new Map<
@@ -94,8 +101,24 @@ export function deriveChangedFiles(
     });
   };
 
-  for (const message of messages) fold(message.toolView?.diff);
-  for (const tool of liveTools) fold(tool.view.diff);
+  // Only fold diffs from edits that actually landed on disk. A rejected/failed
+  // call (`isError`) and the one still awaiting approval carry a preview diff
+  // that was never applied, so they must not count toward the changes panel.
+  for (const message of messages) {
+    if (message.toolView?.isError) continue;
+    fold(message.toolView?.diff);
+  }
+  for (const tool of liveTools) {
+    if (tool.isError) continue;
+    if (
+      pendingApprovalPath !== undefined &&
+      !tool.done &&
+      tool.view.path === pendingApprovalPath
+    ) {
+      continue;
+    }
+    fold(tool.view.diff);
+  }
 
   const files: ChangedFile[] = [];
   for (const path of order) {

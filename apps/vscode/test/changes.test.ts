@@ -21,14 +21,17 @@ function toolMessage(
 function liveTool(
   path: string,
   oldText: string,
-  newText: string
+  newText: string,
+  opts: { done?: boolean; isError?: boolean } = {}
 ): ToolActivity {
   return {
     toolCallId: `c-${path}`,
     toolName: 'edit_file',
-    view: { title: 'Edit', diff: { path, oldText, newText } },
-    done: false,
-    isError: false,
+    view: { title: 'Edit', path, diff: { path, oldText, newText } },
+    // Default to an applied edit: the panel only counts tools that finished
+    // without error, so that's the case most assertions care about.
+    done: opts.done ?? true,
+    isError: opts.isError ?? false,
   };
 }
 
@@ -78,7 +81,7 @@ describe('deriveChangedFiles', () => {
     });
   });
 
-  it('folds live, in-flight tool diffs after committed ones', () => {
+  it('folds applied live tool diffs after committed ones', () => {
     const files = deriveChangedFiles(
       [toolMessage('a.ts', 'orig\n', 'mid\n')],
       [liveTool('a.ts', 'mid\n', 'final\n')],
@@ -87,6 +90,57 @@ describe('deriveChangedFiles', () => {
 
     expect(files).toHaveLength(1);
     expect(files[0]).toMatchObject({ baseline: 'orig\n', current: 'final\n' });
+  });
+
+  it('ignores the edit currently awaiting approval', () => {
+    const files = deriveChangedFiles(
+      [],
+      [liveTool('a.ts', 'orig\n', 'edited\n', { done: false })],
+      new Map(),
+      'a.ts' // this file's edit is the one awaiting approval
+    );
+
+    expect(files).toHaveLength(0);
+  });
+
+  it('shows an accepted edit immediately, before it reports done', () => {
+    // After Accept the approval clears (no pendingApprovalPath); the edit is
+    // applying but may not have reported `done` yet — it must still show.
+    const files = deriveChangedFiles(
+      [],
+      [liveTool('a.ts', 'orig\n', 'edited\n', { done: false })],
+      new Map()
+    );
+
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({ path: 'a.ts', current: 'edited\n' });
+  });
+
+  it('ignores a rejected or failed live tool preview', () => {
+    const files = deriveChangedFiles(
+      [],
+      [liveTool('a.ts', 'orig\n', 'edited\n', { done: true, isError: true })],
+      new Map()
+    );
+
+    expect(files).toHaveLength(0);
+  });
+
+  it('ignores a rejected committed tool message', () => {
+    const rejected: WebviewMessage = {
+      id: 'm-rejected',
+      role: WebviewRole.Tool,
+      content: 'The user rejected this tool call.',
+      toolName: 'edit_file',
+      toolView: {
+        title: 'Edit',
+        diff: { path: 'a.ts', oldText: 'orig\n', newText: 'edited\n' },
+        isError: true,
+      },
+    };
+    const files = deriveChangedFiles([rejected], [], new Map());
+
+    expect(files).toHaveLength(0);
   });
 
   it('omits files resolved at their current edit count', () => {

@@ -1,6 +1,5 @@
 import * as React from 'react';
 
-import { APP_NAME } from '@core/branding';
 import {
   WebviewMessageType,
   WebviewRole,
@@ -85,20 +84,29 @@ export function App(): React.JSX.Element {
   };
 
   // Keep the latest content in view as tokens stream and messages arrive — but
-  // only while the user hasn't scrolled up to read earlier output. Approval and
-  // input prompts are included: they appear below the transcript and are the
-  // thing the user must act on, so a freshly-shown gate has to scroll into view.
+  // only while the user hasn't scrolled up to read earlier output.
   React.useEffect(() => {
     const el = transcriptRef.current;
     if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [
-    state.messages,
-    state.streaming,
-    state.thinking,
-    state.tools,
-    state.approval,
-    state.input,
-  ]);
+  }, [state.messages, state.streaming, state.thinking, state.tools]);
+
+  // When an approval/input gate appears it needs the user to act, so reveal it
+  // unconditionally — even if they'd scrolled up — and re-arm auto-scroll. The
+  // gate's diff/preview can grow the transcript after this commit, so scroll on
+  // the next frame (post-paint) and pin to the real bottom rather than the
+  // height measured mid-render.
+  React.useEffect(() => {
+    if (!state.approval && !state.input) return;
+    const el = transcriptRef.current;
+    if (!el) return;
+    const reveal = (): void => {
+      el.scrollTop = el.scrollHeight;
+      stickToBottomRef.current = true;
+    };
+    reveal();
+    const raf = requestAnimationFrame(reveal);
+    return () => cancelAnimationFrame(raf);
+  }, [state.approval, state.input]);
 
   const sendNow = (content: string, images: WebviewImage[]): void => {
     // Sending a new message should always snap to it, even if the user had
@@ -238,10 +246,6 @@ export function App(): React.JSX.Element {
     });
   };
 
-  const selectProvider = (providerId: string): void => {
-    postToHost({ type: WebviewMessageType.SelectProvider, providerId });
-  };
-
   const newSession = (): void => {
     postToHost({ type: WebviewMessageType.NewSession });
   };
@@ -330,8 +334,14 @@ export function App(): React.JSX.Element {
     [state.resolvedFiles]
   );
   const changedFiles = React.useMemo(
-    () => deriveChangedFiles(state.messages, state.tools, resolvedMap),
-    [state.messages, state.tools, resolvedMap]
+    () =>
+      deriveChangedFiles(
+        state.messages,
+        state.tools,
+        resolvedMap,
+        state.approval?.view.path
+      ),
+    [state.messages, state.tools, resolvedMap, state.approval]
   );
 
   // Keeping a file leaves its current content on disk, so that becomes the

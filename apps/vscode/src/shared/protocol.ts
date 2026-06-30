@@ -195,6 +195,12 @@ export interface WebviewToolView {
   diff?: WebviewDiff;
   /** Workspace-relative path of the file the call concerns, when single-file. */
   path?: string;
+  /**
+   * True when the call was rejected or failed, so its `diff` is only a preview
+   * of what would have happened — never applied to disk. The changes panel uses
+   * this to exclude it from the aggregate of real, applied edits.
+   */
+  isError?: boolean;
 }
 
 /** A single transcript entry sent to the webview to render history. */
