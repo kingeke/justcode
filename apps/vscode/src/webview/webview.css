@@ -1687,10 +1687,20 @@ textarea:focus {
 
 /* --- Manage-tools popup ---------------------------------------------------- */
 
-/* Taller list than the settings popup, so it scrolls rather than overflows. */
+/* Taller list than the settings popup. The tool list scrolls while the MCP
+   footer stays pinned at the bottom, so it's always reachable. */
 .tools-popup {
   min-width: 240px;
   max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* The scrolling region is the tool list section; the footer sits outside it. */
+.tools-popup > .tools-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -1701,7 +1711,7 @@ textarea:focus {
 }
 
 .tools-group + .tools-group {
-  margin-top: 6px;
+  margin-top: 0;
 }
 
 /* The heading row holds a fold caret and a toggle-all button side by side. */
@@ -1734,10 +1744,11 @@ textarea:focus {
 }
 
 .tools-caret-btn {
-  width: 18px;
+  width: 24px;
+  min-height: 24px;
   justify-content: center;
   opacity: 0.7;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .tools-caret-btn:hover,
@@ -1750,14 +1761,124 @@ textarea:focus {
   font-weight: 600;
 }
 
-/* Indent items so their checkbox lines up under the category checkbox: the
-   caret button (18px) plus the category toggle's own left padding (6px). */
+/* Nest items under their category: start past the category checkbox (caret 24px
+   + toggle padding 6px = 30px) plus a further step so children read as indented
+   children rather than sitting flush under the heading. */
 .tools-item {
-  padding-left: 34px;
+  padding-left: 42px;
 }
 
 .tools-item-label {
   opacity: 0.9;
+}
+
+.tools-mcp-footer {
+  flex: none;
+  padding-top: 8px;
+}
+
+.tools-mcp-link {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 2px;
+  font: inherit;
+  color: var(--vscode-textLink-foreground, #3b82f6);
+  opacity: 0.9;
+}
+
+.tools-mcp-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+/* --- MCP servers settings tab --------------------------------------------- */
+
+.mcp-intro {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+.mcp-editor {
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.4));
+  border-radius: 6px;
+  background: var(--vscode-input-background, rgba(0, 0, 0, 0.2));
+  color: var(--vscode-input-foreground, inherit);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  tab-size: 2;
+}
+
+.mcp-editor:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder, #3b82f6);
+}
+
+.mcp-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.mcp-dirty-hint {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.mcp-result {
+  margin-top: 14px;
+}
+
+.mcp-result-ok {
+  margin: 0 0 8px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.mcp-server-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mcp-server-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.mcp-server-status {
+  color: var(--vscode-charts-green, #4caf50);
+}
+
+.mcp-server-row-error .mcp-server-status {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.mcp-server-name {
+  font-weight: 600;
+}
+
+.mcp-server-detail {
+  opacity: 0.6;
+}
+
+.mcp-server-row-error .mcp-server-detail {
+  color: var(--vscode-errorForeground, #f14c4c);
+  opacity: 0.85;
 }
 
 .tools-check {

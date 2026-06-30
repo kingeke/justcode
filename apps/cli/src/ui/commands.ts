@@ -13,6 +13,7 @@ export enum CommandName {
   LazyToolLoading = 'toggle-lazy-tool-loading',
   ExpandTools = 'expand-tools',
   ManageTools = 'manage-tools',
+  ConfigureMcpServers = 'configure-mcp-servers',
   ReadLimit = 'read-limit',
   ContextWindow = 'context-window',
   Config = 'config',
@@ -80,6 +81,10 @@ export const COMMANDS: Command[] = [
   {
     name: CommandName.ManageTools,
     description: 'Turn individual tools on or off',
+  },
+  {
+    name: CommandName.ConfigureMcpServers,
+    description: 'Open mcp.json to add or edit MCP servers',
   },
   {
     name: CommandName.ReadLimit,

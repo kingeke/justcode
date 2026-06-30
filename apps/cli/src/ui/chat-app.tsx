@@ -61,6 +61,7 @@ import type {
 import type { GlobalConfig } from '@runtime/persistence/global-config';
 import { mergeProviderConfig } from '@runtime/persistence/global-config';
 import { resetAppState } from '@runtime/persistence/reset-app-state';
+import { ensureMcpConfigFile } from '@runtime/mcp/mcp-config';
 import { clearModelsCache } from '@providers/http/models-cache';
 import { renderDiff } from '@cli/ui/render-diff.js';
 import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
@@ -127,6 +128,8 @@ interface ChatAppProps {
   providerId: ProviderId | undefined;
   savedConfig: GlobalConfig;
   configFilePath: string;
+  /** Directory holding the on-disk config, used to locate `mcp.json`. */
+  configDirectory: string;
   chatSessionService: ChatSessionService;
   promptAttachmentService: PromptAttachmentService;
   sessionId: string;
@@ -1591,6 +1594,20 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         void openFileInEditor(props.configFilePath)
           .then(() => {
             setStatus('Opened config file');
+          })
+          .catch((caughtError: unknown) => {
+            setError(getErrorMessage(caughtError));
+          });
+        return;
+
+      case CommandName.ConfigureMcpServers:
+        // Seed an empty mcp.json on first use so the editor always opens a valid
+        // file, then open it. Changes take effect on the next launch, when MCP
+        // servers are (re)connected.
+        void ensureMcpConfigFile(props.configDirectory)
+          .then((path) => openFileInEditor(path))
+          .then(() => {
+            setStatus('Opened mcp.json — restart to apply MCP server changes');
           })
           .catch((caughtError: unknown) => {
             setError(getErrorMessage(caughtError));

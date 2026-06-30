@@ -4,11 +4,14 @@ import { APP_NAME } from '@core/branding';
 import { APP_VERSION } from '@core/version';
 import { cacheDirectory } from '@core/application/cache-dir';
 
+import { readFile, writeFile } from 'node:fs/promises';
+
 import {
   SettingsHostMessageType,
   SettingsWebviewMessageType,
   type SettingsAppInfo,
   type SettingsHostToWebview,
+  type SettingsMcpServerStatus,
   type SettingsWebviewToHost,
 } from '@ext/shared/settings-protocol';
 import {
@@ -19,6 +22,7 @@ import {
   testAndConnectProvider,
 } from '@ext/host/provider-settings';
 import { resetAppState } from '@runtime/persistence/reset-app-state';
+import { ensureMcpConfigFile } from '@runtime/mcp/mcp-config';
 
 const APP_INFO: SettingsAppInfo = {
   name: APP_NAME,
@@ -40,19 +44,37 @@ export class SettingsPanel {
   private oauthAbort: AbortController | undefined;
   /** Resolves the OAuth flow's pending promptInput() with the user's reply. */
   private oauthInputResolve: ((value: string) => void) | undefined;
+  /** A section to focus once the webview has loaded (e.g. opened for MCP). */
+  private pendingSection: 'mcp' | undefined;
 
   public constructor(
     private readonly extensionUri: vscode.Uri,
     /** Opens the connect flow (terminal); used for OAuth-only providers. */
     private readonly onConnectProvider: () => void,
     /** Notifies the host that the provider set changed (connect/disconnect). */
-    private readonly onProvidersChanged: () => void
+    private readonly onProvidersChanged: () => void,
+    /**
+     * Persists+reconnects MCP servers after the user saves `mcp.json`, returning
+     * each server's load outcome. Injected by the view provider so the panel can
+     * stay decoupled from the live chat session. Returns undefined when no chat
+     * session is open to reload (the file is still saved either way).
+     */
+    private readonly onMcpChanged: () => Promise<
+      SettingsMcpServerStatus[] | undefined
+    >
   ) {}
 
-  /** Creates the Settings tab if needed, then brings it to the foreground. */
-  public reveal(): void {
+  /**
+   * Creates the Settings tab if needed, then brings it to the foreground.
+   * An optional section focuses a specific tab (e.g. `'mcp'`) once loaded.
+   */
+  public reveal(section?: 'mcp'): void {
+    this.pendingSection = section;
     if (this.panel) {
       this.panel.reveal(vscode.ViewColumn.Active);
+      // Already loaded: the webview won't re-send Init, so focus it now.
+      if (section)
+        this.post({ type: SettingsHostMessageType.FocusSection, section });
       return;
     }
 
@@ -108,6 +130,15 @@ export class SettingsPanel {
           appInfo: APP_INFO,
           providers: await listProviders(cacheDirectory()),
         });
+        // If the tab was opened to a specific section (e.g. the chat's
+        // "Configure MCP servers" link), focus it now that the UI is ready.
+        if (this.pendingSection) {
+          this.post({
+            type: SettingsHostMessageType.FocusSection,
+            section: this.pendingSection,
+          });
+          this.pendingSection = undefined;
+        }
         return;
       case SettingsWebviewMessageType.ListProviders:
         await this.sendProviders();
@@ -171,7 +202,86 @@ export class SettingsPanel {
         }
         return;
       }
+      case SettingsWebviewMessageType.GetMcpConfig:
+        await this.sendMcpConfig();
+        return;
+      case SettingsWebviewMessageType.SaveMcpConfig:
+        await this.saveMcpConfig(message.content);
+        return;
     }
+  }
+
+  /** Reads `mcp.json` (seeding an empty template if absent) and sends its text. */
+  private async sendMcpConfig(): Promise<void> {
+    const path = await ensureMcpConfigFile(cacheDirectory());
+    let content = '';
+    try {
+      content = await readFile(path, 'utf8');
+    } catch {
+      content = '{\n  "mcpServers": {}\n}\n';
+    }
+    this.post({ type: SettingsHostMessageType.McpConfig, content });
+  }
+
+  /**
+   * Validates and writes new `mcp.json` text, then reconnects MCP servers so
+   * their tools appear immediately. Rejects malformed JSON without writing, so a
+   * typo can't wipe a working config or leave servers half-loaded.
+   */
+  private async saveMcpConfig(content: string): Promise<void> {
+    // Clearing the editor means "no servers" rather than an error — fall back to
+    // an empty config instead of complaining about empty/blank input.
+    const toSave = content.trim() ? content : '{\n  "mcpServers": {}\n}\n';
+
+    const validationError = validateMcpJson(toSave);
+    if (validationError) {
+      this.post({
+        type: SettingsHostMessageType.McpSaveResult,
+        success: false,
+        error: validationError,
+      });
+      return;
+    }
+
+    try {
+      const path = await ensureMcpConfigFile(cacheDirectory());
+      await writeFile(path, toSave, 'utf8');
+    } catch (error) {
+      this.post({
+        type: SettingsHostMessageType.McpSaveResult,
+        success: false,
+        error: `Couldn't save mcp.json: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      });
+      return;
+    }
+
+    // Re-sync the editor to exactly what was written (e.g. a cleared editor
+    // becomes the empty template), so the textarea and "unsaved" hint match disk.
+    this.post({ type: SettingsHostMessageType.McpConfig, content: toSave });
+
+    // Reconnect against the new config; the chat view (if open) reloads its tool
+    // list as part of this. A failure to reconnect doesn't unsave the file.
+    let servers: SettingsMcpServerStatus[] | undefined;
+    try {
+      servers = await this.onMcpChanged();
+    } catch (error) {
+      this.post({
+        type: SettingsHostMessageType.McpSaveResult,
+        success: true,
+        error: `Saved, but reconnecting failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      });
+      return;
+    }
+
+    this.post({
+      type: SettingsHostMessageType.McpSaveResult,
+      success: true,
+      ...(servers ? { servers } : {}),
+    });
   }
 
   /**
@@ -261,6 +371,44 @@ export class SettingsPanel {
   </body>
 </html>`;
   }
+}
+
+/**
+ * Validates MCP config text before it's written: it must be a JSON object whose
+ * `mcpServers` (if present) maps names to entries that each carry a string
+ * `command`. Returns a human-readable error, or undefined when the text is fine.
+ */
+function validateMcpJson(content: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch (error) {
+    return `Invalid JSON: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return 'Expected a JSON object at the top level.';
+  }
+  const servers = (parsed as { mcpServers?: unknown }).mcpServers;
+  if (servers === undefined) {
+    return 'Missing a "mcpServers" object.';
+  }
+  if (
+    typeof servers !== 'object' ||
+    servers === null ||
+    Array.isArray(servers)
+  ) {
+    return '"mcpServers" must be an object mapping a name to its config.';
+  }
+  for (const [name, value] of Object.entries(servers)) {
+    if (
+      typeof value !== 'object' ||
+      value === null ||
+      typeof (value as { command?: unknown }).command !== 'string'
+    ) {
+      return `Server "${name}" must have a string "command".`;
+    }
+  }
+  return undefined;
 }
 
 function createNonce(): string {

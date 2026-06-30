@@ -23,7 +23,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       () => openConnectTerminal(),
       // A connect/disconnect in the Settings tab invalidates the sidebar's
       // cached provider; let the live session reload from config.
-      () => void this.bridge?.refreshProviders()
+      () => void this.bridge?.refreshProviders(),
+      // Saving mcp.json reconnects MCP in the live session; return each server's
+      // outcome so the Settings page can report what loaded (undefined when no
+      // chat session is open to reload).
+      () => this.bridge?.reloadMcp() ?? Promise.resolve(undefined)
     );
   }
 
@@ -51,7 +55,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         );
         return choice === 'Delete';
       },
-      () => this.settings.reveal(),
+      (section) => this.settings.reveal(section),
       (absolutePath) => {
         void vscode.window.showTextDocument(vscode.Uri.file(absolutePath), {
           preview: false,

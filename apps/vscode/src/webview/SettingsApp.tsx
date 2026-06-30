@@ -9,6 +9,7 @@ import {
   SettingsHostMessageType,
   SettingsWebviewMessageType,
   type SettingsAppInfo,
+  type SettingsMcpServerStatus,
 } from '@ext/shared/settings-protocol';
 import {
   logoUri,
@@ -46,13 +47,22 @@ interface OAuthControls {
 
 enum Tab {
   Providers = 'providers',
+  Mcp = 'mcp',
   About = 'about',
 }
 
 const TABS: { id: Tab; label: string }[] = [
   { id: Tab.Providers, label: 'Providers' },
+  { id: Tab.Mcp, label: 'MCP Servers' },
   { id: Tab.About, label: 'About JustCode' },
 ];
+
+/** Result of the most recent MCP save, shown beneath the editor. */
+interface McpSaveState {
+  success: boolean;
+  error?: string | undefined;
+  servers?: SettingsMcpServerStatus[];
+}
 
 function matchesSearch(provider: WebviewProvider, query: string): boolean {
   if (!query) return true;
@@ -67,6 +77,13 @@ export function SettingsApp(): React.JSX.Element {
   const [tab, setTab] = React.useState<Tab>(Tab.Providers);
   const [providers, setProviders] = React.useState<WebviewProvider[]>([]);
   const [appInfo, setAppInfo] = React.useState<SettingsAppInfo | undefined>();
+  // MCP editor state: the last text the host sent (for the "Loaded"/reset
+  // baseline), whether a save is in flight, and the most recent save outcome.
+  const [mcpContent, setMcpContent] = React.useState<string | undefined>();
+  const [mcpSaving, setMcpSaving] = React.useState(false);
+  const [mcpSaveState, setMcpSaveState] = React.useState<
+    McpSaveState | undefined
+  >();
 
   // Callback ref: set by ConnectWizard when it fires TestConnectProvider so
   // the incoming ConnectResult message can be routed back to the right form.
@@ -102,11 +119,35 @@ export function SettingsApp(): React.JSX.Element {
           oauthHandlersRef.current?.onResult(message);
           oauthHandlersRef.current = null;
           break;
+        case SettingsHostMessageType.McpConfig:
+          setMcpContent(message.content);
+          break;
+        case SettingsHostMessageType.McpSaveResult:
+          setMcpSaving(false);
+          setMcpSaveState({
+            success: message.success,
+            error: message.error,
+            servers: message.servers,
+          });
+          break;
+        case SettingsHostMessageType.FocusSection:
+          if (message.section === 'mcp') setTab(Tab.Mcp);
+          break;
       }
     });
     postSettingsToHost({ type: SettingsWebviewMessageType.Init });
+    postSettingsToHost({ type: SettingsWebviewMessageType.GetMcpConfig });
     return unsubscribe;
   }, []);
+
+  const saveMcpConfig = (content: string): void => {
+    setMcpSaving(true);
+    setMcpSaveState(undefined);
+    postSettingsToHost({
+      type: SettingsWebviewMessageType.SaveMcpConfig,
+      content,
+    });
+  };
 
   const startOAuth = (providerId: string, handlers: OAuthHandlers): void => {
     oauthHandlersRef.current = handlers;
@@ -199,6 +240,13 @@ export function SettingsApp(): React.JSX.Element {
               onTestConnect={testConnect}
               onDisconnect={disconnect}
               onAddCustom={addCustom}
+            />
+          ) : tab === Tab.Mcp ? (
+            <McpTab
+              content={mcpContent}
+              saving={mcpSaving}
+              saveState={mcpSaveState}
+              onSave={saveMcpConfig}
             />
           ) : (
             <AboutTab appInfo={appInfo} />
@@ -969,6 +1017,126 @@ function CustomProviderForm({
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MCP servers tab — edit mcp.json in a textarea and save (reconnects live)
+// ---------------------------------------------------------------------------
+
+const MCP_PLACEHOLDER = `{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
+    }
+  }
+}`;
+
+function McpTab({
+  content,
+  saving,
+  saveState,
+  onSave,
+}: {
+  content: string | undefined;
+  saving: boolean;
+  saveState: McpSaveState | undefined;
+  onSave: (content: string) => void;
+}): React.JSX.Element {
+  const [draft, setDraft] = React.useState(content ?? '');
+  // The host pushes the file text at load and again after each save (the source
+  // of truth on disk). Sync the editor to it on those pushes — between them
+  // `content` is stable, so typing is preserved.
+  React.useEffect(() => {
+    if (content !== undefined) setDraft(content);
+  }, [content]);
+
+  const dirty = content !== undefined && draft !== content;
+
+  return (
+    <div className="settings-section mcp-section">
+      <h2 className="settings-section-title">MCP Servers</h2>
+      <p className="settings-hint mcp-intro">
+        Define MCP servers as JSON. On save, JustCode connects to each server
+        and adds its tools — manage them under the tools button in chat. Changes
+        apply immediately.
+      </p>
+
+      <textarea
+        className="mcp-editor"
+        spellCheck={false}
+        autoComplete="off"
+        value={draft}
+        placeholder={MCP_PLACEHOLDER}
+        onChange={(e) => setDraft(e.target.value)}
+        aria-label="mcp.json contents"
+      />
+
+      <div className="mcp-actions">
+        <button
+          type="button"
+          className="provider-action provider-action-primary"
+          disabled={saving || !dirty}
+          onClick={() => onSave(draft)}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        {dirty ? <span className="mcp-dirty-hint">Unsaved changes</span> : null}
+      </div>
+
+      {saveState ? <McpSaveSummary saveState={saveState} /> : null}
+    </div>
+  );
+}
+
+function McpSaveSummary({
+  saveState,
+}: {
+  saveState: McpSaveState;
+}): React.JSX.Element {
+  if (!saveState.success) {
+    return (
+      <p className="provider-connect-error mcp-result">
+        {saveState.error ?? 'Save failed.'}
+      </p>
+    );
+  }
+
+  const servers = saveState.servers ?? [];
+  const totalTools = servers.reduce((sum, s) => sum + s.toolCount, 0);
+  const okCount = servers.filter((s) => s.ok).length;
+
+  return (
+    <div className="mcp-result">
+      <p className="mcp-result-ok">
+        {saveState.error
+          ? saveState.error
+          : servers.length === 0
+            ? 'Saved. No servers configured.'
+            : `Saved — loaded ${totalTools} tool${totalTools === 1 ? '' : 's'} from ${okCount} of ${servers.length} server${servers.length === 1 ? '' : 's'}.`}
+      </p>
+      {servers.length > 0 ? (
+        <ul className="mcp-server-list">
+          {servers.map((server) => (
+            <li
+              key={server.name}
+              className={`mcp-server-row ${server.ok ? '' : 'mcp-server-row-error'}`}
+            >
+              <span className="mcp-server-status" aria-hidden="true">
+                {server.ok ? '✓' : '✕'}
+              </span>
+              <span className="mcp-server-name">{server.name}</span>
+              <span className="mcp-server-detail">
+                {server.ok
+                  ? `${server.toolCount} tool${server.toolCount === 1 ? '' : 's'}`
+                  : (server.error ?? 'failed to connect')}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

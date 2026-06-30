@@ -6,6 +6,7 @@ import { ToolRegistry } from '@core/application/tool-registry';
 import {
   TOOL_DISPLAY,
   type ManageableToolInfo,
+  type ToolDisplay,
 } from '@core/domain/tool-metadata';
 import { type ProviderClient } from '@core/ports/chat-model';
 import { ProviderId } from '@core/ports/provider-catalog';
@@ -28,6 +29,10 @@ import {
   LazyLoadToolsTool,
   type LazyLoadableToolDefinition,
 } from '@runtime/tools/lazy-load-tools-tool';
+import {
+  loadMcpTools,
+  type McpServerLoadInfo,
+} from '@runtime/mcp/load-mcp-tools';
 import { ProviderRegistry } from '@runtime/bootstrap/provider-registry';
 import { NullProvider } from '@runtime/bootstrap/null-provider';
 import { loadAppConfig } from '@runtime/config/app-config';
@@ -83,6 +88,17 @@ export interface RuntimeServices {
    * completion/attachment request, so updates take effect immediately.
    */
   setCurrentFile: (path: string | undefined) => void;
+  /**
+   * Tears down every MCP server process spawned at startup. Hosts should call
+   * this on shutdown so spawned servers don't linger. No-op when no MCP servers
+   * are configured.
+   */
+  disposeMcp: () => void;
+  /**
+   * Per-server outcome of loading `mcp.json` at startup (connected? how many
+   * tools?), so a host can show the user what loaded and what failed.
+   */
+  mcpServers: McpServerLoadInfo[];
 }
 
 export interface CreateRuntimeOptions {
@@ -141,7 +157,7 @@ export async function createRuntimeServices(
   // Mutable so a runtime toggle reaches the chat session, which reads the set
   // per turn through `getDisabledToolNames` below.
   const disabledToolsSettings = { names: config.disabledTools };
-  const runtimeTools = [
+  const builtInTools = [
     new WriteFileTool(workspaceFiles),
     new EditFileTool(workspaceFiles),
     new ApplyPatchTool(workspaceFiles),
@@ -155,19 +171,27 @@ export async function createRuntimeServices(
     new QuestionTool(),
     new ViewHistoryTool(),
   ];
+  // Launch any servers configured in `mcp.json` and fold their tools into the
+  // runtime toolset. A broken or missing config yields nothing and never throws,
+  // so MCP is purely additive — its tools sit alongside the built-ins and are
+  // toggled, lazily loaded, and advertised through the very same machinery.
+  const mcp = await loadMcpTools(config.configDirectory);
+  const runtimeTools = [...builtInTools, ...mcp.tools];
   const lazyLoadableTools: LazyLoadableToolDefinition[] = runtimeTools.map(
     (tool) => ({
       ...tool.definition,
       requiresApproval: tool.requiresApproval,
     })
   );
-  // The user-facing catalog: each toggleable tool in display order, joined to
-  // its live description and seeded with its on/off state from the saved config.
+  // The user-facing catalog: every toggleable tool in display order — built-ins
+  // first, then one group per MCP server — joined to its live description and
+  // seeded with its on/off state from the saved config.
   const definitionsByName = new Map(
     runtimeTools.map((tool) => [tool.definition.name, tool.definition])
   );
+  const toolDisplays: ToolDisplay[] = [...TOOL_DISPLAY, ...mcp.displays];
   const initialDisabled = new Set(disabledToolsSettings.names);
-  const manageableTools: ManageableToolInfo[] = TOOL_DISPLAY.flatMap(
+  const manageableTools: ManageableToolInfo[] = toolDisplays.flatMap(
     (display) => {
       const definition = definitionsByName.get(display.name);
       if (!definition) return [];
@@ -235,6 +259,8 @@ export async function createRuntimeServices(
     setCurrentFile: (path: string | undefined) => {
       currentFile.path = path;
     },
+    disposeMcp: mcp.dispose,
+    mcpServers: mcp.servers,
   };
 }
 

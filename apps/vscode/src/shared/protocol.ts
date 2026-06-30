@@ -56,6 +56,7 @@ export enum WebviewMessageType {
   OpenSettings = 'openSettings',
   RevertFile = 'revertFile',
   OpenFile = 'openFile',
+  OpenMcpConfig = 'openMcpConfig',
   ViewChatLog = 'viewChatLog',
   SaveResolvedFiles = 'saveResolvedFiles',
   SyncSteeringQueue = 'syncSteeringQueue',
@@ -658,6 +659,14 @@ export interface OpenFileMessage {
 }
 
 /**
+ * The user chose "Configure MCP servers" in the manage-tools popup. The host
+ * seeds `mcp.json` in the cache directory if absent and opens it in the editor.
+ */
+export interface OpenMcpConfigMessage {
+  type: WebviewMessageType.OpenMcpConfig;
+}
+
+/**
  * Mirrors the webview's current text follow-ups to the host so the running turn
  * can steer on them. Sent whenever the queue changes; the host keeps the latest
  * snapshot and folds it in at the next agent step. Only text-only entries are
@@ -714,4 +723,5 @@ export type WebviewToHost =
   | SyncSteeringQueueMessage
   | RequestWorkspaceFilesMessage
   | RequestFileSymbolsMessage
-  | OpenFileMessage;
+  | OpenFileMessage
+  | OpenMcpConfigMessage;

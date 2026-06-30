@@ -221,6 +221,7 @@ async function runChat(options: SharedOptions): Promise<void> {
     useMouse: true,
   });
   const exit = (): void => {
+    runtime.disposeMcp();
     renderer.destroy();
     process.exit(0);
   };
@@ -232,6 +233,7 @@ async function runChat(options: SharedOptions): Promise<void> {
       providerId: runtime.providerId,
       savedConfig,
       configFilePath: join(appConfig.configDirectory, 'config.json'),
+      configDirectory: appConfig.configDirectory,
       chatSessionService: runtime.chatSessionService,
       promptAttachmentService: runtime.promptAttachmentService,
       sessionId: options.session ?? randomUUID(),

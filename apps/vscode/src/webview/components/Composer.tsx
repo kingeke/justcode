@@ -113,6 +113,8 @@ export interface ComposerProps {
   disabledTools: string[];
   /** Persist a new full set of disabled tool names. */
   onSetDisabledTools: (names: string[]) => void;
+  /** Open `mcp.json` to add or edit MCP servers. */
+  onOpenMcpConfig: () => void;
 }
 
 /**
@@ -212,6 +214,24 @@ export function Composer(props: ComposerProps): React.JSX.Element {
       tools: byCategory.get(category) ?? [],
     }));
   }, [props.manageableTools]);
+
+  // Start every category collapsed so the popup stays compact; a category is
+  // only auto-collapsed the first time it appears, so the user's own expand/
+  // collapse choices survive re-renders (and newly added MCP servers default
+  // collapsed too).
+  const seenCategoriesRef = React.useRef<Set<string>>(new Set());
+  React.useEffect(() => {
+    const fresh = toolCategories
+      .map((entry) => entry.category)
+      .filter((category) => !seenCategoriesRef.current.has(category));
+    if (fresh.length === 0) return;
+    for (const category of fresh) seenCategoriesRef.current.add(category);
+    setCollapsedCategories((prev) => {
+      const next = new Set(prev);
+      for (const category of fresh) next.add(category);
+      return next;
+    });
+  }, [toolCategories]);
 
   const disabledSet = React.useMemo(
     () => new Set(props.disabledTools),
@@ -671,7 +691,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
             <div className="settings-popup-anchor" ref={toolsRef}>
               {showTools ? (
                 <div className="settings-popup tools-popup">
-                  <div className="settings-popup-section">
+                  <div className="settings-popup-section tools-scroll">
                     <div className="settings-popup-heading">Tools</div>
                     {props.manageableTools.length === 0 ? (
                       <div className="settings-popup-row">
@@ -749,6 +769,19 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         );
                       })
                     )}
+                  </div>
+                  <div className="settings-popup-section tools-mcp-footer">
+                    <button
+                      type="button"
+                      className="tools-mcp-link"
+                      onClick={() => {
+                        setShowTools(false);
+                        props.onOpenMcpConfig();
+                      }}
+                      title="Open mcp.json to add or edit MCP servers"
+                    >
+                      + Configure MCP servers
+                    </button>
                   </div>
                 </div>
               ) : null}

@@ -45,6 +45,7 @@ import {
   type RuntimeServices,
 } from '@runtime/bootstrap/create-services';
 import { sessionFilePath } from '@runtime/persistence/file-conversation-repository';
+import type { McpServerLoadInfo } from '@runtime/mcp/load-mcp-tools';
 import { clearModelsCache } from '@providers/http/models-cache';
 
 import { parseRemovedPaths } from '@ext/host/parse-removed-paths';
@@ -172,8 +173,11 @@ export class ChatBridge {
     private readonly onConfirmDeleteSession?: (
       title: string
     ) => Promise<boolean>,
-    /** Reveals the Settings editor tab; injected by the view provider. */
-    private readonly onOpenSettings?: () => void,
+    /**
+     * Reveals the Settings editor tab; injected by the view provider. An
+     * optional section focuses a specific tab (e.g. `'mcp'` for MCP servers).
+     */
+    private readonly onOpenSettings?: (section?: 'mcp') => void,
     /** Opens a workspace file in the editor; injected by the view provider. */
     private readonly onOpenFile?: (absolutePath: string) => void
   ) {
@@ -285,6 +289,11 @@ export class ChatBridge {
       case WebviewMessageType.OpenFile:
         this.openFile(message.path);
         return;
+      case WebviewMessageType.OpenMcpConfig:
+        // Open the Settings tab's MCP section, where the user edits mcp.json in a
+        // textarea and saves — which reconnects servers live (see reloadMcp).
+        this.onOpenSettings?.('mcp');
+        return;
       case WebviewMessageType.SyncSteeringQueue:
         // Mirror the webview's editable follow-up queue so the in-flight turn
         // can fold it in at the next step. Replace wholesale — the webview sends
@@ -328,6 +337,9 @@ export class ChatBridge {
     this.abortController?.abort();
     this.pendingApprovals.clear();
     this.pendingInputs.clear();
+    // Kill any MCP server processes this session spawned.
+    this.services?.disposeMcp();
+    this.services = undefined;
   }
 
   /** Builds (once) and returns the runtime services for this session. */
@@ -1451,6 +1463,8 @@ export class ChatBridge {
    */
   public async refreshProviders(): Promise<void> {
     const previousProvider = this.services?.providerId;
+    // Rebuilding services re-spawns MCP servers; tear the old ones down first.
+    this.services?.disposeMcp();
     this.services = undefined;
 
     if (!this.conversation) return;
@@ -1468,6 +1482,24 @@ export class ChatBridge {
       this.activeModel = undefined;
     }
     await this.sendReady();
+  }
+
+  /**
+   * Reloads MCP servers after the user edits `mcp.json` (from the Settings tab),
+   * so newly added tools appear without a manual reload. Rebuilds the runtime —
+   * which reconnects every server and recomputes the tool catalog — then pushes a
+   * fresh snapshot to the chat view. Returns each server's load outcome so the
+   * Settings page can report what connected and what failed.
+   */
+  public async reloadMcp(): Promise<McpServerLoadInfo[]> {
+    // Drop the cached services so the next build reconnects MCP from the new
+    // config; kill the old server processes first so they don't linger.
+    this.services?.disposeMcp();
+    this.services = undefined;
+    // sendReady rebuilds services (reconnecting MCP), recomputes the tool
+    // catalog, and re-renders the chat view's manage-tools popup in one pass.
+    await this.sendReady();
+    return this.services?.mcpServers ?? [];
   }
 
   private async resetSession(): Promise<void> {

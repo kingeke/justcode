@@ -22,6 +22,12 @@ export enum SettingsHostMessageType {
   OAuthPrompt = 'oauthPrompt',
   /** Final result of an OAuthConnectProvider attempt. */
   OAuthResult = 'oauthResult',
+  /** The raw text of `mcp.json`, in response to GetMcpConfig. */
+  McpConfig = 'mcpConfig',
+  /** Outcome of a SaveMcpConfig attempt (validation + live reload). */
+  McpSaveResult = 'mcpSaveResult',
+  /** Asks the settings UI to focus a specific section/tab (e.g. MCP). */
+  FocusSection = 'focusSection',
 }
 
 /** Discriminator for messages sent from the settings webview to the host. */
@@ -39,6 +45,18 @@ export enum SettingsWebviewMessageType {
   DisconnectProvider = 'disconnectProvider',
   ResetApp = 'resetApp',
   AddCustomProvider = 'addCustomProvider',
+  /** Ask the host for the current `mcp.json` text. */
+  GetMcpConfig = 'getMcpConfig',
+  /** Persist new `mcp.json` text and reconnect MCP servers. */
+  SaveMcpConfig = 'saveMcpConfig',
+}
+
+/** Per-server outcome of loading MCP, shown after a save. */
+export interface SettingsMcpServerStatus {
+  name: string;
+  ok: boolean;
+  toolCount: number;
+  error?: string | undefined;
 }
 
 /** Static product details rendered on the About tab. */
@@ -89,13 +107,38 @@ export interface SettingsOAuthResultMessage {
   error?: string | undefined;
 }
 
+/** The current `mcp.json` text, sent in response to GetMcpConfig. */
+export interface SettingsMcpConfigMessage {
+  type: SettingsHostMessageType.McpConfig;
+  content: string;
+}
+
+/** Outcome of a SaveMcpConfig: parse/validation status and per-server results. */
+export interface SettingsMcpSaveResultMessage {
+  type: SettingsHostMessageType.McpSaveResult;
+  success: boolean;
+  /** Set when the JSON failed to parse/validate (nothing was saved). */
+  error?: string | undefined;
+  /** Per-server load outcome after a successful save + reconnect. */
+  servers?: SettingsMcpServerStatus[];
+}
+
+/** Asks the settings UI to switch to a section (e.g. when opened for MCP). */
+export interface SettingsFocusSectionMessage {
+  type: SettingsHostMessageType.FocusSection;
+  section: 'mcp';
+}
+
 export type SettingsHostToWebview =
   | SettingsSnapshotMessage
   | SettingsProvidersUpdateMessage
   | SettingsConnectResultMessage
   | SettingsOAuthStatusMessage
   | SettingsOAuthPromptMessage
-  | SettingsOAuthResultMessage;
+  | SettingsOAuthResultMessage
+  | SettingsMcpConfigMessage
+  | SettingsMcpSaveResultMessage
+  | SettingsFocusSectionMessage;
 
 // --- Webview -> Host -------------------------------------------------------
 
@@ -159,6 +202,16 @@ export interface SettingsAddCustomProviderMessage {
   baseUrl: string;
 }
 
+export interface SettingsGetMcpConfigMessage {
+  type: SettingsWebviewMessageType.GetMcpConfig;
+}
+
+export interface SettingsSaveMcpConfigMessage {
+  type: SettingsWebviewMessageType.SaveMcpConfig;
+  /** The full new text to write to `mcp.json`. */
+  content: string;
+}
+
 export type SettingsWebviewToHost =
   | SettingsInitMessage
   | SettingsListProvidersMessage
@@ -169,4 +222,6 @@ export type SettingsWebviewToHost =
   | SettingsCancelOAuthMessage
   | SettingsDisconnectProviderMessage
   | SettingsResetAppMessage
-  | SettingsAddCustomProviderMessage;
+  | SettingsAddCustomProviderMessage
+  | SettingsGetMcpConfigMessage
+  | SettingsSaveMcpConfigMessage;

@@ -440,6 +440,10 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.OpenFile, path });
   };
 
+  const openMcpConfig = (): void => {
+    postToHost({ type: WebviewMessageType.OpenMcpConfig });
+  };
+
   const chatDisabled = !state.activeModel;
 
   if (state.view === 'sessions' || state.status === ChatStatus.Loading) {
@@ -778,6 +782,7 @@ export function App(): React.JSX.Element {
         manageableTools={state.manageableTools}
         disabledTools={state.disabledTools}
         onSetDisabledTools={setDisabledTools}
+        onOpenMcpConfig={openMcpConfig}
         onToggleAutoApprove={toggleAutoApprove}
         onToggleExpandTools={toggleExpandTools}
         onToggleThinkingCollapsed={toggleThinkingCollapsed}
