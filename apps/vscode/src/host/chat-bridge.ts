@@ -98,6 +98,10 @@ export class ChatBridge {
   // 0 means "off" — the full conversation is sent without trimming.
   private maxHistoryMessages = DEFAULT_MAX_HISTORY_MESSAGES;
   private thinkingCollapsed = false;
+  // When true (default), local providers refetch their model list every load;
+  // when false they use the once-a-day cache. Applied to the live runtime via
+  // `setLocalModelAutoRefresh` so toggling takes effect without a reload.
+  private localModelAutoRefresh = true;
   // The user's chosen reasoning effort per model, nested by provider id (e.g.
   // `{ openrouter: { "openai/gpt-5": "high" } }`). Mirrors the CLI's per-model
   // store; a model absent here uses its default effort.
@@ -213,6 +217,9 @@ export class ChatBridge {
       case WebviewMessageType.ToggleThinkingCollapsed:
         await this.toggleThinkingCollapsed();
         return;
+      case WebviewMessageType.ToggleLocalModelAutoRefresh:
+        await this.toggleLocalModelAutoRefresh();
+        return;
       case WebviewMessageType.RevertFile:
         await this.revertFile(message.path, message.oldText, message.created);
         return;
@@ -250,6 +257,7 @@ export class ChatBridge {
     this.maxHistoryMessages =
       globalConfig.cache?.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES;
     this.thinkingCollapsed = globalConfig.thinkingCollapsed ?? false;
+    this.localModelAutoRefresh = globalConfig.localModelAutoRefresh ?? true;
     // The config stores the same string values under @core's ReasoningEffort
     // enum type; the webview protocol re-declares them as string literals.
     this.reasoningEffortByModel = (globalConfig.reasoningEffortByModel ??
@@ -274,6 +282,7 @@ export class ChatBridge {
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
         thinkingCollapsed: this.thinkingCollapsed,
+        localModelAutoRefresh: this.localModelAutoRefresh,
         reasoningEffortByModel: this.reasoningEffortByModel,
       });
       return;
@@ -282,6 +291,7 @@ export class ChatBridge {
     // Apply the current read and history limits to the runtime.
     services.setMaxReadLines(this.maxReadLines);
     services.setMaxHistoryMessages(this.maxHistoryMessages);
+    services.setLocalModelAutoRefresh(this.localModelAutoRefresh);
 
     // With no configured provider the session is backed by a NullProvider whose
     // model listing is empty; surface a notice instead of letting startSession
@@ -299,6 +309,7 @@ export class ChatBridge {
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
         thinkingCollapsed: this.thinkingCollapsed,
+        localModelAutoRefresh: this.localModelAutoRefresh,
         reasoningEffortByModel: this.reasoningEffortByModel,
       });
       return;
@@ -347,6 +358,7 @@ export class ChatBridge {
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
         thinkingCollapsed: this.thinkingCollapsed,
+        localModelAutoRefresh: this.localModelAutoRefresh,
         reasoningEffortByModel: this.reasoningEffortByModel,
         ...(session.conversation.title !== undefined
           ? { sessionTitle: session.conversation.title }
@@ -367,6 +379,7 @@ export class ChatBridge {
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
         thinkingCollapsed: this.thinkingCollapsed,
+        localModelAutoRefresh: this.localModelAutoRefresh,
         reasoningEffortByModel: this.reasoningEffortByModel,
       });
     }
@@ -903,6 +916,23 @@ export class ChatBridge {
     });
   }
 
+  private async toggleLocalModelAutoRefresh(): Promise<void> {
+    this.localModelAutoRefresh = !this.localModelAutoRefresh;
+    // Apply to the live runtime so the change takes effect on the next model
+    // listing without a reload, then refresh the panel's model list to reflect
+    // it right away (a refetch when turning on, the cached list when off).
+    this.services?.setLocalModelAutoRefresh(this.localModelAutoRefresh);
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      localModelAutoRefresh: this.localModelAutoRefresh,
+    });
+    if (this.services) {
+      void this.refreshAllModels(this.services, this.models);
+    }
+  }
+
   /**
    * Undoes a file's session changes from the changes panel: restores the
    * pre-session baseline, or deletes the file when it was created this session.
@@ -1027,6 +1057,7 @@ export class ChatBridge {
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
         thinkingCollapsed: this.thinkingCollapsed,
+        localModelAutoRefresh: this.localModelAutoRefresh,
         reasoningEffortByModel: this.reasoningEffortByModel,
       });
       return;

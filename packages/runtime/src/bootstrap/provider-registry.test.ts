@@ -11,6 +11,7 @@ function baseConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     configDirectory: '/tmp/justcode',
     sessionsDirectory: '/tmp/justcode/sessions',
     systemPrompt: '',
+    localModelAutoRefresh: true,
     openai: {
       apiKey: undefined,
       baseUrl: 'https://api.openai.com/v1',

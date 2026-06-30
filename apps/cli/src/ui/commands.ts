@@ -8,6 +8,7 @@ export enum CommandName {
   Thinking = 'thinking',
   Reasoning = 'reasoning',
   AutoWrites = 'auto-writes',
+  LocalRefresh = 'local-model-refresh',
   ExpandTools = 'expand-tools',
   ReadLimit = 'read-limit',
   ContextWindow = 'context-window',
@@ -56,6 +57,10 @@ export const COMMANDS: Command[] = [
   {
     name: CommandName.AutoWrites,
     description: 'Toggle auto-applying file writes without confirmation',
+  },
+  {
+    name: CommandName.LocalRefresh,
+    description: 'Toggle always refreshing local models (off uses daily cache)',
   },
   {
     name: CommandName.ExpandTools,

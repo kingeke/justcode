@@ -24,6 +24,12 @@ export interface GlobalConfig {
   >;
   /** When true, file-writing tools run without per-call confirmation. */
   autoApplyWrites?: boolean;
+  /**
+   * When true (the default), local providers (Ollama/LM Studio) refetch their
+   * model list on every load so newly pulled models appear immediately. When
+   * false they use the same once-a-day cache as remote providers.
+   */
+  localModelAutoRefresh?: boolean;
   /** When true, finished tool calls render their full input/output inline. */
   expandTools?: boolean;
   /** Tunables for how much context the agent reads and sends. */

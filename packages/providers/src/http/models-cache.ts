@@ -83,21 +83,33 @@ function isSameDay(iso: string, now = new Date()): boolean {
 
 /**
  * Decorates {@link inner} so `listModels()` is served from the once-a-day cache.
- * `local` providers are returned unwrapped (always refetched). All other methods
- * delegate straight through.
+ *
+ * `local` providers (Ollama/LM Studio) refetch on every call by default, since
+ * their catalog changes as the user pulls models. That live refresh can be
+ * turned off via {@link Options.autoRefreshLocal}, in which case local providers
+ * fall back to the same once-a-day cache remote providers use. The toggle is
+ * read per call (not at construction) so flipping it takes effect immediately on
+ * already-created clients. All non-list methods delegate straight through.
  */
 export function withModelsCache(
   inner: ProviderClient,
-  options: { local: boolean }
+  options: {
+    local: boolean;
+    /** Whether local providers should refetch every call; defaults to true. */
+    autoRefreshLocal?: () => boolean;
+  }
 ): ProviderClient {
-  if (options.local) return inner;
-  return new CachingModelsClient(inner);
+  return new CachingModelsClient(inner, options.local, options.autoRefreshLocal);
 }
 
 class CachingModelsClient implements ProviderClient {
   public readonly providerId: ProviderId;
 
-  public constructor(private readonly inner: ProviderClient) {
+  public constructor(
+    private readonly inner: ProviderClient,
+    private readonly local: boolean,
+    private readonly autoRefreshLocal: () => boolean = () => true
+  ) {
     this.providerId = inner.providerId;
   }
 
@@ -110,6 +122,13 @@ class CachingModelsClient implements ProviderClient {
 
   public async listModels(): Promise<ModelInfo[]> {
     const id = String(this.inner.providerId);
+
+    // Local providers refetch live unless the user disabled auto-refresh; when
+    // disabled they share the same once-a-day cache path as remote providers.
+    if (this.local && this.autoRefreshLocal()) {
+      return this.inner.listModels();
+    }
+
     const cache = await readCacheFile();
     const cached = cache[id];
     if (cached && isSameDay(cached.fetchedAt)) {

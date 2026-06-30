@@ -24,6 +24,8 @@ export interface AppConfig {
   configDirectory: string;
   sessionsDirectory: string;
   systemPrompt: string;
+  /** Whether local providers refetch their model list on every load (default true). */
+  localModelAutoRefresh: boolean;
   openai: {
     apiKey: string | undefined;
     baseUrl: string;
@@ -105,6 +107,7 @@ export async function loadAppConfig(
     configDirectory: targetConfigDir,
     sessionsDirectory: join(targetConfigDir, 'sessions'),
     systemPrompt: configWithDefaults.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+    localModelAutoRefresh: configWithDefaults.localModelAutoRefresh ?? true,
     openai: {
       apiKey: configWithDefaults.providers?.openai?.apiKey,
       baseUrl:

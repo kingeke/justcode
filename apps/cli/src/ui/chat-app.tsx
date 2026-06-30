@@ -142,6 +142,8 @@ interface ChatAppProps {
   onThinkingCollapsedChange?: (collapsed: boolean) => void;
   initialAutoApplyWrites?: boolean;
   onAutoApplyWritesChange?: (autoApply: boolean) => void;
+  initialLocalModelAutoRefresh?: boolean;
+  onLocalModelAutoRefreshChange?: (enabled: boolean) => void;
   initialExpandTools?: boolean;
   onExpandToolsChange?: (expand: boolean) => void;
   initialMaxReadLines?: number;
@@ -261,6 +263,7 @@ function commandLineContent(
   state: {
     thinkingCollapsed: boolean;
     autoApplyWrites: boolean;
+    localModelAutoRefresh: boolean;
     expandTools: boolean;
     maxReadLines: number;
     maxHistoryMessages: number;
@@ -289,6 +292,13 @@ function commandLineContent(
       tc('  '),
       tc(`[${state.autoApplyWrites ? 'on' : 'off'}]`, {
         fg: state.autoApplyWrites ? 'green' : 'yellow',
+      })
+    );
+  } else if (cmd.name === CommandName.LocalRefresh) {
+    chunks.push(
+      tc('  '),
+      tc(`[${state.localModelAutoRefresh ? 'on' : 'off'}]`, {
+        fg: state.localModelAutoRefresh ? 'green' : 'yellow',
       })
     );
   } else if (cmd.name === CommandName.ExpandTools) {
@@ -653,6 +663,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     props.initialAutoApplyWrites ?? false
   );
   const autoApplyWritesRef = useRef(props.initialAutoApplyWrites ?? false);
+  const [localModelAutoRefresh, setLocalModelAutoRefresh] = useState(
+    props.initialLocalModelAutoRefresh ?? true
+  );
   const [expandTools, setExpandTools] = useState(
     props.initialExpandTools ?? true
   );
@@ -1604,6 +1617,18 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         autoApplyWritesRef.current = next;
         props.onAutoApplyWritesChange?.(next);
         setStatus(next ? 'Auto-applying writes' : 'Confirming each write');
+        return;
+      }
+
+      case CommandName.LocalRefresh: {
+        const next = !localModelAutoRefresh;
+        setLocalModelAutoRefresh(next);
+        props.onLocalModelAutoRefreshChange?.(next);
+        setStatus(
+          next
+            ? 'Always refreshing local models'
+            : 'Local models use the daily cache'
+        );
         return;
       }
 
@@ -2625,6 +2650,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     {
                       thinkingCollapsed,
                       autoApplyWrites,
+                      localModelAutoRefresh,
                       expandTools,
                       maxReadLines,
                       maxHistoryMessages,

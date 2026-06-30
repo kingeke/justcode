@@ -102,6 +102,8 @@ export interface ChatState {
   maxHistoryMessages: number;
   /** When true, thinking blocks start collapsed (user must click to expand). */
   thinkingCollapsed: boolean;
+  /** When true (default), local providers refetch their model list every load. */
+  localModelAutoRefresh: boolean;
   /**
    * The user's chosen reasoning effort per model, nested by provider id. A model
    * absent from the map uses its default effort; `'off'` disables reasoning.
@@ -142,6 +144,7 @@ export const initialState: ChatState = {
   maxReadLines: 200,
   maxHistoryMessages: 50,
   thinkingCollapsed: false,
+  localModelAutoRefresh: true,
   reasoningEffortByModel: {},
   resolvedFiles: {},
 };
@@ -156,6 +159,7 @@ export enum LocalActionType {
   ToggleAutoWrites = 'toggleAutoWrites',
   ToggleExpandTools = 'toggleExpandTools',
   ToggleThinkingCollapsed = 'toggleThinkingCollapsed',
+  ToggleLocalModelAutoRefresh = 'toggleLocalModelAutoRefresh',
   SetReadLimit = 'setReadLimit',
   SetHistoryLimit = 'setHistoryLimit',
   SetView = 'setView',
@@ -178,6 +182,7 @@ export type LocalAction =
   | { type: LocalActionType.ToggleAutoWrites }
   | { type: LocalActionType.ToggleExpandTools }
   | { type: LocalActionType.ToggleThinkingCollapsed }
+  | { type: LocalActionType.ToggleLocalModelAutoRefresh }
   | { type: LocalActionType.SetReadLimit; lines: number }
   | { type: LocalActionType.SetHistoryLimit; count: number }
   | { type: LocalActionType.SetView; view: ChatView }
@@ -224,6 +229,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         maxReadLines: action.maxReadLines,
         maxHistoryMessages: action.maxHistoryMessages,
         thinkingCollapsed: action.thinkingCollapsed,
+        localModelAutoRefresh: action.localModelAutoRefresh,
         reasoningEffortByModel: action.reasoningEffortByModel,
         sessionTitle: action.sessionTitle,
         // A fresh session/snapshot starts with an empty changes panel.
@@ -379,6 +385,12 @@ export function reducer(state: ChatState, action: Action): ChatState {
 
     case LocalActionType.ToggleThinkingCollapsed:
       return { ...state, thinkingCollapsed: !state.thinkingCollapsed };
+
+    case LocalActionType.ToggleLocalModelAutoRefresh:
+      return {
+        ...state,
+        localModelAutoRefresh: !state.localModelAutoRefresh,
+      };
 
     case LocalActionType.SetReadLimit:
       return { ...state, maxReadLines: action.lines };

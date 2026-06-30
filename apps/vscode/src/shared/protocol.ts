@@ -41,6 +41,7 @@ export enum WebviewMessageType {
   SetReadLimit = 'setReadLimit',
   SetHistoryLimit = 'setHistoryLimit',
   ToggleThinkingCollapsed = 'toggleThinkingCollapsed',
+  ToggleLocalModelAutoRefresh = 'toggleLocalModelAutoRefresh',
   ListSessions = 'listSessions',
   OpenSession = 'openSession',
   DeleteSession = 'deleteSession',
@@ -210,6 +211,11 @@ export interface ReadyMessage {
   maxHistoryMessages: number;
   /** When true, thinking blocks start collapsed so the user has to click to expand. */
   thinkingCollapsed: boolean;
+  /**
+   * When true (default), local providers refetch their model list on every load;
+   * when false they use the same once-a-day cache as remote providers.
+   */
+  localModelAutoRefresh: boolean;
   /**
    * The user's chosen reasoning effort per model, nested by provider id, e.g.
    * `{ openrouter: { "openai/gpt-5": "high" } }`. A model absent from the map
@@ -462,6 +468,11 @@ export interface ToggleThinkingCollapsedMessage {
   type: WebviewMessageType.ToggleThinkingCollapsed;
 }
 
+/** The user toggled whether local providers always refresh their model list. */
+export interface ToggleLocalModelAutoRefreshMessage {
+  type: WebviewMessageType.ToggleLocalModelAutoRefresh;
+}
+
 /**
  * The user asked to undo a file's session changes from the changes panel. The
  * host restores `oldText` (the pre-session baseline), or deletes the file when
@@ -505,5 +516,6 @@ export type WebviewToHost =
   | SetReadLimitMessage
   | SetHistoryLimitMessage
   | ToggleThinkingCollapsedMessage
+  | ToggleLocalModelAutoRefreshMessage
   | RevertFileMessage
   | OpenFileMessage;

@@ -44,6 +44,13 @@ export interface RuntimeServices {
   setMaxReadLines: (lines: number) => void;
   /** Update, at runtime, how many recent messages are sent to the model. */
   setMaxHistoryMessages: (count: number) => void;
+  /** Whether local providers refetch their model list on every load. */
+  localModelAutoRefresh: boolean;
+  /**
+   * Toggle, at runtime, whether local providers refetch every load. Takes effect
+   * on the providers already created (they read the flag per `listModels` call).
+   */
+  setLocalModelAutoRefresh: (enabled: boolean) => void;
 }
 
 export interface CreateRuntimeOptions {
@@ -72,7 +79,10 @@ export async function createRuntimeServices(
     (options.allowDefaultProvider === false
       ? undefined
       : config.defaultProvider);
-  const registry = new ProviderRegistry(config);
+  // Mutable so a runtime toggle reaches the providers built below: each client
+  // reads `localRefresh.enabled` per `listModels` call through the getter.
+  const localRefresh = { enabled: config.localModelAutoRefresh };
+  const registry = new ProviderRegistry(config, () => localRefresh.enabled);
   // Without a configured provider the session is backed by a placeholder; the
   // CLI shows the connect screen and swaps in a real provider once chosen.
   const provider = providerId
@@ -142,6 +152,10 @@ export async function createRuntimeServices(
     },
     setMaxHistoryMessages: (count: number) => {
       historySettings.maxHistoryMessages = count;
+    },
+    localModelAutoRefresh: localRefresh.enabled,
+    setLocalModelAutoRefresh: (enabled: boolean) => {
+      localRefresh.enabled = enabled;
     },
   };
 }

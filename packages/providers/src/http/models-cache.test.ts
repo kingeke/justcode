@@ -92,4 +92,52 @@ describe('models cache', () => {
 
     expect(fetches).toBe(1);
   });
+
+  it('refetches a local provider on every call while auto-refresh is on', async () => {
+    let fetches = 0;
+    const inner: ProviderClient = {
+      providerId: ProviderId.Ollama,
+      sendChat: async () => ({ content: '' }),
+      getDefaultModel: () => undefined,
+      listModels: async () => {
+        fetches += 1;
+        return [model('llama3', ProviderId.Ollama)];
+      },
+    };
+    const cached = withModelsCache(inner, {
+      local: true,
+      autoRefreshLocal: () => true,
+    });
+
+    await cached.listModels();
+    await cached.listModels();
+
+    expect(fetches).toBe(2);
+  });
+
+  it('serves a local provider from the daily cache when auto-refresh is off', async () => {
+    let fetches = 0;
+    let autoRefresh = true;
+    const inner: ProviderClient = {
+      providerId: ProviderId.Ollama,
+      sendChat: async () => ({ content: '' }),
+      getDefaultModel: () => undefined,
+      listModels: async () => {
+        fetches += 1;
+        return [model('llama3', ProviderId.Ollama)];
+      },
+    };
+    // The flag is read per call, so flipping it changes behavior live.
+    const cached = withModelsCache(inner, {
+      local: true,
+      autoRefreshLocal: () => autoRefresh,
+    });
+
+    await cached.listModels(); // auto-refresh on: fetches
+    autoRefresh = false;
+    await cached.listModels(); // off: miss → fetches + caches
+    await cached.listModels(); // off: served from same-day cache
+
+    expect(fetches).toBe(2);
+  });
 });

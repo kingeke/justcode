@@ -16,7 +16,15 @@ import {
 } from '@runtime/persistence/global-config';
 
 export class ProviderRegistry {
-  public constructor(private readonly config: AppConfig) {}
+  public constructor(
+    private readonly config: AppConfig,
+    /**
+     * Whether local providers should refetch their model list every load. Read
+     * per `create` call (via a getter) so a runtime toggle reaches the clients
+     * this registry has already built. Defaults to always-on.
+     */
+    private readonly autoRefreshLocal: () => boolean = () => true
+  ) {}
 
   public create(providerId: ProviderId): ProviderClient {
     const entry = resolveProviderEntry(this.config, providerId);
@@ -42,9 +50,10 @@ export class ProviderRegistry {
 
     // Serve remote providers' model lists from the once-a-day on-disk cache so
     // startup doesn't refetch every provider's catalog. Local providers
-    // (Ollama/LM Studio) opt out and always refetch.
+    // (Ollama/LM Studio) refetch every load unless the user disables it.
     return withModelsCache(entry.create(credentials), {
       local: entry.local ?? false,
+      autoRefreshLocal: this.autoRefreshLocal,
     });
   }
 

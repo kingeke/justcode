@@ -171,6 +171,11 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.ToggleThinkingCollapsed });
   };
 
+  const toggleLocalModelAutoRefresh = (): void => {
+    dispatch({ type: LocalActionType.ToggleLocalModelAutoRefresh });
+    postToHost({ type: WebviewMessageType.ToggleLocalModelAutoRefresh });
+  };
+
   const setReadLimit = (lines: number): void => {
     dispatch({ type: LocalActionType.SetReadLimit, lines });
     postToHost({ type: WebviewMessageType.SetReadLimit, lines });
@@ -462,9 +467,11 @@ export function App(): React.JSX.Element {
         reasoningEffortByModel={state.reasoningEffortByModel}
         onSetReasoningEffort={setReasoningEffort}
         thinkingCollapsed={state.thinkingCollapsed}
+        localModelAutoRefresh={state.localModelAutoRefresh}
         onToggleAutoWrites={toggleAutoWrites}
         onToggleExpandTools={toggleExpandTools}
         onToggleThinkingCollapsed={toggleThinkingCollapsed}
+        onToggleLocalModelAutoRefresh={toggleLocalModelAutoRefresh}
         onSetReadLimit={setReadLimit}
         onSetHistoryLimit={setHistoryLimit}
       />

@@ -48,6 +48,9 @@ export interface ComposerProps {
   /** When true, thinking blocks start collapsed. */
   thinkingCollapsed: boolean;
   onToggleThinkingCollapsed: () => void;
+  /** When true, local providers refetch their model list on every load. */
+  localModelAutoRefresh: boolean;
+  onToggleLocalModelAutoRefresh: () => void;
 }
 
 /**
@@ -322,6 +325,24 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                       }
                       onClick={props.onToggleExpandTools}
                       aria-pressed={props.expandTools}
+                    >
+                      <span className="toggle-knob" />
+                    </button>
+                  </div>
+                  <div className="settings-popup-row">
+                    <span className="settings-popup-label">
+                      Local model refresh
+                    </span>
+                    <button
+                      type="button"
+                      className={`toggle-btn ${props.localModelAutoRefresh ? 'toggle-on' : ''}`}
+                      title={
+                        props.localModelAutoRefresh
+                          ? 'On — always refresh local models'
+                          : 'Off — local models use the daily cache'
+                      }
+                      onClick={props.onToggleLocalModelAutoRefresh}
+                      aria-pressed={props.localModelAutoRefresh}
                     >
                       <span className="toggle-knob" />
                     </button>

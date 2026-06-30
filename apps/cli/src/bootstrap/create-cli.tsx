@@ -250,6 +250,7 @@ async function runChat(options: SharedOptions): Promise<void> {
       },
       initialThinkingCollapsed: savedConfig.thinkingCollapsed ?? false,
       initialAutoApplyWrites: savedConfig.autoApplyWrites ?? false,
+      initialLocalModelAutoRefresh: savedConfig.localModelAutoRefresh ?? true,
       initialExpandTools: savedConfig.expandTools ?? true,
       initialMaxReadLines:
         savedConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES,
@@ -266,6 +267,10 @@ async function runChat(options: SharedOptions): Promise<void> {
       },
       onAutoApplyWritesChange: (autoApply: boolean) => {
         persistConfig({ autoApplyWrites: autoApply });
+      },
+      onLocalModelAutoRefreshChange: (enabled: boolean) => {
+        runtime.setLocalModelAutoRefresh(enabled);
+        persistConfig({ localModelAutoRefresh: enabled });
       },
       onExpandToolsChange: (expand: boolean) => {
         persistConfig({ expandTools: expand });
