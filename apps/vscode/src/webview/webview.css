@@ -31,6 +31,46 @@ body {
 
 /* --- Transcript ----------------------------------------------------------- */
 
+/* Non-scrolling positioned shell around the transcript so the floating
+   "jump to bottom" button can anchor to the bottom of the visible area rather
+   than scroll away with the content. */
+.transcript-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.jump-to-bottom-btn {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.35));
+  background: var(
+    --vscode-editorWidget-background,
+    var(--vscode-editor-background)
+  );
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  opacity: 0.92;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transition: opacity 0.1s ease, background 0.1s ease;
+}
+
+.jump-to-bottom-btn:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+}
+
 .transcript {
   flex: 1;
   overflow-y: auto;

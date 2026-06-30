@@ -9,8 +9,6 @@ This document tracks the issues so far.
 - CLI
 
 - VSCODE EXTENSION
-- @ files and methods
-- show button to go to bottom when scrolled up
 - maybe make discover_tools optional via settings
 
 # Instruction

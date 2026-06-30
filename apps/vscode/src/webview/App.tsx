@@ -21,7 +21,11 @@ import { ApprovalPrompt, InputPrompt } from '@ext/webview/components/Prompts';
 import { Composer } from '@ext/webview/components/Composer';
 import { SessionsView } from '@ext/webview/components/SessionsView';
 import { ModelPickerView } from '@ext/webview/components/ModelPickerView';
-import { JsonIcon, PencilIcon } from '@ext/webview/components/Icons';
+import {
+  ChevronDownIcon,
+  JsonIcon,
+  PencilIcon,
+} from '@ext/webview/components/Icons';
 import { ChangesPanel } from '@ext/webview/components/ChangesPanel';
 import { deriveChangedFiles, type ChangedFile } from '@ext/webview/changes';
 
@@ -88,11 +92,26 @@ export function App(): React.JSX.Element {
   // Track whether the user is pinned to the bottom. A small threshold absorbs
   // sub-pixel rounding and the height growth from a token that lands between the
   // scroll event and this read.
+  // Whether to show the floating "jump to bottom" button. True once the user has
+  // scrolled meaningfully away from the bottom; hidden again when they return.
+  const [showJumpToBottom, setShowJumpToBottom] = React.useState(false);
+
   const onTranscriptScroll = (): void => {
     const el = transcriptRef.current;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     stickToBottomRef.current = distanceFromBottom <= 24;
+    // A larger threshold than the auto-scroll pin so the button doesn't flicker
+    // in and out on the last sliver of scroll.
+    setShowJumpToBottom(distanceFromBottom > 120);
+  };
+
+  const jumpToBottom = (): void => {
+    const el = transcriptRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    stickToBottomRef.current = true;
+    setShowJumpToBottom(false);
   };
 
   // Keep the latest content in view as tokens stream and messages arrive — but
@@ -485,6 +504,7 @@ export function App(): React.JSX.Element {
         </button>
       </div>
 
+      <div className="transcript-wrap">
       <div
         className="transcript"
         ref={transcriptRef}
@@ -614,6 +634,18 @@ export function App(): React.JSX.Element {
         ) : null}
 
         {state.error ? <div className="error">{state.error}</div> : null}
+      </div>
+        {showJumpToBottom ? (
+          <button
+            type="button"
+            className="jump-to-bottom-btn"
+            title="Scroll to bottom"
+            aria-label="Scroll to bottom"
+            onClick={jumpToBottom}
+          >
+            <ChevronDownIcon size={16} />
+          </button>
+        ) : null}
       </div>
 
       <ChangesPanel
