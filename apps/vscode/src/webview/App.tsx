@@ -5,6 +5,7 @@ import {
   WebviewMessageType,
   WebviewRole,
   type WebviewModel,
+  type WebviewReasoningChoice,
 } from '@ext/shared/protocol';
 import { onHostMessage, postToHost } from '@ext/webview/vscode-api';
 import {
@@ -88,6 +89,24 @@ export function App(): React.JSX.Element {
       type: WebviewMessageType.SelectModel,
       modelId: model.id,
       providerId: model.providerId,
+    });
+  };
+
+  const setReasoningEffort = (
+    model: WebviewModel,
+    effort: WebviewReasoningChoice
+  ): void => {
+    dispatch({
+      type: LocalActionType.SetReasoningEffort,
+      modelId: model.id,
+      providerId: model.providerId,
+      effort,
+    });
+    postToHost({
+      type: WebviewMessageType.SetReasoningEffort,
+      modelId: model.id,
+      providerId: model.providerId,
+      effort,
     });
   };
 
@@ -440,6 +459,8 @@ export function App(): React.JSX.Element {
         onCancel={cancel}
         onNewSession={newSession}
         onOpenModelPicker={openModelPicker}
+        reasoningEffortByModel={state.reasoningEffortByModel}
+        onSetReasoningEffort={setReasoningEffort}
         thinkingCollapsed={state.thinkingCollapsed}
         onToggleAutoWrites={toggleAutoWrites}
         onToggleExpandTools={toggleExpandTools}

@@ -30,6 +30,7 @@ describe('deletion persistence through a turn', () => {
       maxReadLines: 200,
       maxHistoryMessages: 50,
       thinkingCollapsed: false,
+      reasoningEffortByModel: {},
     });
 
     state = reducer(state, {

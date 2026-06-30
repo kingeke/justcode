@@ -3,6 +3,7 @@ import * as React from 'react';
 import { APP_NAME } from '@core/branding';
 import type {
   WebviewModel,
+  WebviewReasoningChoice,
   WebviewStats,
   WebviewUsage,
 } from '@ext/shared/protocol';
@@ -26,6 +27,15 @@ export interface ComposerProps {
   maxReadLines: number;
   /** Recent context window items sent to the model per request; 0 means "off" (send all). */
   maxHistoryMessages: number;
+  /** The user's chosen reasoning effort per model, nested by provider id. */
+  reasoningEffortByModel: Record<
+    string,
+    Record<string, WebviewReasoningChoice | undefined> | undefined
+  >;
+  onSetReasoningEffort: (
+    model: WebviewModel,
+    effort: WebviewReasoningChoice
+  ) => void;
   onSubmit: (content: string) => void;
   onCancel: () => void;
   onNewSession: () => void;
@@ -50,6 +60,8 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   const { busy, disabled } = props;
   const [value, setValue] = React.useState('');
   const [showSettings, setShowSettings] = React.useState(false);
+  const [showReasoning, setShowReasoning] = React.useState(false);
+  const reasoningRef = React.useRef<HTMLDivElement>(null);
   const [readLimitDraft, setReadLimitDraft] = React.useState('');
   const [editingReadLimit, setEditingReadLimit] = React.useState(false);
   const [historyLimitDraft, setHistoryLimitDraft] = React.useState('');
@@ -70,6 +82,47 @@ export function Composer(props: ComposerProps): React.JSX.Element {
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [showSettings]);
+
+  // Close the reasoning popup when clicking outside it.
+  React.useEffect(() => {
+    if (!showReasoning) return;
+    const onPointerDown = (e: PointerEvent): void => {
+      if (
+        reasoningRef.current &&
+        !reasoningRef.current.contains(e.target as Node)
+      ) {
+        setShowReasoning(false);
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [showReasoning]);
+
+  // The active model and its reasoning capability, used to offer a thinking-
+  // level picker only for models the provider reports as reasoning-capable.
+  const activeModelObj =
+    props.models.find(
+      (m) =>
+        m.id === props.activeModel &&
+        m.providerId === props.activeProviderId
+    ) ?? props.models.find((m) => m.id === props.activeModel);
+  const reasoning = activeModelObj?.reasoning;
+  const reasoningLevels = reasoning?.effortLevels ?? [];
+  const reasoningSupported = reasoningLevels.length > 0;
+  const storedEffort = activeModelObj
+    ? props.reasoningEffortByModel[activeModelObj.providerId]?.[
+        activeModelObj.id
+      ]
+    : undefined;
+  const defaultEffort = reasoning?.defaultEffort ?? reasoningLevels[0];
+  // What's in effect now: the stored choice, or the model default when unset.
+  const effectiveEffort: WebviewReasoningChoice =
+    storedEffort ?? defaultEffort ?? 'off';
+  // Mandatory models always reason, so "off" isn't offered; optional ones lead
+  // with it (mirrors the CLI's reasoning picker).
+  const reasoningChoices: WebviewReasoningChoice[] = reasoning?.mandatory
+    ? [...reasoningLevels]
+    : ['off', ...reasoningLevels];
 
   const submit = (): void => {
     const trimmed = value.trim();
@@ -170,6 +223,53 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                 return `${m.providerName} · ${m.displayName}`;
               })()}
             </button>
+
+            {reasoningSupported && activeModelObj ? (
+              <div className="reasoning-popup-anchor" ref={reasoningRef}>
+                <button
+                  type="button"
+                  className={`reasoning-btn ${showReasoning ? 'reasoning-btn-active' : ''}`}
+                  title="Thinking level"
+                  onClick={() => setShowReasoning((s) => !s)}
+                >
+                  {effectiveEffort}
+                </button>
+                {showReasoning ? (
+                  <div className="reasoning-popup">
+                    <div className="reasoning-popup-title">Thinking level</div>
+                    {reasoningChoices.map((choice) => {
+                      const isCurrent = choice === effectiveEffort;
+                      const isDefault =
+                        choice !== 'off' && choice === defaultEffort;
+                      return (
+                        <button
+                          key={choice}
+                          type="button"
+                          className={`reasoning-choice-btn ${isCurrent ? 'reasoning-choice-active' : ''}`}
+                          onClick={() => {
+                            props.onSetReasoningEffort(activeModelObj, choice);
+                            setShowReasoning(false);
+                          }}
+                        >
+                          <span className="reasoning-choice-label">
+                            {choice === 'off' ? 'Off' : choice}
+                            {isDefault ? (
+                              <span className="reasoning-choice-default">
+                                {' '}
+                                (default)
+                              </span>
+                            ) : null}
+                          </span>
+                          {isCurrent ? (
+                            <span className="reasoning-choice-check">✓</span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="toolbar-right">

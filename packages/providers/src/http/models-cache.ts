@@ -1,5 +1,6 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 
 import { cacheDirectory } from '@core/application/cache-dir';
 import type { ModelInfo, ProviderClient } from '@core/ports/chat-model';
@@ -34,22 +35,39 @@ async function readCacheFile(): Promise<ModelsCacheFile> {
   }
 }
 
+// Serializes the read-modify-write of the shared cache file. `listModels()` is
+// called concurrently (one per provider) during the startup fan-out, so without
+// this every cache-miss writer would read the file, splice in its own entry, and
+// write the whole thing back at the same time — overlapping writers clobber each
+// other's entries and `writeFile`'s truncate-then-write can interleave into
+// invalid JSON. Chaining each write onto the previous one makes them run one at a
+// time within the process.
+let writeChain: Promise<void> = Promise.resolve();
+
 async function writeCacheEntry(
   providerId: string,
   models: ModelInfo[]
 ): Promise<void> {
-  try {
-    await mkdir(cacheDir(), { recursive: true });
-    const existing = await readCacheFile();
-    existing[providerId] = { fetchedAt: new Date().toISOString(), models };
-    await writeFile(
-      cacheFile(),
-      JSON.stringify(existing, null, 2) + '\n',
-      'utf8'
-    );
-  } catch {
-    // Best-effort: a failed cache write must never break listing models.
-  }
+  const run = writeChain.then(async () => {
+    try {
+      await mkdir(cacheDir(), { recursive: true });
+      const existing = await readCacheFile();
+      existing[providerId] = { fetchedAt: new Date().toISOString(), models };
+      // Write to a unique temp file then atomically rename over the target, so a
+      // reader (or another process) never observes a half-written file, and a
+      // crash mid-write can't leave the cache truncated. The temp name carries
+      // pid + random bytes to stay unique across processes.
+      const tmp = `${cacheFile()}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+      await writeFile(tmp, JSON.stringify(existing, null, 2) + '\n', 'utf8');
+      await rename(tmp, cacheFile());
+    } catch {
+      // Best-effort: a failed cache write must never break listing models.
+    }
+  });
+  // Keep the chain alive regardless of this write's outcome (errors are already
+  // swallowed above, but guard so a rejection can't break the next writer).
+  writeChain = run.catch(() => {});
+  return run;
 }
 
 /** True when {@link iso} falls on the same calendar day as {@link now}. */

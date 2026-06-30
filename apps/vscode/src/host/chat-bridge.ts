@@ -3,12 +3,17 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 
-import type { Conversation } from '@core/domain/conversation';
+import {
+  createConversation,
+  type Conversation,
+} from '@core/domain/conversation';
 import { APP_NAME } from '@core/branding';
 import type { MessageRole } from '@core/domain/message';
 import type {
   ModelInfo,
+  ModelReasoning,
   ProviderClient,
+  ReasoningEffortChoice,
   TokenUsage,
 } from '@core/ports/chat-model';
 import { ProviderId, PROVIDER_BY_ID } from '@core/ports/provider-catalog';
@@ -29,6 +34,7 @@ import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
 import {
   readGlobalConfig,
   writeGlobalConfig,
+  type GlobalConfig,
 } from '@runtime/persistence/global-config';
 import {
   createRuntimeServices,
@@ -47,6 +53,8 @@ import {
   type WebviewStats,
   type WebviewToHost,
   type WebviewModel,
+  type WebviewReasoningChoice,
+  type WebviewReasoningEffort,
   type WebviewToolView,
   type WebviewUsage,
 } from '@ext/shared/protocol';
@@ -90,6 +98,13 @@ export class ChatBridge {
   // 0 means "off" — the full conversation is sent without trimming.
   private maxHistoryMessages = DEFAULT_MAX_HISTORY_MESSAGES;
   private thinkingCollapsed = false;
+  // The user's chosen reasoning effort per model, nested by provider id (e.g.
+  // `{ openrouter: { "openai/gpt-5": "high" } }`). Mirrors the CLI's per-model
+  // store; a model absent here uses its default effort.
+  private reasoningEffortByModel: Record<
+    string,
+    Record<string, WebviewReasoningChoice | undefined> | undefined
+  > = {};
   // Cumulative token usage across the session, mirroring the CLI's metrics
   // footer (ctx / cached / new / out / cost). Reset whenever the conversation is.
   private cumulativeUsage: Required<WebviewUsage> = {
@@ -151,6 +166,13 @@ export class ChatBridge {
         this.activeModel = message.modelId;
         await this.persistModelSelection(message.modelId, message.providerId);
         await this.switchToProvider(message.providerId);
+        return;
+      case WebviewMessageType.SetReasoningEffort:
+        await this.setReasoningEffort(
+          message.providerId,
+          message.modelId,
+          message.effort
+        );
         return;
       case WebviewMessageType.ConnectProvider:
         this.onConnectProvider?.();
@@ -228,6 +250,13 @@ export class ChatBridge {
     this.maxHistoryMessages =
       globalConfig.cache?.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES;
     this.thinkingCollapsed = globalConfig.thinkingCollapsed ?? false;
+    // The config stores the same string values under @core's ReasoningEffort
+    // enum type; the webview protocol re-declares them as string literals.
+    this.reasoningEffortByModel = (globalConfig.reasoningEffortByModel ??
+      {}) as Record<
+      string,
+      Record<string, WebviewReasoningChoice | undefined> | undefined
+    >;
 
     let services: RuntimeServices;
     try {
@@ -245,6 +274,7 @@ export class ChatBridge {
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
         thinkingCollapsed: this.thinkingCollapsed,
+        reasoningEffortByModel: this.reasoningEffortByModel,
       });
       return;
     }
@@ -269,6 +299,7 @@ export class ChatBridge {
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
         thinkingCollapsed: this.thinkingCollapsed,
+        reasoningEffortByModel: this.reasoningEffortByModel,
       });
       return;
     }
@@ -316,6 +347,7 @@ export class ChatBridge {
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
         thinkingCollapsed: this.thinkingCollapsed,
+        reasoningEffortByModel: this.reasoningEffortByModel,
         ...(session.conversation.title !== undefined
           ? { sessionTitle: session.conversation.title }
           : {}),
@@ -335,6 +367,7 @@ export class ChatBridge {
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
         thinkingCollapsed: this.thinkingCollapsed,
+        reasoningEffortByModel: this.reasoningEffortByModel,
       });
     }
   }
@@ -411,10 +444,16 @@ export class ChatBridge {
     };
 
     try {
+      const reasoningEffort = this.effectiveEffortForActiveModel();
       const result = await services.chatSessionService.submitMessage({
         conversation: this.conversation,
         model: this.activeModel,
         content,
+        // The webview-flavored choice carries the same string values as @core's
+        // ReasoningEffortChoice; bridge the nominal enum/literal mismatch here.
+        ...(reasoningEffort
+          ? { reasoningEffort: reasoningEffort as ReasoningEffortChoice }
+          : {}),
         signal: abortController.signal,
         onToken: (token) => {
           markFirstToken();
@@ -766,6 +805,45 @@ export class ChatBridge {
     });
   }
 
+  /**
+   * The reasoning effort actually sent for the active model: the stored choice,
+   * or the model's default when the user hasn't picked one. Returns undefined
+   * for models that don't advertise reasoning (the parameter is then omitted).
+   * Mirrors the CLI's `effectiveEffort`.
+   */
+  private effectiveEffortForActiveModel(): WebviewReasoningChoice | undefined {
+    const model = this.models.find((m) => m.id === this.activeModel);
+    return effectiveEffort(
+      model?.reasoning,
+      model
+        ? this.reasoningEffortByModel[model.providerId]?.[model.id]
+        : undefined
+    );
+  }
+
+  private async setReasoningEffort(
+    providerId: string,
+    modelId: string,
+    effort: WebviewReasoningChoice
+  ): Promise<void> {
+    this.reasoningEffortByModel = {
+      ...this.reasoningEffortByModel,
+      [providerId]: {
+        ...this.reasoningEffortByModel[providerId],
+        [modelId]: effort,
+      },
+    };
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      reasoningEffortByModel: this
+        .reasoningEffortByModel as NonNullable<
+        GlobalConfig['reasoningEffortByModel']
+      >,
+    });
+  }
+
   private async toggleAutoWrites(): Promise<void> {
     this.autoApplyWrites = !this.autoApplyWrites;
     const configDir = cacheDirectory();
@@ -928,8 +1006,33 @@ export class ChatBridge {
     // Start a new session without touching the existing one — it's already
     // persisted and should remain visible in the sessions list.
     this.sessionId = randomUUID();
-    this.conversation = undefined;
     this.resetMetrics();
+
+    // Fast path: a new session is just an empty conversation reusing the model
+    // list and active model we already hold. Falling through to `sendReady`
+    // would re-run `startSession`, which awaits `provider.listModels()` — a live
+    // network call for local providers (Ollama/LM Studio), a disk read+parse
+    // otherwise — and only renders the blank chat once that resolves, the lag
+    // the user sees when clicking "+". Reuse the cached state so it shows at once.
+    if (this.services?.providerId && this.activeModel && this.models.length > 0) {
+      this.conversation = createConversation(this.sessionId);
+      this.post({
+        type: HostMessageType.Ready,
+        providerId: this.services.providerId,
+        activeModel: this.activeModel,
+        models: this.models.map(toWebviewModel),
+        messages: [],
+        autoApplyWrites: this.autoApplyWrites,
+        expandTools: this.expandTools,
+        maxReadLines: this.maxReadLines,
+        maxHistoryMessages: this.maxHistoryMessages,
+        thinkingCollapsed: this.thinkingCollapsed,
+        reasoningEffortByModel: this.reasoningEffortByModel,
+      });
+      return;
+    }
+
+    this.conversation = undefined;
     await this.sendReady();
   }
 }
@@ -951,7 +1054,36 @@ function toWebviewModel(model: ModelInfo): WebviewModel {
   } else if (entry?.local) {
     result.local = true;
   }
+  if (model.reasoning) {
+    // The enum values are the same strings the protocol re-declares as literals.
+    result.reasoning = {
+      effortLevels: model.reasoning.effortLevels as WebviewReasoningEffort[],
+      mandatory: model.reasoning.mandatory,
+      ...(model.reasoning.defaultEffort
+        ? {
+            defaultEffort: model.reasoning
+              .defaultEffort as WebviewReasoningEffort,
+          }
+        : {}),
+    };
+  }
   return result;
+}
+
+/**
+ * The reasoning effort actually sent for a model: the stored choice, or the
+ * model's default when the user hasn't picked one. Returns undefined for models
+ * that don't advertise reasoning. Mirrors the CLI's `effectiveEffort`.
+ */
+function effectiveEffort(
+  reasoning: ModelReasoning | undefined,
+  stored: WebviewReasoningChoice | undefined
+): WebviewReasoningChoice | undefined {
+  if (!reasoning) return undefined;
+  if (stored) return stored;
+  return (reasoning.defaultEffort ?? reasoning.effortLevels[0]) as
+    | WebviewReasoningChoice
+    | undefined;
 }
 
 function toToolView(view: ToolInvocationView): WebviewToolView {

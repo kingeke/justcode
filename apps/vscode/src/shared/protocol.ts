@@ -33,6 +33,7 @@ export enum WebviewMessageType {
   ApprovalResponse = 'approvalResponse',
   UserInputResponse = 'userInputResponse',
   SelectModel = 'selectModel',
+  SetReasoningEffort = 'setReasoningEffort',
   SelectProvider = 'selectProvider',
   NewSession = 'newSession',
   ToggleAutoWrites = 'toggleAutoWrites',
@@ -72,6 +73,25 @@ export interface WebviewSessionSummary {
   messageCount: number;
 }
 
+/** Reasoning/thinking intensity, mirrors `@core` ReasoningEffort enum values. */
+export type WebviewReasoningEffort = 'low' | 'medium' | 'high';
+
+/** A reasoning choice the user can pick: an effort level, or explicit "off". */
+export type WebviewReasoningChoice = WebviewReasoningEffort | 'off';
+
+/**
+ * Reasoning capability advertised for a model, flattened from `@core`
+ * ModelReasoning. Present only when the provider reports the model reasons.
+ */
+export interface WebviewModelReasoning {
+  /** Effort levels the model accepts, in canonical low→high order. */
+  effortLevels: WebviewReasoningEffort[];
+  /** True when reasoning can't be turned off, so the picker omits "off". */
+  mandatory: boolean;
+  /** Provider default, applied when the user hasn't chosen a level. */
+  defaultEffort?: WebviewReasoningEffort | undefined;
+}
+
 /** A model the user can pick, flattened from `@core` ModelInfo for the webview. */
 export interface WebviewModel {
   id: string;
@@ -82,6 +102,8 @@ export interface WebviewModel {
   inputCostPerM?: number | undefined;
   outputCostPerM?: number | undefined;
   local?: boolean | undefined;
+  /** Present only when the provider reports the model supports reasoning. */
+  reasoning?: WebviewModelReasoning | undefined;
 }
 
 /** Auth methods a provider accepts; mirrors @core AuthMethod enum values. */
@@ -188,6 +210,16 @@ export interface ReadyMessage {
   maxHistoryMessages: number;
   /** When true, thinking blocks start collapsed so the user has to click to expand. */
   thinkingCollapsed: boolean;
+  /**
+   * The user's chosen reasoning effort per model, nested by provider id, e.g.
+   * `{ openrouter: { "openai/gpt-5": "high" } }`. A model absent from the map
+   * uses its default effort; the sentinel `'off'` disables reasoning for a model
+   * that would otherwise default to it.
+   */
+  reasoningEffortByModel: Record<
+    string,
+    Record<string, WebviewReasoningChoice | undefined> | undefined
+  >;
   sessionTitle?: string | undefined;
 }
 
@@ -351,6 +383,15 @@ export interface SelectModelMessage {
   providerId: string;
 }
 
+/** The user chose a reasoning effort for a model (or "off" to disable it). */
+export interface SetReasoningEffortMessage {
+  type: WebviewMessageType.SetReasoningEffort;
+  modelId: string;
+  /** Provider the model belongs to; the choice is stored per provider+model. */
+  providerId: string;
+  effort: WebviewReasoningChoice;
+}
+
 /** The user switched the active provider; the host re-lists its models. */
 export interface SelectProviderMessage {
   type: WebviewMessageType.SelectProvider;
@@ -450,6 +491,7 @@ export type WebviewToHost =
   | ApprovalResponseMessage
   | UserInputResponseMessage
   | SelectModelMessage
+  | SetReasoningEffortMessage
   | SelectProviderMessage
   | NewSessionMessage
   | ListSessionsMessage

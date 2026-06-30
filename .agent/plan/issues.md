@@ -7,7 +7,6 @@ This document tracks the issues so far.
 - CLI
 
 - VSCODE EXTENSION
-- add model thinking level pop up
 - add images
 - send queued messages
 - @ files and methods

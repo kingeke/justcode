@@ -7,6 +7,7 @@ import {
   type UserInputRequestMessage,
   type WebviewMessage,
   type WebviewModel,
+  type WebviewReasoningChoice,
   type WebviewSessionSummary,
   type WebviewToolView,
   type WebviewUsage,
@@ -101,6 +102,14 @@ export interface ChatState {
   maxHistoryMessages: number;
   /** When true, thinking blocks start collapsed (user must click to expand). */
   thinkingCollapsed: boolean;
+  /**
+   * The user's chosen reasoning effort per model, nested by provider id. A model
+   * absent from the map uses its default effort; `'off'` disables reasoning.
+   */
+  reasoningEffortByModel: Record<
+    string,
+    Record<string, WebviewReasoningChoice | undefined> | undefined
+  >;
   sessionTitle?: string | undefined;
   /**
    * Files the user has resolved in the changes panel (kept or undone), mapping
@@ -133,6 +142,7 @@ export const initialState: ChatState = {
   maxReadLines: 200,
   maxHistoryMessages: 50,
   thinkingCollapsed: false,
+  reasoningEffortByModel: {},
   resolvedFiles: {},
 };
 
@@ -142,6 +152,7 @@ export enum LocalActionType {
   DismissApproval = 'dismissApproval',
   DismissInput = 'dismissInput',
   SelectModel = 'selectModel',
+  SetReasoningEffort = 'setReasoningEffort',
   ToggleAutoWrites = 'toggleAutoWrites',
   ToggleExpandTools = 'toggleExpandTools',
   ToggleThinkingCollapsed = 'toggleThinkingCollapsed',
@@ -158,6 +169,12 @@ export type LocalAction =
   | { type: LocalActionType.DismissApproval }
   | { type: LocalActionType.DismissInput }
   | { type: LocalActionType.SelectModel; modelId: string; providerId: string }
+  | {
+      type: LocalActionType.SetReasoningEffort;
+      modelId: string;
+      providerId: string;
+      effort: WebviewReasoningChoice;
+    }
   | { type: LocalActionType.ToggleAutoWrites }
   | { type: LocalActionType.ToggleExpandTools }
   | { type: LocalActionType.ToggleThinkingCollapsed }
@@ -207,6 +224,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         maxReadLines: action.maxReadLines,
         maxHistoryMessages: action.maxHistoryMessages,
         thinkingCollapsed: action.thinkingCollapsed,
+        reasoningEffortByModel: action.reasoningEffortByModel,
         sessionTitle: action.sessionTitle,
         // A fresh session/snapshot starts with an empty changes panel.
         resolvedFiles: {},
@@ -339,6 +357,18 @@ export function reducer(state: ChatState, action: Action): ChatState {
         ...state,
         activeModel: action.modelId,
         providerId: action.providerId,
+      };
+
+    case LocalActionType.SetReasoningEffort:
+      return {
+        ...state,
+        reasoningEffortByModel: {
+          ...state.reasoningEffortByModel,
+          [action.providerId]: {
+            ...state.reasoningEffortByModel[action.providerId],
+            [action.modelId]: action.effort,
+          },
+        },
       };
 
     case LocalActionType.ToggleAutoWrites:
