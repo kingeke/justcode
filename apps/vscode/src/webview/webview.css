@@ -1571,6 +1571,26 @@ textarea:focus {
   gap: 8px;
 }
 
+.settings-popup-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* A thin rule separates one category from the next. */
+.settings-popup-section + .settings-popup-section {
+  padding-top: 8px;
+  border-top: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.25));
+}
+
+.settings-popup-heading {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
 .settings-popup-row {
   display: flex;
   align-items: center;

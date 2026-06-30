@@ -73,6 +73,12 @@ export interface ComposerProps {
   ) => void;
   onSubmit: (content: string, images: WebviewImage[]) => void;
   onCancel: () => void;
+  /** The unsent draft to restore on mount (survives the composer unmounting). */
+  initialDraft?: string;
+  /** Staged images to restore on mount, paired with {@link initialDraft}. */
+  initialImages?: WebviewImage[];
+  /** Mirror the live draft up so it persists while a full-screen view is open. */
+  onDraftChange?: (draft: string, images: WebviewImage[]) => void;
   /** Workspace files for `@file` completions (fetched lazily, filtered locally). */
   workspaceFiles: string[];
   /** A file's symbols for `@path::method` completions, cached by path. */
@@ -106,9 +112,20 @@ export interface ComposerProps {
  */
 export function Composer(props: ComposerProps): React.JSX.Element {
   const { busy, disabled } = props;
-  const [value, setValue] = React.useState('');
-  const [images, setImages] = React.useState<WebviewImage[]>([]);
+  // Seed from the persisted draft so reopening from the model picker (which
+  // unmounts the composer) restores what the user had typed.
+  const [value, setValue] = React.useState(props.initialDraft ?? '');
+  const [images, setImages] = React.useState<WebviewImage[]>(
+    props.initialImages ?? []
+  );
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  // Mirror the draft up on every change so it outlives this component when a
+  // full-screen view (model picker, sessions) takes over and unmounts it.
+  const { onDraftChange } = props;
+  React.useEffect(() => {
+    onDraftChange?.(value, images);
+  }, [value, images, onDraftChange]);
   const [showSettings, setShowSettings] = React.useState(false);
   const [showReasoning, setShowReasoning] = React.useState(false);
   const reasoningRef = React.useRef<HTMLDivElement>(null);
@@ -563,136 +580,145 @@ export function Composer(props: ComposerProps): React.JSX.Element {
             <div className="settings-popup-anchor" ref={settingsRef}>
               {showSettings ? (
                 <div className="settings-popup">
-                  <div className="settings-popup-row">
-                    <span className="settings-popup-label">Show thinking</span>
-                    <button
-                      type="button"
-                      className={`toggle-btn ${!props.thinkingCollapsed ? 'toggle-on' : ''}`}
-                      title={
-                        props.thinkingCollapsed
-                          ? 'Collapsed — click to expand by default'
-                          : 'Expanded — click to collapse by default'
-                      }
-                      onClick={props.onToggleThinkingCollapsed}
-                      aria-pressed={!props.thinkingCollapsed}
-                    >
-                      <span className="toggle-knob" />
-                    </button>
+                  <div className="settings-popup-section">
+                    <div className="settings-popup-heading">
+                      Context Management
+                    </div>
+                    <div className="settings-popup-row">
+                      <span className="settings-popup-label">Max file read</span>
+                      {editingReadLimit ? (
+                        <input
+                          className="settings-popup-input"
+                          type="number"
+                          min={1}
+                          value={readLimitDraft}
+                          // eslint-disable-next-line jsx-a11y/no-autofocus
+                          autoFocus
+                          onChange={(e) => setReadLimitDraft(e.target.value)}
+                          onBlur={commitReadLimit}
+                          onKeyDown={onReadLimitKeyDown}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="settings-popup-value-btn"
+                          onClick={() => {
+                            setReadLimitDraft(String(props.maxReadLines));
+                            setEditingReadLimit(true);
+                          }}
+                        >
+                          {props.maxReadLines} lines
+                        </button>
+                      )}
+                    </div>
+                    <div className="settings-popup-row">
+                      <span className="settings-popup-label">
+                        Max Context Window
+                      </span>
+                      {editingHistoryLimit ? (
+                        <input
+                          className="settings-popup-input"
+                          type="number"
+                          min={0}
+                          value={historyLimitDraft}
+                          // eslint-disable-next-line jsx-a11y/no-autofocus
+                          autoFocus
+                          onChange={(e) => setHistoryLimitDraft(e.target.value)}
+                          onBlur={commitHistoryLimit}
+                          onKeyDown={onHistoryLimitKeyDown}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="settings-popup-value-btn"
+                          title="Recent context window items sent to model — 0 means send all"
+                          onClick={() => {
+                            setHistoryLimitDraft(
+                              props.maxHistoryMessages > 0
+                                ? String(props.maxHistoryMessages)
+                                : '0'
+                            );
+                            setEditingHistoryLimit(true);
+                          }}
+                        >
+                          {props.maxHistoryMessages > 0
+                            ? `${props.maxHistoryMessages} items`
+                            : 'All'}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="settings-popup-row">
-                    <span className="settings-popup-label">Auto approvals</span>
-                    <button
-                      type="button"
-                      className={`toggle-btn ${props.autoApprove ? 'toggle-on' : ''}`}
-                      title={
-                        props.autoApprove
-                          ? 'On — click to disable'
-                          : 'Off — click to enable'
-                      }
-                      onClick={props.onToggleAutoApprove}
-                      aria-pressed={props.autoApprove}
-                    >
-                      <span className="toggle-knob" />
-                    </button>
-                  </div>
-                  <div className="settings-popup-row">
-                    <span className="settings-popup-label">
-                      Expand tool details
-                    </span>
-                    <button
-                      type="button"
-                      className={`toggle-btn ${props.expandTools ? 'toggle-on' : ''}`}
-                      title={
-                        props.expandTools
-                          ? 'On — click to collapse'
-                          : 'Off — click to expand'
-                      }
-                      onClick={props.onToggleExpandTools}
-                      aria-pressed={props.expandTools}
-                    >
-                      <span className="toggle-knob" />
-                    </button>
-                  </div>
-                  <div className="settings-popup-row">
-                    <span className="settings-popup-label">
-                      Local model refresh
-                    </span>
-                    <button
-                      type="button"
-                      className={`toggle-btn ${props.localModelAutoRefresh ? 'toggle-on' : ''}`}
-                      title={
-                        props.localModelAutoRefresh
-                          ? 'On — always refresh local models'
-                          : 'Off — local models use the daily cache'
-                      }
-                      onClick={props.onToggleLocalModelAutoRefresh}
-                      aria-pressed={props.localModelAutoRefresh}
-                    >
-                      <span className="toggle-knob" />
-                    </button>
-                  </div>
-                  <div className="settings-popup-row">
-                    <span className="settings-popup-label">Max file read</span>
-                    {editingReadLimit ? (
-                      <input
-                        className="settings-popup-input"
-                        type="number"
-                        min={1}
-                        value={readLimitDraft}
-                        // eslint-disable-next-line jsx-a11y/no-autofocus
-                        autoFocus
-                        onChange={(e) => setReadLimitDraft(e.target.value)}
-                        onBlur={commitReadLimit}
-                        onKeyDown={onReadLimitKeyDown}
-                      />
-                    ) : (
+
+                  <div className="settings-popup-section">
+                    <div className="settings-popup-heading">General Settings</div>
+                    <div className="settings-popup-row">
+                      <span className="settings-popup-label">Auto approvals</span>
                       <button
                         type="button"
-                        className="settings-popup-value-btn"
-                        onClick={() => {
-                          setReadLimitDraft(String(props.maxReadLines));
-                          setEditingReadLimit(true);
-                        }}
+                        className={`toggle-btn ${props.autoApprove ? 'toggle-on' : ''}`}
+                        title={
+                          props.autoApprove
+                            ? 'On — click to disable'
+                            : 'Off — click to enable'
+                        }
+                        onClick={props.onToggleAutoApprove}
+                        aria-pressed={props.autoApprove}
                       >
-                        {props.maxReadLines} lines
+                        <span className="toggle-knob" />
                       </button>
-                    )}
-                  </div>
-                  <div className="settings-popup-row">
-                    <span className="settings-popup-label">
-                      Max Context Window
-                    </span>
-                    {editingHistoryLimit ? (
-                      <input
-                        className="settings-popup-input"
-                        type="number"
-                        min={0}
-                        value={historyLimitDraft}
-                        // eslint-disable-next-line jsx-a11y/no-autofocus
-                        autoFocus
-                        onChange={(e) => setHistoryLimitDraft(e.target.value)}
-                        onBlur={commitHistoryLimit}
-                        onKeyDown={onHistoryLimitKeyDown}
-                      />
-                    ) : (
+                    </div>
+                    <div className="settings-popup-row">
+                      <span className="settings-popup-label">Show thinking</span>
                       <button
                         type="button"
-                        className="settings-popup-value-btn"
-                        title="Recent context window items sent to model — 0 means send all"
-                        onClick={() => {
-                          setHistoryLimitDraft(
-                            props.maxHistoryMessages > 0
-                              ? String(props.maxHistoryMessages)
-                              : '0'
-                          );
-                          setEditingHistoryLimit(true);
-                        }}
+                        className={`toggle-btn ${!props.thinkingCollapsed ? 'toggle-on' : ''}`}
+                        title={
+                          props.thinkingCollapsed
+                            ? 'Collapsed — click to expand by default'
+                            : 'Expanded — click to collapse by default'
+                        }
+                        onClick={props.onToggleThinkingCollapsed}
+                        aria-pressed={!props.thinkingCollapsed}
                       >
-                        {props.maxHistoryMessages > 0
-                          ? `${props.maxHistoryMessages} items`
-                          : 'All'}
+                        <span className="toggle-knob" />
                       </button>
-                    )}
+                    </div>
+                    <div className="settings-popup-row">
+                      <span className="settings-popup-label">
+                        Expand tool details
+                      </span>
+                      <button
+                        type="button"
+                        className={`toggle-btn ${props.expandTools ? 'toggle-on' : ''}`}
+                        title={
+                          props.expandTools
+                            ? 'On — click to collapse'
+                            : 'Off — click to expand'
+                        }
+                        onClick={props.onToggleExpandTools}
+                        aria-pressed={props.expandTools}
+                      >
+                        <span className="toggle-knob" />
+                      </button>
+                    </div>
+                    <div className="settings-popup-row">
+                      <span className="settings-popup-label">
+                        Local model refresh
+                      </span>
+                      <button
+                        type="button"
+                        className={`toggle-btn ${props.localModelAutoRefresh ? 'toggle-on' : ''}`}
+                        title={
+                          props.localModelAutoRefresh
+                            ? 'On — always refresh local models'
+                            : 'Off — local models use the daily cache'
+                        }
+                        onClick={props.onToggleLocalModelAutoRefresh}
+                        aria-pressed={props.localModelAutoRefresh}
+                      >
+                        <span className="toggle-knob" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : null}

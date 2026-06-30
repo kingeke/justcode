@@ -34,6 +34,18 @@ export function App(): React.JSX.Element {
     null
   );
   const [queuedDraft, setQueuedDraft] = React.useState('');
+  // The composer's unsent draft, mirrored here so it survives the Composer being
+  // unmounted when a full-screen view (model picker, sessions) takes over. Kept
+  // in refs rather than render state so typing doesn't re-render the transcript.
+  const composerDraftRef = React.useRef('');
+  const composerDraftImagesRef = React.useRef<WebviewImage[]>([]);
+  const persistComposerDraft = React.useCallback(
+    (draft: string, images: WebviewImage[]): void => {
+      composerDraftRef.current = draft;
+      composerDraftImagesRef.current = images;
+    },
+    []
+  );
   const transcriptRef = React.useRef<HTMLDivElement>(null);
   // Whether new content should auto-scroll. True while the user is parked at the
   // bottom; flips to false the moment they scroll up to read earlier output, so
@@ -704,6 +716,9 @@ export function App(): React.JSX.Element {
         maxHistoryMessages={state.maxHistoryMessages}
         onSubmit={submit}
         onCancel={cancel}
+        initialDraft={composerDraftRef.current}
+        initialImages={composerDraftImagesRef.current}
+        onDraftChange={persistComposerDraft}
         workspaceFiles={state.workspaceFiles}
         fileSymbols={state.fileSymbols}
         onRequestWorkspaceFiles={requestWorkspaceFiles}
