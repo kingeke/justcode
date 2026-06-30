@@ -40,7 +40,7 @@ interface ReadFileArguments {
  * flagged. Path-safety is enforced by the underlying `WorkspaceFilePort`.
  */
 export class ReadFileTool implements Tool {
-  public readonly requiresApproval = false;
+  public readonly requiresApproval = true;
 
   public readonly definition: ToolDefinition = {
     name: 'read_file',

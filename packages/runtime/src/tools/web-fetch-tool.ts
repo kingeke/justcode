@@ -30,7 +30,7 @@ const MAX_DOWNLOAD_BYTES = 5_000_000;
  * context's `AbortSignal` (e.g. when the user cancels).
  */
 export class WebFetchTool implements Tool {
-  public readonly requiresApproval = false;
+  public readonly requiresApproval = true;
 
   public readonly definition: ToolDefinition = {
     name: 'webfetch',

@@ -26,7 +26,7 @@ const DEFAULT_MAX_RESULTS = 100;
  * workspace-relative directory prefix.
  */
 export class GlobTool implements Tool {
-  public readonly requiresApproval = false;
+  public readonly requiresApproval = true;
 
   public readonly definition: ToolDefinition = {
     name: 'glob',

@@ -45,7 +45,7 @@ const BROWSER_USER_AGENT =
  * (e.g. when the user cancels). Pair it with `webfetch` to read a result's page.
  */
 export class WebSearchTool implements Tool {
-  public readonly requiresApproval = false;
+  public readonly requiresApproval = true;
 
   public readonly definition: ToolDefinition = {
     name: 'websearch',

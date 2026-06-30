@@ -159,8 +159,8 @@ describe('ReadFileTool', () => {
     expect(result.isError).toBe(true);
   });
 
-  it('does not require approval', () => {
-    expect(tool.requiresApproval).toBe(false);
+  it('requires approval', () => {
+    expect(tool.requiresApproval).toBe(true);
   });
 
   describe('method reads', () => {

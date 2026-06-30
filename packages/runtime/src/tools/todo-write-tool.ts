@@ -35,7 +35,7 @@ const STATUS_MARKER: Record<TodoStatus, string> = {
  * model so it can see the state it just set.
  */
 export class TodoWriteTool implements Tool {
-  public readonly requiresApproval = false;
+  public readonly requiresApproval = true;
 
   public readonly definition: ToolDefinition = {
     name: 'todowrite',

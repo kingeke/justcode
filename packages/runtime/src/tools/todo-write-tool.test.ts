@@ -11,8 +11,8 @@ describe('TodoWriteTool', () => {
     return tool.execute(JSON.stringify({ todos }));
   }
 
-  it('does not require approval', () => {
-    expect(tool.requiresApproval).toBe(false);
+  it('requires approval', () => {
+    expect(tool.requiresApproval).toBe(true);
   });
 
   it('renders the list with status markers', async () => {

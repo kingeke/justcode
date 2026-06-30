@@ -26,7 +26,7 @@ const MAX_LINE_LENGTH = 240;
  * to a workspace-relative file or directory prefix.
  */
 export class GrepTool implements Tool {
-  public readonly requiresApproval = false;
+  public readonly requiresApproval = true;
 
   public readonly definition: ToolDefinition = {
     name: 'grep',
