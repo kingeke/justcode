@@ -22,6 +22,7 @@ export enum HostMessageType {
   TurnComplete = 'turnComplete',
   ModelsUpdate = 'modelsUpdate',
   FileReverted = 'fileReverted',
+  SteeringConsumed = 'steeringConsumed',
   Error = 'error',
 }
 
@@ -37,7 +38,7 @@ export enum WebviewMessageType {
   RefreshModels = 'refreshModels',
   SelectProvider = 'selectProvider',
   NewSession = 'newSession',
-  ToggleAutoWrites = 'toggleAutoWrites',
+  ToggleAutoApprove = 'toggleAutoApprove',
   ToggleExpandTools = 'toggleExpandTools',
   SetReadLimit = 'setReadLimit',
   SetHistoryLimit = 'setHistoryLimit',
@@ -53,6 +54,7 @@ export enum WebviewMessageType {
   OpenFile = 'openFile',
   ViewChatLog = 'viewChatLog',
   SaveResolvedFiles = 'saveResolvedFiles',
+  SyncSteeringQueue = 'syncSteeringQueue',
 }
 
 /** Roles the transcript renders. Mirrors the persisted message roles. */
@@ -220,6 +222,17 @@ export interface WebviewUsage {
   cost?: number;
 }
 
+/**
+ * A provider whose model list couldn't be fetched (e.g. an unreachable local
+ * server). Surfaced in the model picker so one failing provider never blocks the
+ * panel — the user can still see why it's missing and switch to a working one.
+ */
+export interface WebviewProviderError {
+  providerId: string;
+  providerName: string;
+  message: string;
+}
+
 /** Per-session timing stats mirroring the CLI's TTFT / tok-s footer. */
 export interface WebviewStats {
   /** Time to first token for the most recent turn, in milliseconds. */
@@ -241,7 +254,9 @@ export interface ReadyMessage {
   messages: WebviewMessage[];
   /** Human-readable reason the session can't chat yet (e.g. no provider). */
   notice?: string;
-  autoApplyWrites: boolean;
+  /** Providers whose model list couldn't be fetched, shown in the picker. */
+  providerErrors?: WebviewProviderError[];
+  autoApprove: boolean;
   expandTools: boolean;
   maxReadLines: number;
   /** Recent context window items sent to the model per request; 0 means "off" (send all). */
@@ -361,6 +376,8 @@ export interface ErrorMessage {
 export interface ModelsUpdateMessage {
   type: HostMessageType.ModelsUpdate;
   models: WebviewModel[];
+  /** Providers whose model list couldn't be fetched, shown in the picker. */
+  providerErrors: WebviewProviderError[];
 }
 
 /**
@@ -376,6 +393,20 @@ export interface FileRevertedMessage {
   message?: string;
 }
 
+/**
+ * Tells the webview that queued follow-ups were folded into the running turn to
+ * steer the model (the host appended `content` as a user message before the next
+ * model call). The webview drops the listed pills and shows the message in the
+ * transcript so the steering is visible immediately, not just at turn end.
+ */
+export interface SteeringConsumedMessage {
+  type: HostMessageType.SteeringConsumed;
+  /** Ids of the queued messages that were consumed, to remove from the queue. */
+  ids: string[];
+  /** The combined text that was folded into the turn. */
+  content: string;
+}
+
 export type HostToWebview =
   | ReadyMessage
   | ModelsUpdateMessage
@@ -389,6 +420,7 @@ export type HostToWebview =
   | UsageUpdateMessage
   | TurnCompleteMessage
   | FileRevertedMessage
+  | SteeringConsumedMessage
   | ErrorMessage;
 
 // --- Webview -> Host -------------------------------------------------------
@@ -496,8 +528,8 @@ export interface OpenSettingsMessage {
 }
 
 /** The user toggled auto-approval for write tools. */
-export interface ToggleAutoWritesMessage {
-  type: WebviewMessageType.ToggleAutoWrites;
+export interface ToggleAutoApproveMessage {
+  type: WebviewMessageType.ToggleAutoApprove;
 }
 
 /** The user toggled inline tool detail expansion. */
@@ -558,6 +590,17 @@ export interface OpenFileMessage {
   path: string;
 }
 
+/**
+ * Mirrors the webview's current text follow-ups to the host so the running turn
+ * can steer on them. Sent whenever the queue changes; the host keeps the latest
+ * snapshot and folds it in at the next agent step. Only text-only entries are
+ * steerable — image-bearing follow-ups stay queued and send after the turn.
+ */
+export interface SyncSteeringQueueMessage {
+  type: WebviewMessageType.SyncSteeringQueue;
+  messages: { id: string; content: string }[];
+}
+
 export type WebviewToHost =
   | InitMessage
   | SubmitMessage
@@ -576,7 +619,7 @@ export type WebviewToHost =
   | ClearSessionsMessage
   | ConnectProviderMessage
   | OpenSettingsMessage
-  | ToggleAutoWritesMessage
+  | ToggleAutoApproveMessage
   | ToggleExpandToolsMessage
   | SetReadLimitMessage
   | SetHistoryLimitMessage
@@ -584,4 +627,5 @@ export type WebviewToHost =
   | ToggleLocalModelAutoRefreshMessage
   | RevertFileMessage
   | SaveResolvedFilesMessage
+  | SyncSteeringQueueMessage
   | OpenFileMessage;

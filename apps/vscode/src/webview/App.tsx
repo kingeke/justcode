@@ -22,7 +22,7 @@ import { ApprovalPrompt, InputPrompt } from '@ext/webview/components/Prompts';
 import { Composer } from '@ext/webview/components/Composer';
 import { SessionsView } from '@ext/webview/components/SessionsView';
 import { ModelPickerView } from '@ext/webview/components/ModelPickerView';
-import { JsonIcon } from '@ext/webview/components/Icons';
+import { JsonIcon, PencilIcon } from '@ext/webview/components/Icons';
 import { ChangesPanel } from '@ext/webview/components/ChangesPanel';
 import { deriveChangedFiles, type ChangedFile } from '@ext/webview/changes';
 
@@ -85,11 +85,20 @@ export function App(): React.JSX.Element {
   };
 
   // Keep the latest content in view as tokens stream and messages arrive — but
-  // only while the user hasn't scrolled up to read earlier output.
+  // only while the user hasn't scrolled up to read earlier output. Approval and
+  // input prompts are included: they appear below the transcript and are the
+  // thing the user must act on, so a freshly-shown gate has to scroll into view.
   React.useEffect(() => {
     const el = transcriptRef.current;
     if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [state.messages, state.streaming, state.thinking, state.tools]);
+  }, [
+    state.messages,
+    state.streaming,
+    state.thinking,
+    state.tools,
+    state.approval,
+    state.input,
+  ]);
 
   const sendNow = (content: string, images: WebviewImage[]): void => {
     // Sending a new message should always snap to it, even if the user had
@@ -130,6 +139,20 @@ export function App(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.busy, state.queuedMessages, editingQueuedId]);
 
+  // Mirror the text follow-ups to the host so the in-flight turn can steer on
+  // them at its next step instead of waiting for the turn to finish. Only
+  // text-only entries are steerable — an image-bearing follow-up stays queued
+  // and sends as its own turn once the current one ends. Re-sent on every queue
+  // change (add/edit/delete) so the host always has the latest editable state.
+  React.useEffect(() => {
+    postToHost({
+      type: WebviewMessageType.SyncSteeringQueue,
+      messages: state.queuedMessages
+        .filter((m) => m.images.length === 0 && m.content.trim().length > 0)
+        .map((m) => ({ id: m.id, content: m.content })),
+    });
+  }, [state.queuedMessages]);
+
   const dequeueMessage = (id: string): void => {
     dispatch({ type: LocalActionType.DequeueMessage, id });
   };
@@ -169,6 +192,14 @@ export function App(): React.JSX.Element {
   const respondApproval = (id: string, approved: boolean): void => {
     postToHost({ type: WebviewMessageType.ApprovalResponse, id, approved });
     dispatch({ type: LocalActionType.DismissApproval });
+  };
+
+  // Approve this tool and flip on auto-approve so the rest of the turn (and
+  // future turns) run without prompting. The prompt only appears while
+  // auto-approve is off, so toggling reliably turns it on.
+  const approveAllTools = (id: string): void => {
+    respondApproval(id, true);
+    if (!state.autoApprove) toggleAutoApprove();
   };
 
   const respondInput = (id: string, value: string): void => {
@@ -261,9 +292,9 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.OpenSettings });
   };
 
-  const toggleAutoWrites = (): void => {
-    dispatch({ type: LocalActionType.ToggleAutoWrites });
-    postToHost({ type: WebviewMessageType.ToggleAutoWrites });
+  const toggleAutoApprove = (): void => {
+    dispatch({ type: LocalActionType.ToggleAutoApprove });
+    postToHost({ type: WebviewMessageType.ToggleAutoApprove });
   };
 
   const toggleExpandTools = (): void => {
@@ -388,6 +419,7 @@ export function App(): React.JSX.Element {
     return (
       <ModelPickerView
         models={state.models}
+        providerErrors={state.providerErrors}
         activeModel={state.activeModel}
         activeProviderId={state.providerId}
         onSelect={(model) => {
@@ -540,6 +572,7 @@ export function App(): React.JSX.Element {
             onRespond={(approved) =>
               respondApproval(state.approval!.id, approved)
             }
+            onApproveAll={() => approveAllTools(state.approval!.id)}
           />
         ) : null}
 
@@ -567,6 +600,10 @@ export function App(): React.JSX.Element {
         <div className="queued-messages">
           {state.queuedMessages.map((m) => {
             const editing = editingQueuedId === m.id;
+            // Text-only follow-ups steer the running turn at its next step;
+            // image-bearing ones can't be folded in, so they wait for the flush.
+            const steerable =
+              m.images.length === 0 && m.content.trim().length > 0;
             return (
               <div
                 key={m.id}
@@ -574,10 +611,14 @@ export function App(): React.JSX.Element {
                 title={
                   editing
                     ? undefined
-                    : 'Queued — sends when the current turn finishes'
+                    : steerable
+                      ? 'Follow-up — steers the model on its next step'
+                      : 'Queued — sends when the current turn finishes'
                 }
               >
-                <span className="queued-message-icon">⏱</span>
+                <span className="queued-message-icon">
+                  {steerable ? '➤' : '⏱'}
+                </span>
                 {editing ? (
                   <input
                     className="queued-message-input"
@@ -598,7 +639,7 @@ export function App(): React.JSX.Element {
                   <button
                     type="button"
                     className="queued-message-text"
-                    title="Click to edit"
+                    title="Edit this follow-up"
                     onClick={() => startEditQueued(m.id, m.content)}
                   >
                     {m.content.trim() ||
@@ -607,6 +648,16 @@ export function App(): React.JSX.Element {
                         : `${m.images.length} images`)}
                   </button>
                 )}
+                {!editing ? (
+                  <button
+                    type="button"
+                    className="queued-message-edit"
+                    title="Edit this follow-up"
+                    onClick={() => startEditQueued(m.id, m.content)}
+                  >
+                    <PencilIcon size={16} />
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="queued-message-remove"
@@ -629,7 +680,7 @@ export function App(): React.JSX.Element {
         activeProviderId={state.providerId}
         usage={state.usage}
         stats={state.stats}
-        autoApplyWrites={state.autoApplyWrites}
+        autoApprove={state.autoApprove}
         expandTools={state.expandTools}
         maxReadLines={state.maxReadLines}
         maxHistoryMessages={state.maxHistoryMessages}
@@ -642,7 +693,7 @@ export function App(): React.JSX.Element {
         onSetReasoningEffort={setReasoningEffort}
         thinkingCollapsed={state.thinkingCollapsed}
         localModelAutoRefresh={state.localModelAutoRefresh}
-        onToggleAutoWrites={toggleAutoWrites}
+        onToggleAutoApprove={toggleAutoApprove}
         onToggleExpandTools={toggleExpandTools}
         onToggleThinkingCollapsed={toggleThinkingCollapsed}
         onToggleLocalModelAutoRefresh={toggleLocalModelAutoRefresh}

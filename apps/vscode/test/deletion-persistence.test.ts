@@ -25,7 +25,7 @@ describe('deletion persistence through a turn', () => {
       activeModel: 'm',
       models: [],
       messages: [],
-      autoApplyWrites: true,
+      autoApprove: true,
       expandTools: false,
       maxReadLines: 200,
       maxHistoryMessages: 50,

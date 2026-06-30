@@ -8,6 +8,7 @@ import {
   type WebviewImage,
   type WebviewMessage,
   type WebviewModel,
+  type WebviewProviderError,
   type WebviewReasoningChoice,
   type WebviewSessionSummary,
   type WebviewToolView,
@@ -88,6 +89,8 @@ export interface ChatState {
   providerId?: string | undefined;
   activeModel?: string | undefined;
   models: WebviewModel[];
+  /** Providers whose model list couldn't be fetched, shown in the picker. */
+  providerErrors: WebviewProviderError[];
   notice?: string | undefined;
   messages: WebviewMessage[];
   busy: boolean;
@@ -107,7 +110,7 @@ export interface ChatState {
   liveTurnItems: LiveTurnItem[];
   /** Thinking segments from the just-completed turn, kept visible after commit. */
   completedThinkingItems: LiveThinkingItem[];
-  autoApplyWrites: boolean;
+  autoApprove: boolean;
   expandTools: boolean;
   maxReadLines: number;
   /** Recent context window items sent to the model per request; 0 means "off" (send all). */
@@ -144,6 +147,7 @@ export const initialState: ChatState = {
   sessions: [],
   hasConnectedProvider: false,
   models: [],
+  providerErrors: [],
   messages: [],
   busy: false,
   thinking: '',
@@ -153,7 +157,7 @@ export const initialState: ChatState = {
   tools: [],
   liveTurnItems: [],
   completedThinkingItems: [],
-  autoApplyWrites: false,
+  autoApprove: false,
   expandTools: false,
   maxReadLines: 200,
   maxHistoryMessages: 50,
@@ -171,7 +175,7 @@ export enum LocalActionType {
   DismissInput = 'dismissInput',
   SelectModel = 'selectModel',
   SetReasoningEffort = 'setReasoningEffort',
-  ToggleAutoWrites = 'toggleAutoWrites',
+  ToggleAutoApprove = 'toggleAutoApprove',
   ToggleExpandTools = 'toggleExpandTools',
   ToggleThinkingCollapsed = 'toggleThinkingCollapsed',
   ToggleLocalModelAutoRefresh = 'toggleLocalModelAutoRefresh',
@@ -202,7 +206,7 @@ export type LocalAction =
       providerId: string;
       effort: WebviewReasoningChoice;
     }
-  | { type: LocalActionType.ToggleAutoWrites }
+  | { type: LocalActionType.ToggleAutoApprove }
   | { type: LocalActionType.ToggleExpandTools }
   | { type: LocalActionType.ToggleThinkingCollapsed }
   | { type: LocalActionType.ToggleLocalModelAutoRefresh }
@@ -238,6 +242,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         providerId: action.providerId,
         activeModel: action.activeModel,
         models: action.models,
+        providerErrors: action.providerErrors ?? [],
         messages: action.messages,
         notice: action.notice,
         busy: false,
@@ -251,7 +256,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         error: undefined,
         usage: undefined,
         stats: undefined,
-        autoApplyWrites: action.autoApplyWrites,
+        autoApprove: action.autoApprove,
         expandTools: action.expandTools,
         maxReadLines: action.maxReadLines,
         maxHistoryMessages: action.maxHistoryMessages,
@@ -268,7 +273,33 @@ export function reducer(state: ChatState, action: Action): ChatState {
       };
 
     case HostMessageType.ModelsUpdate:
-      return { ...state, models: action.models };
+      return {
+        ...state,
+        models: action.models,
+        providerErrors: action.providerErrors,
+      };
+
+    case HostMessageType.SteeringConsumed: {
+      // The host folded these queued follow-ups into the running turn. Drop their
+      // pills and surface the combined message in the transcript now, so the
+      // steering is visible immediately rather than only at turn end (the
+      // authoritative rebuild on TurnComplete replaces this echo).
+      const consumed = new Set(action.ids);
+      return {
+        ...state,
+        queuedMessages: state.queuedMessages.filter(
+          (m) => !consumed.has(m.id)
+        ),
+        messages: [
+          ...state.messages,
+          {
+            id: `steer-${Date.now()}`,
+            role: WebviewRole.User,
+            content: action.content,
+          },
+        ],
+      };
+    }
 
     case HostMessageType.SessionsList:
       return {
@@ -415,8 +446,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
         },
       };
 
-    case LocalActionType.ToggleAutoWrites:
-      return { ...state, autoApplyWrites: !state.autoApplyWrites };
+    case LocalActionType.ToggleAutoApprove:
+      return { ...state, autoApprove: !state.autoApprove };
 
     case LocalActionType.ToggleExpandTools:
       return { ...state, expandTools: !state.expandTools };

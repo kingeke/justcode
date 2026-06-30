@@ -8,7 +8,7 @@ export enum CommandName {
   ClearSessions = 'clear-sessions',
   Thinking = 'thinking',
   Reasoning = 'reasoning',
-  AutoWrites = 'auto-writes',
+  AutoApprove = 'auto-approve',
   LocalRefresh = 'local-model-refresh',
   ExpandTools = 'expand-tools',
   ReadLimit = 'read-limit',
@@ -60,8 +60,8 @@ export const COMMANDS: Command[] = [
     description: 'Choose reasoning effort for the current model',
   },
   {
-    name: CommandName.AutoWrites,
-    description: 'Toggle auto-applying file writes without confirmation',
+    name: CommandName.AutoApprove,
+    description: 'Toggle auto-approving all tool actions without confirmation',
   },
   {
     name: CommandName.LocalRefresh,

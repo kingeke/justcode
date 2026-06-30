@@ -10,9 +10,12 @@ import { DiffView } from '@ext/webview/components/DiffView';
 export function ApprovalPrompt({
   request,
   onRespond,
+  onApproveAll,
 }: {
   request: ApprovalRequestMessage;
   onRespond: (approved: boolean) => void;
+  /** Approve this tool and turn on auto-approve for the rest of the session. */
+  onApproveAll: () => void;
 }): React.JSX.Element {
   return (
     <div className="prompt prompt-approval">
@@ -34,6 +37,14 @@ export function ApprovalPrompt({
         </button>
         <button type="button" className="btn" onClick={() => onRespond(false)}>
           Reject
+        </button>
+        <button
+          type="button"
+          className="btn"
+          title="Approve this and stop asking — auto-approves all tools for the session"
+          onClick={onApproveAll}
+        >
+          Approve all tools
         </button>
       </div>
     </div>

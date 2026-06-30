@@ -61,6 +61,7 @@ import {
   type WebviewStats,
   type WebviewToHost,
   type WebviewModel,
+  type WebviewProviderError,
   type WebviewReasoningChoice,
   type WebviewReasoningEffort,
   type WebviewToolView,
@@ -81,6 +82,13 @@ export class ChatBridge {
   private conversation: Conversation | undefined;
   private activeModel: string | undefined;
   private models: ModelInfo[] = [];
+  // Providers whose last model-list fetch failed, mirrored to the picker so an
+  // unreachable provider surfaces its error instead of silently disappearing.
+  private providerErrors: WebviewProviderError[] = [];
+  // The webview's current text follow-up queue, mirrored here so the running
+  // turn can steer on it. Drained (and cleared) a step at a time by the agent
+  // loop via `drainSteering`; reset when a fresh turn starts.
+  private steeringQueue: { id: string; content: string }[] = [];
   private abortController: AbortController | undefined;
   private readonly pendingApprovals = new Map<
     string,
@@ -100,7 +108,7 @@ export class ChatBridge {
     Array<{ path: string; oldText: string }>
   >();
   private sessionId: string = randomUUID();
-  private autoApplyWrites = false;
+  private autoApprove = false;
   private expandTools = false;
   private maxReadLines = DEFAULT_MAX_READ_LINES;
   // 0 means "off" — the full conversation is sent without trimming.
@@ -223,8 +231,8 @@ export class ChatBridge {
       case WebviewMessageType.ClearSessions:
         await this.clearAllSessions();
         return;
-      case WebviewMessageType.ToggleAutoWrites:
-        await this.toggleAutoWrites();
+      case WebviewMessageType.ToggleAutoApprove:
+        await this.toggleAutoApprove();
         return;
       case WebviewMessageType.ToggleExpandTools:
         await this.toggleExpandTools();
@@ -246,6 +254,12 @@ export class ChatBridge {
         return;
       case WebviewMessageType.OpenFile:
         this.openFile(message.path);
+        return;
+      case WebviewMessageType.SyncSteeringQueue:
+        // Mirror the webview's editable follow-up queue so the in-flight turn
+        // can fold it in at the next step. Replace wholesale — the webview sends
+        // the full current snapshot on every change (queue/edit/delete).
+        this.steeringQueue = message.messages;
         return;
     }
   }
@@ -271,7 +285,7 @@ export class ChatBridge {
     // Load persisted settings so the webview always starts in sync.
     const configDir = cacheDirectory();
     const globalConfig = await readGlobalConfig(configDir);
-    this.autoApplyWrites = globalConfig.autoApplyWrites ?? false;
+    this.autoApprove = globalConfig.autoApprove ?? false;
     this.expandTools = globalConfig.expandTools ?? false;
     this.maxReadLines =
       globalConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES;
@@ -298,7 +312,7 @@ export class ChatBridge {
         models: [],
         messages: [],
         notice: `Failed to start ${APP_NAME}: ${errorMessage(error)}`,
-        autoApplyWrites: this.autoApplyWrites,
+        autoApprove: this.autoApprove,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
@@ -326,7 +340,7 @@ export class ChatBridge {
         models: [],
         messages: [],
         notice: `No provider is configured. Connect one with the ${APP_NAME} CLI (or set the provider env vars), then reload this view.`,
-        autoApplyWrites: this.autoApplyWrites,
+        autoApprove: this.autoApprove,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
@@ -380,7 +394,7 @@ export class ChatBridge {
           services,
           this.toolViewsByCallId
         ),
-        autoApplyWrites: this.autoApplyWrites,
+        autoApprove: this.autoApprove,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
@@ -395,22 +409,60 @@ export class ChatBridge {
 
       void this.refreshAllModels(services, session.availableModels);
     } catch (error) {
+      // The active provider couldn't list its models — typically a local server
+      // (Ollama/LM Studio) that isn't running. Don't dead-end the panel: load
+      // the conversation that's already on disk, render it, and let the model
+      // picker surface the error and the other providers' models so the user can
+      // switch. The background refresh re-posts the authoritative provider list.
+      const conversation = await services.chatSessionService
+        .loadConversation(this.sessionId)
+        .catch(() => createConversation(this.sessionId));
+      this.conversation = conversation;
+      this.models = [];
+
+      const providerErrors: WebviewProviderError[] = services.providerId
+        ? [
+            {
+              providerId: services.providerId,
+              providerName:
+                PROVIDER_BY_ID[services.providerId]?.name ?? services.providerId,
+              message: errorMessage(error),
+            },
+          ]
+        : [];
+      this.providerErrors = providerErrors;
+
+      const resolvedFiles = await readResolvedFiles(configDir, this.sessionId);
+
       this.post({
         type: HostMessageType.Ready,
         providerId: services.providerId,
-        activeModel: undefined,
+        activeModel: this.activeModel,
         models: [],
-        messages: [],
-        notice: `Could not load models for ${services.providerId}: ${errorMessage(error)}`,
-        autoApplyWrites: this.autoApplyWrites,
+        messages: await toWebviewMessages(
+          conversation,
+          services,
+          this.toolViewsByCallId
+        ),
+        notice:
+          'Some providers could not be reached. Open the model picker to see details and switch models.',
+        providerErrors,
+        autoApprove: this.autoApprove,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         reasoningEffortByModel: this.reasoningEffortByModel,
-        resolvedFiles: {},
+        resolvedFiles,
+        ...(conversation.title !== undefined
+          ? { sessionTitle: conversation.title }
+          : {}),
       });
+
+      // Populate the picker from every reachable provider so the user can pick a
+      // working model even though the active one's provider is down.
+      void this.refreshAllModels(services, []);
     }
   }
 
@@ -449,30 +501,38 @@ export class ChatBridge {
   /**
    * Lists every configured provider's models in the background and pushes the
    * merged result to the webview. The active provider's models (already shown by
-   * `sendReady`) seed the list so the dropdown is never missing the live session,
-   * and providers that fail (e.g. unreachable) are silently skipped.
+   * `sendReady`) seed the list so the dropdown is never missing the live session.
+   * Providers that fail (e.g. an unreachable local server) don't drop the list —
+   * their error is collected into `providerErrors` so the picker can show it.
    */
   private async refreshAllModels(
     services: RuntimeServices,
     activeModels: ModelInfo[]
   ): Promise<void> {
+    const providers = services.allProviders;
     const perProvider = await Promise.allSettled(
-      services.allProviders.map((p) => p.listModels())
+      providers.map((p) => p.listModels())
     );
     // Dedup on provider + id, not id alone: the same model id (e.g.
     // "gpt-5.4-mini") is offered by multiple providers (openai, copilot, ...)
     // and each is a distinct, separately selectable entry.
     const key = (m: ModelInfo): string => `${m.providerId}:${m.id}`;
     const seen = new Set<string>();
-    const merged = perProvider.flatMap((result) =>
-      result.status === 'fulfilled'
-        ? result.value.filter((m) => {
-            if (seen.has(key(m))) return false;
-            seen.add(key(m));
-            return true;
-          })
-        : []
-    );
+    const merged: ModelInfo[] = [];
+    const providerErrors: WebviewProviderError[] = [];
+    providers.forEach((provider, index) => {
+      const result = perProvider[index];
+      if (!result) return;
+      if (result.status === 'fulfilled') {
+        for (const m of result.value) {
+          if (seen.has(key(m))) continue;
+          seen.add(key(m));
+          merged.push(m);
+        }
+      } else {
+        providerErrors.push(toProviderError(provider, result.reason));
+      }
+    });
     for (const m of activeModels) {
       if (!seen.has(key(m))) {
         seen.add(key(m));
@@ -481,10 +541,33 @@ export class ChatBridge {
     }
 
     this.models = merged;
+    this.providerErrors = providerErrors;
     this.post({
       type: HostMessageType.ModelsUpdate,
       models: merged.map(toWebviewModel),
+      providerErrors,
     });
+  }
+
+  /**
+   * Folds the follow-ups the user queued while this turn is running into the
+   * model's next step so they steer the answer instead of waiting for the turn
+   * to finish. Called by the agent loop at each step; returns the combined text
+   * (or null when nothing is queued). Tells the webview which pills were consumed
+   * so they disappear and the message shows in the transcript right away.
+   */
+  private drainSteering(): string | null {
+    const queued = this.steeringQueue;
+    if (queued.length === 0) return null;
+    const ids = queued.map((m) => m.id);
+    const content = queued
+      .map((m) => m.content)
+      .filter((c) => c.trim().length > 0)
+      .join('\n\n');
+    this.steeringQueue = [];
+    if (!content.trim()) return null;
+    this.post({ type: HostMessageType.SteeringConsumed, ids, content });
+    return content;
   }
 
   /** Runs one agent turn, streaming tokens, tool activity, and approvals. */
@@ -511,6 +594,10 @@ export class ChatBridge {
 
     const abortController = new AbortController();
     this.abortController = abortController;
+
+    // A fresh turn starts with an empty steering queue; follow-ups the user adds
+    // while this turn runs are mirrored in via `SyncSteeringQueue`.
+    this.steeringQueue = [];
 
     // Timing for the TTFT / tok-s footer. `firstTokenMs` is stamped by the first
     // streamed token (visible or thinking), matching the CLI's measurement.
@@ -540,6 +627,7 @@ export class ChatBridge {
           ? { reasoningEffort: reasoningEffort as ReasoningEffortChoice }
           : {}),
         signal: abortController.signal,
+        drainSteering: () => this.drainSteering(),
         onToken: (token) => {
           markFirstToken();
           this.post({ type: HostMessageType.Token, token });
@@ -558,7 +646,7 @@ export class ChatBridge {
           });
         },
         onToolActivity: (event) => this.postToolActivity(event),
-        ...(!this.autoApplyWrites && {
+        ...(!this.autoApprove && {
           requestApproval: (request) => this.requestApproval(request),
         }),
         requestUserInput: (request) => this.requestUserInput(request),
@@ -758,6 +846,10 @@ export class ChatBridge {
   }
 
   private requestApproval(request: ToolApprovalRequest): Promise<boolean> {
+    // Auto-approve may have been flipped on mid-turn (e.g. the user clicked
+    // "Approve all tools" on an earlier prompt). The callback is wired for the
+    // whole turn, so re-check here to skip prompting for the remaining tools.
+    if (this.autoApprove) return Promise.resolve(true);
     return new Promise<boolean>((resolve) => {
       const id = randomUUID();
       this.pendingApprovals.set(id, resolve);
@@ -947,13 +1039,13 @@ export class ChatBridge {
     });
   }
 
-  private async toggleAutoWrites(): Promise<void> {
-    this.autoApplyWrites = !this.autoApplyWrites;
+  private async toggleAutoApprove(): Promise<void> {
+    this.autoApprove = !this.autoApprove;
     const configDir = cacheDirectory();
     const config = await readGlobalConfig(configDir);
     await writeGlobalConfig(configDir, {
       ...config,
-      autoApplyWrites: this.autoApplyWrites,
+      autoApprove: this.autoApprove,
     });
   }
 
@@ -1146,7 +1238,7 @@ export class ChatBridge {
         activeModel: this.activeModel,
         models: this.models.map(toWebviewModel),
         messages: [],
-        autoApplyWrites: this.autoApplyWrites,
+        autoApprove: this.autoApprove,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
@@ -1161,6 +1253,18 @@ export class ChatBridge {
     this.conversation = undefined;
     await this.sendReady();
   }
+}
+
+function toProviderError(
+  provider: ProviderClient,
+  reason: unknown
+): WebviewProviderError {
+  const entry = PROVIDER_BY_ID[provider.providerId];
+  return {
+    providerId: provider.providerId,
+    providerName: entry?.name ?? provider.providerId,
+    message: errorMessage(reason),
+  };
 }
 
 function toWebviewModel(model: ModelInfo): WebviewModel {

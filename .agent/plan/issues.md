@@ -10,7 +10,8 @@ This document tracks the issues so far.
 - @ files and methods
 - show button to go to bottom when scrolled up
 - maybe make discover_tools optional via settings
-- change auto_writes to auto approvals, since its an approval for all
+- aborting a requests removes all previous thinking and generated texts
+- ensure all tools ask for permission except if auto approvals are active
 
 # Instruction
 

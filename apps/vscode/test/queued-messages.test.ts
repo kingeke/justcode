@@ -72,7 +72,7 @@ describe('queued messages', () => {
       activeModel: 'm',
       models: [],
       messages: [],
-      autoApplyWrites: false,
+      autoApprove: false,
       expandTools: false,
       maxReadLines: 200,
       maxHistoryMessages: 50,

@@ -49,7 +49,7 @@ export interface ComposerProps {
   activeProviderId: string | undefined;
   usage: WebviewUsage | undefined;
   stats: WebviewStats | undefined;
-  autoApplyWrites: boolean;
+  autoApprove: boolean;
   expandTools: boolean;
   maxReadLines: number;
   /** Recent context window items sent to the model per request; 0 means "off" (send all). */
@@ -69,7 +69,7 @@ export interface ComposerProps {
   onOpenModelPicker: () => void;
   /** Opens a full-size preview of a staged image (data URL). */
   onOpenImage?: (src: string) => void;
-  onToggleAutoWrites: () => void;
+  onToggleAutoApprove: () => void;
   onToggleExpandTools: () => void;
   onSetReadLimit: (lines: number) => void;
   /** Pass 0 to turn trimming off (send the whole conversation). */
@@ -85,7 +85,7 @@ export interface ComposerProps {
 /**
  * The Copilot-style composer: one rounded box holding the prompt, an in-box
  * toolbar (new · mode · model · provider · send), and a settings strip beneath
- * it (auto writes · expand · read limit · usage). Enter submits; Shift+Enter
+ * it (auto approvals · expand · read limit · usage). Enter submits; Shift+Enter
  * inserts a newline, matching the CLI.
  */
 export function Composer(props: ComposerProps): React.JSX.Element {
@@ -412,17 +412,17 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                     </button>
                   </div>
                   <div className="settings-popup-row">
-                    <span className="settings-popup-label">Auto writes</span>
+                    <span className="settings-popup-label">Auto approvals</span>
                     <button
                       type="button"
-                      className={`toggle-btn ${props.autoApplyWrites ? 'toggle-on' : ''}`}
+                      className={`toggle-btn ${props.autoApprove ? 'toggle-on' : ''}`}
                       title={
-                        props.autoApplyWrites
+                        props.autoApprove
                           ? 'On — click to disable'
                           : 'Off — click to enable'
                       }
-                      onClick={props.onToggleAutoWrites}
-                      aria-pressed={props.autoApplyWrites}
+                      onClick={props.onToggleAutoApprove}
+                      aria-pressed={props.autoApprove}
                     >
                       <span className="toggle-knob" />
                     </button>

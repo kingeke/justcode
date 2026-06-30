@@ -218,6 +218,16 @@ export class ChatSessionService {
     };
   }
 
+  /**
+   * Loads just the persisted conversation, without touching the provider's model
+   * list. Lets a host (e.g. the VSCode panel) still render a resumed chat when
+   * `startSession` fails because the active provider can't list models — a down
+   * local server shouldn't bury the conversation that's already on disk.
+   */
+  public async loadConversation(sessionId: string): Promise<Conversation> {
+    return this.repository.load(sessionId);
+  }
+
   public async clearSession(sessionId: string): Promise<Conversation> {
     await this.repository.clear(sessionId);
     return createConversation(sessionId);

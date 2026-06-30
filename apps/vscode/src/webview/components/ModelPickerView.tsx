@@ -1,6 +1,9 @@
 import * as React from 'react';
 
-import type { WebviewModel } from '@ext/shared/protocol';
+import type {
+  WebviewModel,
+  WebviewProviderError,
+} from '@ext/shared/protocol';
 import { PlusIcon, RefreshIcon } from '@ext/webview/components/Icons';
 
 // ── Sort ─────────────────────────────────────────────────────────────────────
@@ -96,6 +99,8 @@ function modelMeta(m: WebviewModel): string {
 
 interface ModelPickerViewProps {
   models: WebviewModel[];
+  /** Providers whose model list couldn't be fetched, shown inline as warnings. */
+  providerErrors: WebviewProviderError[];
   activeModel: string | undefined;
   activeProviderId: string | undefined;
   onSelect: (model: WebviewModel) => void;
@@ -107,6 +112,7 @@ interface ModelPickerViewProps {
 
 export function ModelPickerView({
   models,
+  providerErrors,
   activeModel,
   activeProviderId,
   onSelect,
@@ -254,8 +260,26 @@ export function ModelPickerView({
       </div>
 
       <div className="model-picker-list">
+        {providerErrors.length > 0 ? (
+          <div className="model-picker-errors">
+            {providerErrors.map((err) => (
+              <div key={err.providerId} className="model-picker-error">
+                <span className="model-picker-error-provider">
+                  {err.providerName}
+                </span>
+                <span className="model-picker-error-message">
+                  {err.message}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
         {sorted.length === 0 ? (
-          <div className="sessions-empty">No models match.</div>
+          <div className="sessions-empty">
+            {providerErrors.length > 0
+              ? 'No models available from reachable providers.'
+              : 'No models match.'}
+          </div>
         ) : byProvider ? (
           groups.map((group) => (
             <div key={group.providerId} className="model-group">

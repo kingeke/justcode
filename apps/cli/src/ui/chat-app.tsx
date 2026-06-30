@@ -141,8 +141,8 @@ interface ChatAppProps {
   onModelChange?: (modelId: string, providerId: string) => void;
   initialThinkingCollapsed?: boolean;
   onThinkingCollapsedChange?: (collapsed: boolean) => void;
-  initialAutoApplyWrites?: boolean;
-  onAutoApplyWritesChange?: (autoApply: boolean) => void;
+  initialAutoApprove?: boolean;
+  onAutoApproveChange?: (autoApply: boolean) => void;
   initialLocalModelAutoRefresh?: boolean;
   onLocalModelAutoRefreshChange?: (enabled: boolean) => void;
   initialExpandTools?: boolean;
@@ -265,7 +265,7 @@ function commandLineContent(
   isSelected: boolean,
   state: {
     thinkingCollapsed: boolean;
-    autoApplyWrites: boolean;
+    autoApprove: boolean;
     localModelAutoRefresh: boolean;
     expandTools: boolean;
     maxReadLines: number;
@@ -290,11 +290,11 @@ function commandLineContent(
       : cmd.description;
   chunks.push(tc(description, { fg: MUTED }));
 
-  if (cmd.name === CommandName.AutoWrites) {
+  if (cmd.name === CommandName.AutoApprove) {
     chunks.push(
       tc('  '),
-      tc(`[${state.autoApplyWrites ? 'on' : 'off'}]`, {
-        fg: state.autoApplyWrites ? 'green' : 'yellow',
+      tc(`[${state.autoApprove ? 'on' : 'off'}]`, {
+        fg: state.autoApprove ? 'green' : 'yellow',
       })
     );
   } else if (cmd.name === CommandName.LocalRefresh) {
@@ -665,10 +665,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const [thinkingCollapsed, setThinkingCollapsed] = useState(
     props.initialThinkingCollapsed ?? false
   );
-  const [autoApplyWrites, setAutoApplyWrites] = useState(
-    props.initialAutoApplyWrites ?? false
+  const [autoApprove, setAutoApprove] = useState(
+    props.initialAutoApprove ?? false
   );
-  const autoApplyWritesRef = useRef(props.initialAutoApplyWrites ?? false);
+  const autoApproveRef = useRef(props.initialAutoApprove ?? false);
   const [localModelAutoRefresh, setLocalModelAutoRefresh] = useState(
     props.initialLocalModelAutoRefresh ?? true
   );
@@ -1499,9 +1499,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
   const resolveApproval = (approved: boolean, always: boolean): void => {
     if (always) {
-      setAutoApplyWrites(true);
-      autoApplyWritesRef.current = true;
-      props.onAutoApplyWritesChange?.(true);
+      setAutoApprove(true);
+      autoApproveRef.current = true;
+      props.onAutoApproveChange?.(true);
     }
     setPendingApproval((current) => {
       current?.resolve(approved);
@@ -1626,12 +1626,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         return;
       }
 
-      case CommandName.AutoWrites: {
-        const next = !autoApplyWritesRef.current;
-        setAutoApplyWrites(next);
-        autoApplyWritesRef.current = next;
-        props.onAutoApplyWritesChange?.(next);
-        setStatus(next ? 'Auto-applying writes' : 'Confirming each write');
+      case CommandName.AutoApprove: {
+        const next = !autoApproveRef.current;
+        setAutoApprove(next);
+        autoApproveRef.current = next;
+        props.onAutoApproveChange?.(next);
+        setStatus(next ? 'Auto-approving all actions' : 'Confirming each action');
         return;
       }
 
@@ -1869,7 +1869,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     const requestApproval = (
       request: ToolApprovalRequest
     ): Promise<boolean> => {
-      if (autoApplyWritesRef.current) return Promise.resolve(true);
+      if (autoApproveRef.current) return Promise.resolve(true);
       return new Promise<boolean>((resolve) => {
         setStatus('Awaiting approval...');
         setPendingApproval({ request, resolve });
@@ -2664,7 +2664,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     commandWindowStart + index === selectedCommandIndex,
                     {
                       thinkingCollapsed,
-                      autoApplyWrites,
+                      autoApprove,
                       localModelAutoRefresh,
                       expandTools,
                       maxReadLines,

@@ -37,6 +37,14 @@ export function TrashIcon({ size = 16 }: IconProps): React.JSX.Element {
   );
 }
 
+export function PencilIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M4 20h4l10-10a2 2 0 0 0-4-4L4 16v4zM13.5 6.5l4 4" />
+    </svg>
+  );
+}
+
 export function CodeIcon({ size = 16 }: IconProps): React.JSX.Element {
   return (
     <svg {...svgProps(size)} aria-hidden="true">

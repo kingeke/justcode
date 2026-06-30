@@ -22,8 +22,8 @@ export interface GlobalConfig {
     string,
     Record<string, ReasoningEffort | 'off' | undefined> | undefined
   >;
-  /** When true, file-writing tools run without per-call confirmation. */
-  autoApplyWrites?: boolean;
+  /** When true, all tool actions run without per-call confirmation. */
+  autoApprove?: boolean;
   /**
    * When true (the default), local providers (Ollama/LM Studio) refetch their
    * model list on every load so newly pulled models appear immediately. When
@@ -46,7 +46,16 @@ export async function readGlobalConfig(
 ): Promise<GlobalConfig> {
   try {
     const raw = await readFile(join(configDirectory, 'config.json'), 'utf8');
-    return JSON.parse(raw) as GlobalConfig;
+    const parsed = JSON.parse(raw) as GlobalConfig & {
+      autoApplyWrites?: boolean;
+    };
+    // Migrate the pre-rename key: `autoApplyWrites` became `autoApprove` once
+    // the toggle started gating every tool action, not just file writes.
+    if (parsed.autoApplyWrites !== undefined && parsed.autoApprove === undefined) {
+      parsed.autoApprove = parsed.autoApplyWrites;
+    }
+    delete parsed.autoApplyWrites;
+    return parsed;
   } catch {
     return {};
   }

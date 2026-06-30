@@ -249,7 +249,7 @@ async function runChat(options: SharedOptions): Promise<void> {
         void writeGlobalConfig(appConfig.configDirectory, currentConfig);
       },
       initialThinkingCollapsed: savedConfig.thinkingCollapsed ?? false,
-      initialAutoApplyWrites: savedConfig.autoApplyWrites ?? false,
+      initialAutoApprove: savedConfig.autoApprove ?? false,
       initialLocalModelAutoRefresh: savedConfig.localModelAutoRefresh ?? true,
       initialExpandTools: savedConfig.expandTools ?? true,
       initialMaxReadLines:
@@ -265,8 +265,8 @@ async function runChat(options: SharedOptions): Promise<void> {
       onThinkingCollapsedChange: (collapsed: boolean) => {
         persistConfig({ thinkingCollapsed: collapsed });
       },
-      onAutoApplyWritesChange: (autoApply: boolean) => {
-        persistConfig({ autoApplyWrites: autoApply });
+      onAutoApproveChange: (autoApply: boolean) => {
+        persistConfig({ autoApprove: autoApply });
       },
       onLocalModelAutoRefreshChange: (enabled: boolean) => {
         runtime.setLocalModelAutoRefresh(enabled);
