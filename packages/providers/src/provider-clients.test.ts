@@ -8,6 +8,18 @@ import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
 import { OllamaProvider } from '@providers/ollama/ollama-provider';
 import { OpenRouterProvider } from '@providers/openrouter/openrouter-provider';
 import { ProviderId } from '@core/ports/provider-catalog';
+import { ReasoningEffort } from '@core/ports/chat-model';
+import type { ChatMessage } from '@core/domain/message';
+
+function userMessage(content: string): ChatMessage {
+  return { id: 'm1', role: 'user', content, createdAt: '2026-01-01T00:00:00Z' };
+}
+
+/** The JSON request body the fetch mock was called with. */
+function sentBody(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknown> {
+  const init = fetchMock.mock.calls.at(-1)?.[1] as { body?: string };
+  return JSON.parse(init?.body ?? '{}') as Record<string, unknown>;
+}
 
 function createJsonResponse(payload: unknown): Response {
   return new Response(JSON.stringify(payload), {
@@ -75,6 +87,62 @@ describe('provider clients', () => {
         providerId: ProviderId.LmStudio,
       },
     ]);
+  });
+
+  it('advertises mandatory reasoning for gpt-oss but not plain models', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      createJsonResponse({
+        data: [{ id: 'gpt-oss:20b' }, { id: 'llama3.1:8b' }],
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const models = await new OllamaProvider(
+      'http://127.0.0.1:11434'
+    ).listModels();
+
+    expect(models.find((m) => m.id === 'gpt-oss:20b')?.reasoning).toEqual({
+      effortLevels: [
+        ReasoningEffort.Low,
+        ReasoningEffort.Medium,
+        ReasoningEffort.High,
+      ],
+      mandatory: true,
+      defaultEffort: ReasoningEffort.Medium,
+    });
+    expect(
+      models.find((m) => m.id === 'llama3.1:8b')?.reasoning
+    ).toBeUndefined();
+  });
+
+  it('sends reasoning_effort for a chosen level', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      createJsonResponse({ choices: [{ message: { content: 'hi' } }] })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new OllamaProvider('http://127.0.0.1:11434').sendChat({
+      model: 'gpt-oss:20b',
+      messages: [userMessage('hello')],
+      reasoningEffort: ReasoningEffort.High,
+    });
+
+    expect(sentBody(fetchMock).reasoning_effort).toBe('high');
+  });
+
+  it("sends reasoning_effort 'none' when the choice is off", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      createJsonResponse({ choices: [{ message: { content: 'hi' } }] })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new OllamaProvider('http://127.0.0.1:11434').sendChat({
+      model: 'some-local-model',
+      messages: [userMessage('hello')],
+      reasoningEffort: 'off',
+    });
+
+    expect(sentBody(fetchMock).reasoning_effort).toBe('none');
   });
 
   it('lists OpenRouter models from the catalog', async () => {

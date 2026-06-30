@@ -22,7 +22,7 @@ import {
   type RawOpenAiToolCall,
 } from '@providers/openai-compatible/openai-wire';
 import { sendResponsesRequest } from '@providers/openai/openai-responses-client';
-import { supportsReasoningEffort } from '@providers/http/reasoning';
+import { openAiReasoningCapability } from '@providers/http/reasoning';
 
 interface OpenAiCompatibleProviderOptions {
   providerId: ProviderId;
@@ -146,14 +146,7 @@ export class OpenAiCompatibleProvider implements ProviderClient {
   private async sendChatCompletions(request: ChatRequest): Promise<ChatResult> {
     const messages = toOpenAiWireMessages(request.messages);
     const tools = toOpenAiToolDefinitions(request.tools);
-    // Only reasoning-capable models accept `reasoning_effort`; sending it to a
-    // plain chat model 400s, so gate on the model id and omit otherwise.
-    const reasoningParam: { reasoning_effort?: ReasoningEffort } =
-      request.reasoningEffort &&
-      request.reasoningEffort !== 'off' &&
-      supportsReasoningEffort(request.model)
-        ? { reasoning_effort: request.reasoningEffort }
-        : {};
+    const reasoningParam = toReasoningParam(request);
 
     if (request.onToken) {
       let accumulated = '';
@@ -279,11 +272,18 @@ export class OpenAiCompatibleProvider implements ProviderClient {
     }
 
     return (response.data ?? [])
-      .map((model) => ({
-        id: model.id,
-        displayName: model.id,
-        providerId: this.providerId,
-      }))
+      .map((model) => {
+        // Advertise reasoning for models that accept `reasoning_effort` (o-series,
+        // GPT-5, gpt-oss) so the picker appears without the user hand-editing the
+        // models cache. Other models get no reasoning capability.
+        const reasoning = openAiReasoningCapability(model.id);
+        return {
+          id: model.id,
+          displayName: model.id,
+          providerId: this.providerId,
+          ...(reasoning ? { reasoning } : {}),
+        };
+      })
       .sort((left, right) => left.id.localeCompare(right.id));
   }
 
@@ -302,6 +302,23 @@ export class OpenAiCompatibleProvider implements ProviderClient {
 
     return headers;
   }
+}
+
+/**
+ * Translates the request's normalized reasoning choice into the OpenAI wire
+ * field. A concrete effort is only ever set for models that advertise reasoning
+ * (the picker is gated on that), so there's no need to re-check the model id
+ * here. `'off'` is sent as the explicit `'none'` level so a model that reasons by
+ * default is actually disabled, rather than silently falling back to its default.
+ */
+function toReasoningParam(request: ChatRequest): {
+  reasoning_effort?: ReasoningEffort | 'none';
+} {
+  if (!request.reasoningEffort) return {};
+  return {
+    reasoning_effort:
+      request.reasoningEffort === 'off' ? 'none' : request.reasoningEffort,
+  };
 }
 
 /**

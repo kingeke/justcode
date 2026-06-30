@@ -1,4 +1,4 @@
-import { ReasoningEffort } from '@core/ports/chat-model';
+import { ReasoningEffort, type ModelReasoning } from '@core/ports/chat-model';
 
 /**
  * Shared translation of the normalized {@link ReasoningEffort} into each
@@ -17,6 +17,27 @@ const OPENAI_REASONING_MODEL = /(^|[/:])(o[1345]\b|gpt-5|gpt-oss)/i;
 
 export function supportsReasoningEffort(model: string): boolean {
   return OPENAI_REASONING_MODEL.test(model);
+}
+
+/**
+ * Reasoning capability to advertise for an OpenAI-compatible model that accepts
+ * `reasoning_effort` (o-series, GPT-5, gpt-oss). These models always reason, so
+ * effort is mandatory — the picker offers low/medium/high but no "off". Returns
+ * undefined for models that don't reason, leaving them without a picker.
+ */
+export function openAiReasoningCapability(
+  model: string
+): ModelReasoning | undefined {
+  if (!supportsReasoningEffort(model)) return undefined;
+  return {
+    effortLevels: [
+      ReasoningEffort.Low,
+      ReasoningEffort.Medium,
+      ReasoningEffort.High,
+    ],
+    mandatory: true,
+    defaultEffort: ReasoningEffort.Medium,
+  };
 }
 
 /**

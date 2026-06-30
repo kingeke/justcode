@@ -118,9 +118,12 @@ export function Composer(props: ComposerProps): React.JSX.Element {
       ]
     : undefined;
   const defaultEffort = reasoning?.defaultEffort ?? reasoningLevels[0];
-  // What's in effect now: the stored choice, or the model default when unset.
+  // What's in effect now: the stored choice, or the model default when unset. A
+  // mandatory model ignores a stale "off" (it always reasons), matching the host.
+  const usableStored =
+    reasoning?.mandatory && storedEffort === 'off' ? undefined : storedEffort;
   const effectiveEffort: WebviewReasoningChoice =
-    storedEffort ?? defaultEffort ?? 'off';
+    usableStored ?? defaultEffort ?? 'off';
   // Mandatory models always reason, so "off" isn't offered; optional ones lead
   // with it (mirrors the CLI's reasoning picker).
   const reasoningChoices: WebviewReasoningChoice[] = reasoning?.mandatory

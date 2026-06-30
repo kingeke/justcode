@@ -5,8 +5,12 @@ import { PlusIcon } from '@ext/webview/components/Icons';
 
 // ── Sort ─────────────────────────────────────────────────────────────────────
 
-type SortMode = 'provider' | 'input-cost' | 'output-cost' | 'context-window';
-type SortDir = 'asc' | 'desc';
+export type SortMode =
+  | 'provider'
+  | 'input-cost'
+  | 'output-cost'
+  | 'context-window';
+export type SortDir = 'asc' | 'desc';
 
 const SORT_MODES: SortMode[] = [
   'provider',
@@ -21,17 +25,24 @@ const SORT_LABELS: Record<SortMode, string> = {
   'context-window': 'Context',
 };
 
-function nextSort(
-  mode: SortMode,
+/**
+ * Compares two numeric sort keys, always ordering a missing value (e.g. local
+ * models that report no context window or price) last regardless of direction —
+ * otherwise they'd bunch at the top of a descending sort instead of being
+ * pushed out of the way.
+ */
+function compareNumeric(
+  a: number | undefined,
+  b: number | undefined,
   dir: SortDir
-): { mode: SortMode; dir: SortDir } {
-  if (dir === 'asc') return { mode, dir: 'desc' };
-  const idx = SORT_MODES.indexOf(mode);
-  const nextMode = SORT_MODES[(idx + 1) % SORT_MODES.length]!;
-  return { mode: nextMode, dir: 'asc' };
+): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return dir === 'asc' ? a - b : b - a;
 }
 
-function sortModels(
+export function sortModels(
   models: WebviewModel[],
   mode: SortMode,
   dir: SortDir
@@ -42,14 +53,10 @@ function sortModels(
       return dir === 'asc' ? cmp : -cmp;
     }
     if (mode === 'context-window') {
-      const av = a.contextWindow ?? (dir === 'asc' ? -Infinity : Infinity);
-      const bv = b.contextWindow ?? (dir === 'asc' ? -Infinity : Infinity);
-      return dir === 'asc' ? av - bv : bv - av;
+      return compareNumeric(a.contextWindow, b.contextWindow, dir);
     }
     const key = mode === 'input-cost' ? 'inputCostPerM' : 'outputCostPerM';
-    const av = a[key] ?? (dir === 'asc' ? Infinity : -Infinity);
-    const bv = b[key] ?? (dir === 'asc' ? Infinity : -Infinity);
-    return dir === 'asc' ? av - bv : bv - av;
+    return compareNumeric(a[key], b[key], dir);
   });
 }
 
@@ -148,10 +155,15 @@ export function ModelPickerView({
     }
   }
 
-  const cycleSort = (): void => {
-    const next = nextSort(sortMode, sortDir);
-    setSortMode(next.mode);
-    setSortDir(next.dir);
+  // Clicking the active sort flips its direction; clicking another switches to
+  // it ascending. Only one mode is ever active.
+  const onSortClick = (mode: SortMode): void => {
+    if (mode === sortMode) {
+      setSortDir((dir) => (dir === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortMode(mode);
+      setSortDir('asc');
+    }
   };
 
   return (
@@ -194,14 +206,26 @@ export function ModelPickerView({
 
       <div className="model-picker-sort-bar">
         <span className="model-sort-label">Sort:</span>
-        <button
-          type="button"
-          className="model-sort-btn"
-          title="Cycle sort mode"
-          onClick={cycleSort}
-        >
-          {SORT_LABELS[sortMode]} {sortDir === 'asc' ? '↑' : '↓'}
-        </button>
+        {SORT_MODES.map((mode) => {
+          const active = mode === sortMode;
+          return (
+            <button
+              key={mode}
+              type="button"
+              className={`model-sort-btn ${active ? 'model-sort-btn-active' : ''}`}
+              title={
+                active
+                  ? `Sorted by ${SORT_LABELS[mode].toLowerCase()} — click to reverse`
+                  : `Sort by ${SORT_LABELS[mode].toLowerCase()}`
+              }
+              aria-pressed={active}
+              onClick={() => onSortClick(mode)}
+            >
+              {SORT_LABELS[mode]}
+              {active ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+            </button>
+          );
+        })}
       </div>
 
       <div className="model-picker-list">

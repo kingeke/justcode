@@ -253,7 +253,9 @@ function effectiveEffort(
   stored: ReasoningEffort | 'off' | undefined
 ): ReasoningEffort | 'off' | undefined {
   if (!reasoning) return undefined;
-  if (stored) return stored;
+  // A mandatory model always reasons, so a stale "off" (no longer offered by the
+  // picker) can't disable it — fall back to the default effort instead.
+  if (stored && !(reasoning.mandatory && stored === 'off')) return stored;
   return reasoning.defaultEffort ?? reasoning.effortLevels[0];
 }
 

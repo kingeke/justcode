@@ -891,6 +891,13 @@ textarea:focus {
   background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15));
 }
 
+.model-sort-btn-active {
+  border-color: var(--vscode-focusBorder, #3794ff);
+  background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15));
+  color: var(--vscode-textLink-foreground, #3794ff);
+  font-weight: 600;
+}
+
 .model-group-header {
   padding: 8px 12px 2px;
   font-size: 11px;
