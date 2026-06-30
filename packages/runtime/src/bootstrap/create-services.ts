@@ -34,6 +34,7 @@ import {
   type McpServerLoadInfo,
 } from '@runtime/mcp/load-mcp-tools';
 import { readMcpConfig } from '@runtime/mcp/mcp-config';
+import { MCP_TOOL_PREFIX } from '@runtime/mcp/mcp-tool';
 import { ProviderRegistry } from '@runtime/bootstrap/provider-registry';
 import { NullProvider } from '@runtime/bootstrap/null-provider';
 import { loadAppConfig } from '@runtime/config/app-config';
@@ -108,6 +109,15 @@ export interface RuntimeServices {
    * after the user saves `mcp.json`).
    */
   mcpReady: Promise<McpServerLoadInfo[]>;
+  /**
+   * Reconnects MCP servers in place after the user edits `mcp.json`: the old
+   * server processes are killed, their tools dropped from the live registry and
+   * catalog, and the new config's servers connected and folded in. Resolves with
+   * each server's outcome. Crucially it does NOT rebuild the runtime, so the
+   * active chat session — and the host's transcript/stats — are untouched.
+   * `manageableTools` is mutated in place; re-read it after this resolves.
+   */
+  reloadMcp: () => Promise<McpServerLoadInfo[]>;
 }
 
 export interface CreateRuntimeOptions {
@@ -226,32 +236,68 @@ export async function createRuntimeServices(
     ]
   );
 
+  // Holds the teardown for whatever MCP clients are currently connected, swapped
+  // each (re)load so the previous batch's processes are always killed first.
+  let disposeMcpClients: () => void = () => {};
+
+  // Reads `mcp.json`, connects its servers, and folds their tools into the live
+  // registry and catalog (both mutated in place so existing references — the
+  // chat session's registry, the host's manageableTools — pick the tools up).
+  // Shared by the initial background load and by `reloadMcp`.
+  const loadAndRegisterMcp = async (): Promise<McpServerLoadInfo[]> => {
+    const mcp = await loadMcpTools(config.configDirectory);
+    disposeMcpClients = mcp.dispose;
+    toolRegistry.add(mcp.tools);
+    for (const tool of mcp.tools) {
+      definitionsByName.set(tool.definition.name, tool.definition);
+    }
+    for (const display of mcp.displays) {
+      manageableTools.push(...toManageable(display));
+    }
+    return mcp.servers;
+  };
+
+  // Drops the previously loaded MCP tools from the registry and catalog so a
+  // reload reflects removals (and never duplicates a still-present server).
+  const clearMcp = (): void => {
+    disposeMcpClients();
+    disposeMcpClients = () => {};
+    toolRegistry.removeWhere((name) => name.startsWith(MCP_TOOL_PREFIX));
+    for (const name of [...definitionsByName.keys()]) {
+      if (name.startsWith(MCP_TOOL_PREFIX)) definitionsByName.delete(name);
+    }
+    for (let i = manageableTools.length - 1; i >= 0; i -= 1) {
+      if (manageableTools[i]?.name.startsWith(MCP_TOOL_PREFIX)) {
+        manageableTools.splice(i, 1);
+      }
+    }
+  };
+
   // Connect MCP servers in the background so a slow server (e.g. a cold `npx`
   // launch) never blocks startup, the session list, or the first message. Their
   // tools are folded into the live registry and catalog when they're ready, and
   // `onMcpToolsLoaded` lets the host refresh its UI (and drop the spinner). A
   // broken or missing config yields nothing and never throws — MCP is additive.
   const configuredServers = await readMcpConfig(config.configDirectory);
-  const mcpLoading = Object.values(configuredServers).some(
+  const hasServers = Object.values(configuredServers).some(
     (server) => server.disabled !== true
   );
-  let disposeMcpClients: () => void = () => {};
-  const mcpReady: Promise<McpServerLoadInfo[]> = !mcpLoading
+  // Live loading flag (not a snapshot): a host reads it through the `mcpLoading`
+  // getter below, so a `sendReady` that fires *after* the load already finished
+  // sees `false` and doesn't re-raise the spinner that nothing would clear.
+  const mcpState = { loading: hasServers };
+  const mcpReady: Promise<McpServerLoadInfo[]> = !hasServers
     ? Promise.resolve([])
-    : loadMcpTools(config.configDirectory)
-        .then((mcp) => {
-          disposeMcpClients = mcp.dispose;
-          toolRegistry.add(mcp.tools);
-          for (const tool of mcp.tools) {
-            definitionsByName.set(tool.definition.name, tool.definition);
-          }
-          for (const display of mcp.displays) {
-            manageableTools.push(...toManageable(display));
-          }
+    : loadAndRegisterMcp()
+        .then((servers) => {
+          mcpState.loading = false;
           options.onMcpToolsLoaded?.([...manageableTools]);
-          return mcp.servers;
+          return servers;
         })
-        .catch(() => []);
+        .catch(() => {
+          mcpState.loading = false;
+          return [];
+        });
   const allProviders = createAllProviders(config, registry);
 
   return {
@@ -298,8 +344,19 @@ export async function createRuntimeServices(
       currentFile.path = path;
     },
     disposeMcp: () => disposeMcpClients(),
-    mcpLoading,
+    get mcpLoading() {
+      return mcpState.loading;
+    },
     mcpReady,
+    reloadMcp: async () => {
+      mcpState.loading = true;
+      clearMcp();
+      try {
+        return await loadAndRegisterMcp();
+      } finally {
+        mcpState.loading = false;
+      }
+    },
   };
 }
 

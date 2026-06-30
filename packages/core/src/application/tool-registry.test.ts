@@ -61,6 +61,26 @@ describe('ToolRegistry', () => {
     ]);
   });
 
+  it('removes tools matching a predicate, leaving the rest', () => {
+    const mcpTool: Tool = {
+      requiresApproval: true,
+      definition: {
+        name: 'mcp__srv__do',
+        description: 'mcp',
+        parameters: { type: 'object' },
+      },
+      describe: () => ({ title: 'mcp' }),
+      execute: async () => ({ content: 'ok' }),
+    };
+    const registry = new ToolRegistry([fakeTool, mcpTool]);
+
+    registry.removeWhere((name) => name.startsWith('mcp__'));
+
+    expect(registry.get('mcp__srv__do')).toBeUndefined();
+    expect(registry.get('noop')).toBe(fakeTool);
+    expect(registry.list()).toEqual([fakeTool]);
+  });
+
   it('can advertise a different tool definition set than the executable tools', () => {
     const registry = new ToolRegistry(
       [fakeTool],

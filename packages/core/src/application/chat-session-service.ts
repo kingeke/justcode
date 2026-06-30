@@ -286,25 +286,27 @@ export class ChatSessionService {
     );
 
     const initialToolDefinitions = this.toolRegistry?.definitions() ?? [];
+    // Every tool, gateway included. Advertised once the toolset is loaded in lazy
+    // mode. The `lazy_load_tools` gateway is intentionally kept in the set even
+    // after it's been called: re-advertising it lets the model call it again to
+    // pull a refreshed list (e.g. MCP tools that finished connecting mid-session),
+    // and keeping it present every turn is far simpler to reason about than
+    // dropping it once and never again.
     const fullToolDefinitions =
       this.toolRegistry?.list().map((tool) => tool.definition) ?? [];
-    // The full real toolset minus the `lazy_load_tools` gateway. Used when lazy
-    // loading is off: every tool is already advertised, so the gateway would
-    // just be a dead no-op the model could waste a call on.
+    // The full toolset minus the gateway. Used when lazy loading is off: every
+    // tool is already advertised, so the gateway would just be a dead no-op.
     const eagerToolDefinitions = fullToolDefinitions.filter(
       (definition) => definition.name !== ToolName.LazyLoadTools
     );
     const projectInstructions = await this.loadProjectInstructions();
     // `lazy_load_tools` is a one-way gate per session: once the model has called
     // it, the real tool set stays loaded for every later turn instead of
-    // collapsing back to the gateway and forcing it to re-load. The gateway
-    // itself is dropped from that set — it has done its job, so re-advertising
-    // it would just waste tokens and let the model call a now-useless no-op.
+    // collapsing back to the gateway-only view and forcing it to re-load.
     const toolsLoaded = hasLoadedTools(input.conversation.messages);
     // With lazy loading off, advertise every real tool from the first turn (no
-    // gateway). With it on: the gateway is advertised on every request until the
-    // model calls it; once it does, the real tool set (gateway excluded) stays
-    // loaded for the rest of the session.
+    // gateway). With it on: only the gateway is advertised until the model calls
+    // it; once it does, the full set (gateway still included) stays advertised.
     const lazyToolLoadingEnabled = this.getLazyToolLoadingEnabled();
     // Drop any tool the user has turned off so the model never sees it (and, in
     // lazy mode, can't load it). Applied both here and when the gateway swaps in
@@ -325,7 +327,7 @@ export class ChatSessionService {
       !lazyToolLoadingEnabled
         ? eagerToolDefinitions
         : toolsLoaded
-          ? eagerToolDefinitions
+          ? fullToolDefinitions
           : initialToolDefinitions
     );
     let toolsEnabled =
@@ -468,10 +470,10 @@ export class ChatSessionService {
         );
 
         if (call.name === ToolName.LazyLoadTools) {
-          // Swap in the real tools for the rest of the turn — minus the gateway
-          // itself, which has served its purpose and shouldn't be re-advertised,
-          // and minus any tool the user has turned off.
-          toolDefinitions = withoutDisabledTools(eagerToolDefinitions);
+          // Swap in the full toolset for the rest of the turn (minus any tool the
+          // user has turned off). The gateway stays in the set so the model can
+          // call it again later for a refreshed list.
+          toolDefinitions = withoutDisabledTools(fullToolDefinitions);
           toolsEnabled =
             toolDefinitions.length > 0 &&
             !this.toolUnsupportedModels.has(input.model);

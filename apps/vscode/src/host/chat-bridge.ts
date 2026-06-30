@@ -1520,16 +1520,35 @@ export class ChatBridge {
    * Settings page can report what connected and what failed.
    */
   public async reloadMcp(): Promise<McpServerLoadInfo[]> {
-    // Drop the cached services so the next build reconnects MCP from the new
-    // config; kill the old server processes first so they don't linger.
-    this.services?.disposeMcp();
-    this.services = undefined;
-    // sendReady rebuilds services and re-renders the chat view with the spinner
-    // on; MCP then connects in the background. Wait for that to finish here so
-    // the Settings page can report the per-server outcome. The onMcpToolsLoaded
-    // callback (wired in ensureServices) refreshes the manage-tools popup.
-    await this.sendReady();
-    return (await this.services?.mcpReady) ?? [];
+    const services = await this.ensureServices();
+    // Reconnect MCP *in place* — without rebuilding the runtime or re-sending a
+    // full Ready snapshot, which would reset the webview's transcript and stats.
+    // Show the spinner, reconnect, then push just the refreshed tool catalog.
+    this.mcpLoading = true;
+    this.post({
+      type: HostMessageType.McpStatus,
+      loading: true,
+      manageableTools: this.manageableTools,
+      disabledTools: this.disabledTools,
+    });
+
+    const summary = await services.reloadMcp();
+
+    this.manageableTools = services.manageableTools.map((tool) => ({
+      name: tool.name,
+      label: tool.label,
+      category: tool.category,
+      summary: tool.summary,
+    }));
+    services.setDisabledTools(this.disabledTools);
+    this.mcpLoading = false;
+    this.post({
+      type: HostMessageType.McpStatus,
+      loading: false,
+      manageableTools: this.manageableTools,
+      disabledTools: this.disabledTools,
+    });
+    return summary;
   }
 
   private async resetSession(): Promise<void> {

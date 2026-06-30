@@ -36,6 +36,18 @@ export class ToolRegistry {
     }
   }
 
+  /**
+   * Removes every executable tool whose name matches the predicate. Used to drop
+   * a previous batch of MCP tools before reconnecting servers, so a removed
+   * server's tools don't linger. The advertised set is left untouched (MCP tools
+   * are never advertised eagerly — they're added via {@link add}).
+   */
+  public removeWhere(predicate: (name: string) => boolean): void {
+    for (const name of [...this.byName.keys()]) {
+      if (predicate(name)) this.byName.delete(name);
+    }
+  }
+
   public list(): Tool[] {
     return [...this.byName.values()];
   }
