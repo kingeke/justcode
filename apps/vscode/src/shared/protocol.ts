@@ -21,6 +21,8 @@ export enum HostMessageType {
   UsageUpdate = 'usageUpdate',
   TurnComplete = 'turnComplete',
   ModelsUpdate = 'modelsUpdate',
+  /** MCP servers finished connecting in the background; refresh tools + spinner. */
+  McpStatus = 'mcpStatus',
   FileReverted = 'fileReverted',
   SteeringConsumed = 'steeringConsumed',
   WorkspaceFiles = 'workspaceFiles',
@@ -300,6 +302,12 @@ export interface ReadyMessage {
   /** Names of tools the user has turned off; empty means all enabled. */
   disabledTools: string[];
   /**
+   * Whether MCP servers are still connecting in the background. While true the
+   * UI shows a "loading MCP servers" spinner; an McpStatus message clears it and
+   * delivers the MCP tools once they're ready.
+   */
+  mcpLoading: boolean;
+  /**
    * The user's chosen reasoning effort per model, nested by provider id, e.g.
    * `{ openrouter: { "openai/gpt-5": "high" } }`. A model absent from the map
    * uses its default effort; the sentinel `'off'` disables reasoning for a model
@@ -412,6 +420,21 @@ export interface ModelsUpdateMessage {
 }
 
 /**
+ * Sent when MCP servers finish connecting in the background, after a
+ * {@link ReadyMessage} reported `mcpLoading: true`. Carries the refreshed tool
+ * catalog (built-ins + the now-loaded MCP tools) and clears the spinner.
+ */
+export interface McpStatusMessage {
+  type: HostMessageType.McpStatus;
+  /** Whether MCP is still loading. False once the background connect finishes. */
+  loading: boolean;
+  /** The full toggleable-tool catalog, including MCP tools once loaded. */
+  manageableTools: WebviewTool[];
+  /** Names of tools the user has turned off; empty means all enabled. */
+  disabledTools: string[];
+}
+
+/**
  * Result of a webview-requested file revert. `ok` is false when the file
  * couldn't be restored (e.g. it moved or permissions changed); the panel then
  * keeps the row and surfaces `message`.
@@ -464,6 +487,7 @@ export interface FileSymbolsMessage {
 export type HostToWebview =
   | ReadyMessage
   | ModelsUpdateMessage
+  | McpStatusMessage
   | SessionsListMessage
   | TitleUpdateMessage
   | TokenMessage

@@ -115,6 +115,8 @@ export interface ComposerProps {
   onSetDisabledTools: (names: string[]) => void;
   /** Open `mcp.json` to add or edit MCP servers. */
   onOpenMcpConfig: () => void;
+  /** Whether MCP servers are still connecting (shows a spinner on the tools button). */
+  mcpLoading: boolean;
 }
 
 /**
@@ -692,7 +694,19 @@ export function Composer(props: ComposerProps): React.JSX.Element {
               {showTools ? (
                 <div className="settings-popup tools-popup">
                   <div className="settings-popup-section tools-scroll">
-                    <div className="settings-popup-heading">Tools</div>
+                    <div className="settings-popup-heading tools-heading">
+                      <span>Tools</span>
+                      {props.mcpLoading ? (
+                        <span className="tools-loading">
+                          <span
+                            className="composer-spinner"
+                            role="status"
+                            aria-label="Loading MCP servers"
+                          />
+                          Loading MCP servers…
+                        </span>
+                      ) : null}
+                    </div>
                     {props.manageableTools.length === 0 ? (
                       <div className="settings-popup-row">
                         <span className="settings-popup-label">
@@ -788,10 +802,22 @@ export function Composer(props: ComposerProps): React.JSX.Element {
               <button
                 type="button"
                 className={`icon-btn ${showTools ? 'icon-btn-active' : ''}`}
-                title="Manage tools"
+                title={
+                  props.mcpLoading
+                    ? 'Manage tools (loading MCP servers…)'
+                    : 'Manage tools'
+                }
                 onClick={() => setShowTools((s) => !s)}
               >
-                <ToolIcon size={14} />
+                {props.mcpLoading ? (
+                  <span
+                    className="composer-spinner"
+                    role="status"
+                    aria-label="Loading MCP servers"
+                  />
+                ) : (
+                  <ToolIcon size={14} />
+                )}
               </button>
             </div>
 

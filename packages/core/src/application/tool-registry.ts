@@ -22,6 +22,20 @@ export class ToolRegistry {
       advertisedDefinitions ?? tools.map((tool) => tool.definition);
   }
 
+  /**
+   * Adds tools after construction. Used to fold in MCP server tools once they
+   * finish connecting in the background, so startup isn't blocked on them. The
+   * advertised set is intentionally left untouched: the agentic loop derives what
+   * to advertise from `list()` each turn (and, in lazy mode, only the gateway is
+   * advertised up front), so newly added tools become available on the next turn
+   * without re-advertising them eagerly.
+   */
+  public add(tools: Tool[]): void {
+    for (const tool of tools) {
+      this.byName.set(tool.definition.name, tool);
+    }
+  }
+
   public list(): Tool[] {
     return [...this.byName.values()];
   }

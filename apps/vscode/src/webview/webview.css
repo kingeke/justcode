@@ -1704,6 +1704,32 @@ textarea:focus {
   overflow-y: auto;
 }
 
+/* The "Tools" heading row, which also hosts the MCP loading indicator. */
+.tools-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tools-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 0.7;
+}
+
+.tools-loading .composer-spinner {
+  width: 10px;
+  height: 10px;
+  border-width: 1.5px;
+  margin-right: 0;
+}
+
 .tools-group {
   display: flex;
   flex-direction: column;

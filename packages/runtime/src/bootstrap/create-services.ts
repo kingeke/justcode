@@ -33,6 +33,7 @@ import {
   loadMcpTools,
   type McpServerLoadInfo,
 } from '@runtime/mcp/load-mcp-tools';
+import { readMcpConfig } from '@runtime/mcp/mcp-config';
 import { ProviderRegistry } from '@runtime/bootstrap/provider-registry';
 import { NullProvider } from '@runtime/bootstrap/null-provider';
 import { loadAppConfig } from '@runtime/config/app-config';
@@ -95,10 +96,18 @@ export interface RuntimeServices {
    */
   disposeMcp: () => void;
   /**
-   * Per-server outcome of loading `mcp.json` at startup (connected? how many
-   * tools?), so a host can show the user what loaded and what failed.
+   * Whether MCP servers are still connecting in the background at the moment this
+   * was returned. The host uses it to show a "loading MCP servers" spinner; it
+   * clears once `mcpReady` resolves (and `onMcpToolsLoaded` fires).
    */
-  mcpServers: McpServerLoadInfo[];
+  mcpLoading: boolean;
+  /**
+   * Resolves once the background MCP load finishes, with each server's outcome
+   * (connected? how many tools?). Resolves immediately with `[]` when no servers
+   * are configured. Lets a host await the result when it needs the summary (e.g.
+   * after the user saves `mcp.json`).
+   */
+  mcpReady: Promise<McpServerLoadInfo[]>;
 }
 
 export interface CreateRuntimeOptions {
@@ -116,6 +125,12 @@ export interface CreateRuntimeOptions {
    * extension) pass the active workspace folder instead.
    */
   workspaceRoot?: string;
+  /**
+   * Called once MCP servers finish connecting in the background, with the full
+   * tool catalog (built-ins + MCP). Lets a host refresh its manage-tools UI and
+   * drop the "loading MCP servers" spinner without rebuilding the runtime.
+   */
+  onMcpToolsLoaded?: (manageableTools: ManageableToolInfo[]) => void;
 }
 
 export async function createRuntimeServices(
@@ -171,42 +186,38 @@ export async function createRuntimeServices(
     new QuestionTool(),
     new ViewHistoryTool(),
   ];
-  // Launch any servers configured in `mcp.json` and fold their tools into the
-  // runtime toolset. A broken or missing config yields nothing and never throws,
-  // so MCP is purely additive — its tools sit alongside the built-ins and are
-  // toggled, lazily loaded, and advertised through the very same machinery.
-  const mcp = await loadMcpTools(config.configDirectory);
-  const runtimeTools = [...builtInTools, ...mcp.tools];
-  const lazyLoadableTools: LazyLoadableToolDefinition[] = runtimeTools.map(
+  const lazyLoadableTools: LazyLoadableToolDefinition[] = builtInTools.map(
     (tool) => ({
       ...tool.definition,
       requiresApproval: tool.requiresApproval,
     })
   );
   // The user-facing catalog: every toggleable tool in display order — built-ins
-  // first, then one group per MCP server — joined to its live description and
-  // seeded with its on/off state from the saved config.
+  // first, then one group per MCP server (appended later, when MCP finishes
+  // connecting) — joined to its live description and seeded with its on/off state
+  // from the saved config.
   const definitionsByName = new Map(
-    runtimeTools.map((tool) => [tool.definition.name, tool.definition])
+    builtInTools.map((tool) => [tool.definition.name, tool.definition])
   );
-  const toolDisplays: ToolDisplay[] = [...TOOL_DISPLAY, ...mcp.displays];
   const initialDisabled = new Set(disabledToolsSettings.names);
-  const manageableTools: ManageableToolInfo[] = toolDisplays.flatMap(
-    (display) => {
-      const definition = definitionsByName.get(display.name);
-      if (!definition) return [];
-      return [
-        {
-          ...display,
-          description: definition.description,
-          enabled: !initialDisabled.has(display.name),
-        },
-      ];
-    }
-  );
+  const toManageable = (display: ToolDisplay): ManageableToolInfo[] => {
+    const definition = definitionsByName.get(display.name);
+    if (!definition) return [];
+    return [
+      {
+        ...display,
+        description: definition.description,
+        enabled: !initialDisabled.has(display.name),
+      },
+    ];
+  };
+  // Mutated in place when MCP tools arrive, so callers holding this reference (and
+  // the host re-reading it from the load callback) see the MCP entries appear.
+  const manageableTools: ManageableToolInfo[] =
+    TOOL_DISPLAY.flatMap(toManageable);
   const lazyLoadToolsTool = new LazyLoadToolsTool(lazyLoadableTools);
   const toolRegistry = new ToolRegistry(
-    [lazyLoadToolsTool, ...runtimeTools],
+    [lazyLoadToolsTool, ...builtInTools],
     [
       {
         ...lazyLoadToolsTool.definition,
@@ -214,6 +225,33 @@ export async function createRuntimeServices(
       },
     ]
   );
+
+  // Connect MCP servers in the background so a slow server (e.g. a cold `npx`
+  // launch) never blocks startup, the session list, or the first message. Their
+  // tools are folded into the live registry and catalog when they're ready, and
+  // `onMcpToolsLoaded` lets the host refresh its UI (and drop the spinner). A
+  // broken or missing config yields nothing and never throws — MCP is additive.
+  const configuredServers = await readMcpConfig(config.configDirectory);
+  const mcpLoading = Object.values(configuredServers).some(
+    (server) => server.disabled !== true
+  );
+  let disposeMcpClients: () => void = () => {};
+  const mcpReady: Promise<McpServerLoadInfo[]> = !mcpLoading
+    ? Promise.resolve([])
+    : loadMcpTools(config.configDirectory)
+        .then((mcp) => {
+          disposeMcpClients = mcp.dispose;
+          toolRegistry.add(mcp.tools);
+          for (const tool of mcp.tools) {
+            definitionsByName.set(tool.definition.name, tool.definition);
+          }
+          for (const display of mcp.displays) {
+            manageableTools.push(...toManageable(display));
+          }
+          options.onMcpToolsLoaded?.([...manageableTools]);
+          return mcp.servers;
+        })
+        .catch(() => []);
   const allProviders = createAllProviders(config, registry);
 
   return {
@@ -259,8 +297,9 @@ export async function createRuntimeServices(
     setCurrentFile: (path: string | undefined) => {
       currentFile.path = path;
     },
-    disposeMcp: mcp.dispose,
-    mcpServers: mcp.servers,
+    disposeMcp: () => disposeMcpClients(),
+    mcpLoading,
+    mcpReady,
   };
 }
 

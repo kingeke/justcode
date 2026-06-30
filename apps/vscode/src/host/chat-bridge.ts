@@ -139,6 +139,9 @@ export class ChatBridge {
   // The toggleable tool catalog, populated from the runtime once services exist;
   // sent to the webview in every snapshot so the manage-tools popup can render.
   private manageableTools: WebviewTool[] = [];
+  // Whether MCP servers are still connecting in the background. Drives the
+  // webview's "loading MCP servers" spinner; cleared when the load callback fires.
+  private mcpLoading = false;
   // Workspace-relative path of the file open in the editor, which `@currentfile`
   // resolves to. Kept in sync by the view provider as the active editor changes;
   // re-applied to the runtime whenever services are (re)created.
@@ -347,6 +350,24 @@ export class ChatBridge {
     if (!this.services) {
       this.services = await createRuntimeServices({
         workspaceRoot: this.workspaceRoot,
+        // MCP servers connect in the background; when they're ready, refresh the
+        // tool catalog and clear the spinner without rebuilding the runtime.
+        onMcpToolsLoaded: (manageableTools) => {
+          this.mcpLoading = false;
+          this.manageableTools = manageableTools.map((tool) => ({
+            name: tool.name,
+            label: tool.label,
+            category: tool.category,
+            summary: tool.summary,
+          }));
+          this.services?.setDisabledTools(this.disabledTools);
+          this.post({
+            type: HostMessageType.McpStatus,
+            loading: false,
+            manageableTools: this.manageableTools,
+            disabledTools: this.disabledTools,
+          });
+        },
       });
     }
     return this.services;
@@ -407,6 +428,7 @@ export class ChatBridge {
         lazyToolLoading: this.lazyToolLoading,
         manageableTools: this.manageableTools,
         disabledTools: this.disabledTools,
+        mcpLoading: this.mcpLoading,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles: {},
       });
@@ -428,6 +450,9 @@ export class ChatBridge {
       category: tool.category,
       summary: tool.summary,
     }));
+    // Reflect whether MCP is still connecting so the snapshot shows the spinner;
+    // the onMcpToolsLoaded callback clears it and re-sends the catalog.
+    this.mcpLoading = services.mcpLoading;
 
     // With no configured provider the session is backed by a NullProvider whose
     // model listing is empty; surface a notice instead of letting startSession
@@ -449,6 +474,7 @@ export class ChatBridge {
         lazyToolLoading: this.lazyToolLoading,
         manageableTools: this.manageableTools,
         disabledTools: this.disabledTools,
+        mcpLoading: this.mcpLoading,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles: {},
       });
@@ -506,6 +532,7 @@ export class ChatBridge {
         lazyToolLoading: this.lazyToolLoading,
         manageableTools: this.manageableTools,
         disabledTools: this.disabledTools,
+        mcpLoading: this.mcpLoading,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles,
         ...(session.conversation.title !== undefined
@@ -563,6 +590,7 @@ export class ChatBridge {
         lazyToolLoading: this.lazyToolLoading,
         manageableTools: this.manageableTools,
         disabledTools: this.disabledTools,
+        mcpLoading: this.mcpLoading,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles,
         ...(conversation.title !== undefined
@@ -1496,10 +1524,12 @@ export class ChatBridge {
     // config; kill the old server processes first so they don't linger.
     this.services?.disposeMcp();
     this.services = undefined;
-    // sendReady rebuilds services (reconnecting MCP), recomputes the tool
-    // catalog, and re-renders the chat view's manage-tools popup in one pass.
+    // sendReady rebuilds services and re-renders the chat view with the spinner
+    // on; MCP then connects in the background. Wait for that to finish here so
+    // the Settings page can report the per-server outcome. The onMcpToolsLoaded
+    // callback (wired in ensureServices) refreshes the manage-tools popup.
     await this.sendReady();
-    return this.services?.mcpServers ?? [];
+    return (await this.services?.mcpReady) ?? [];
   }
 
   private async resetSession(): Promise<void> {
@@ -1535,6 +1565,7 @@ export class ChatBridge {
         lazyToolLoading: this.lazyToolLoading,
         manageableTools: this.manageableTools,
         disabledTools: this.disabledTools,
+        mcpLoading: this.mcpLoading,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles: {},
       });

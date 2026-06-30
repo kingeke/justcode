@@ -783,6 +783,7 @@ export function App(): React.JSX.Element {
         disabledTools={state.disabledTools}
         onSetDisabledTools={setDisabledTools}
         onOpenMcpConfig={openMcpConfig}
+        mcpLoading={state.mcpLoading}
         onToggleAutoApprove={toggleAutoApprove}
         onToggleExpandTools={toggleExpandTools}
         onToggleThinkingCollapsed={toggleThinkingCollapsed}

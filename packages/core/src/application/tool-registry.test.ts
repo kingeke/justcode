@@ -29,6 +29,38 @@ describe('ToolRegistry', () => {
     expect(new ToolRegistry().isEmpty()).toBe(true);
   });
 
+  it('adds tools after construction without changing the advertised set', () => {
+    const gatewayOnly = [
+      {
+        name: 'lazy_load_tools',
+        description: 'dispatches to tools',
+        parameters: { type: 'object' },
+        requiresApproval: false,
+      },
+    ];
+    const registry = new ToolRegistry([fakeTool], gatewayOnly);
+
+    const added: Tool = {
+      requiresApproval: true,
+      definition: {
+        name: 'mcp__srv__do',
+        description: 'an mcp tool',
+        parameters: { type: 'object' },
+      },
+      describe: () => ({ title: 'mcp' }),
+      execute: async () => ({ content: 'ok' }),
+    };
+    registry.add([added]);
+
+    // Resolvable and listed…
+    expect(registry.get('mcp__srv__do')).toBe(added);
+    expect(registry.list()).toContain(added);
+    // …but the advertised set (the lazy gateway) is left untouched.
+    expect(registry.definitions()).toEqual([
+      expect.objectContaining({ name: 'lazy_load_tools' }),
+    ]);
+  });
+
   it('can advertise a different tool definition set than the executable tools', () => {
     const registry = new ToolRegistry(
       [fakeTool],

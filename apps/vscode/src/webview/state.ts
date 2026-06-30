@@ -126,6 +126,8 @@ export interface ChatState {
   manageableTools: WebviewTool[];
   /** Names of tools the user has turned off; empty means all enabled. */
   disabledTools: string[];
+  /** Whether MCP servers are still connecting (shows a spinner in the tools UI). */
+  mcpLoading: boolean;
   /**
    * The user's chosen reasoning effort per model, nested by provider id. A model
    * absent from the map uses its default effort; `'off'` disables reasoning.
@@ -180,6 +182,7 @@ export const initialState: ChatState = {
   lazyToolLoading: true,
   manageableTools: [],
   disabledTools: [],
+  mcpLoading: false,
   reasoningEffortByModel: {},
   resolvedFiles: {},
   queuedMessages: [],
@@ -292,6 +295,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         lazyToolLoading: action.lazyToolLoading,
         manageableTools: action.manageableTools,
         disabledTools: action.disabledTools,
+        mcpLoading: action.mcpLoading,
         reasoningEffortByModel: action.reasoningEffortByModel,
         sessionTitle: action.sessionTitle,
         // Restore the resolutions saved for this session so a resumed chat keeps
@@ -300,6 +304,14 @@ export function reducer(state: ChatState, action: Action): ChatState {
         revertError: undefined,
         // A new session/snapshot drops anything that was queued.
         queuedMessages: [],
+      };
+
+    case HostMessageType.McpStatus:
+      return {
+        ...state,
+        mcpLoading: action.loading,
+        manageableTools: action.manageableTools,
+        disabledTools: action.disabledTools,
       };
 
     case HostMessageType.ModelsUpdate:
