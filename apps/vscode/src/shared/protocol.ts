@@ -46,6 +46,7 @@ export enum WebviewMessageType {
   SetHistoryLimit = 'setHistoryLimit',
   ToggleThinkingCollapsed = 'toggleThinkingCollapsed',
   ToggleLocalModelAutoRefresh = 'toggleLocalModelAutoRefresh',
+  ToggleLazyToolLoading = 'toggleLazyToolLoading',
   ListSessions = 'listSessions',
   OpenSession = 'openSession',
   DeleteSession = 'deleteSession',
@@ -278,6 +279,11 @@ export interface ReadyMessage {
    * when false they use the same once-a-day cache as remote providers.
    */
   localModelAutoRefresh: boolean;
+  /**
+   * Whether the `lazy_load_tools` gateway is on (default true). When false, the
+   * full tool set is advertised to the model from the first turn.
+   */
+  lazyToolLoading: boolean;
   /**
    * The user's chosen reasoning effort per model, nested by provider id, e.g.
    * `{ openrouter: { "openai/gpt-5": "high" } }`. A model absent from the map
@@ -594,6 +600,11 @@ export interface ToggleLocalModelAutoRefreshMessage {
   type: WebviewMessageType.ToggleLocalModelAutoRefresh;
 }
 
+/** The user toggled the `lazy_load_tools` gateway (off = all tools up front). */
+export interface ToggleLazyToolLoadingMessage {
+  type: WebviewMessageType.ToggleLazyToolLoading;
+}
+
 /**
  * The user asked to undo a file's session changes from the changes panel. The
  * host restores `oldText` (the pre-session baseline), or deletes the file when
@@ -675,6 +686,7 @@ export type WebviewToHost =
   | SetHistoryLimitMessage
   | ToggleThinkingCollapsedMessage
   | ToggleLocalModelAutoRefreshMessage
+  | ToggleLazyToolLoadingMessage
   | RevertFileMessage
   | SaveResolvedFilesMessage
   | SyncSteeringQueueMessage

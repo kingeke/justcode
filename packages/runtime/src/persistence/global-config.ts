@@ -30,6 +30,12 @@ export interface GlobalConfig {
    * false they use the same once-a-day cache as remote providers.
    */
   localModelAutoRefresh?: boolean;
+  /**
+   * When true (the default), lazy tool loading is on: the model is advertised
+   * only the `lazy_load_tools` gateway up front and loads the rest by calling
+   * it. When false, the full tool set is sent from the first turn.
+   */
+  lazyToolLoading?: boolean;
   /** When true, finished tool calls render their full input/output inline. */
   expandTools?: boolean;
   /** Tunables for how much context the agent reads and sends. */

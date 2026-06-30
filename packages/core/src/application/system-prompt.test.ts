@@ -17,10 +17,10 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('Follow the repo rules.');
   });
 
-  it('tells the model to use discover_tools only when tool use is actually needed', () => {
+  it('tells the model to use lazy_load_tools only when tool use is actually needed', () => {
     const prompt = buildSystemPrompt('Custom prompt', '/workspace/root', [
       {
-        name: 'discover_tools',
+        name: 'lazy_load_tools',
         description: 'Reveal the full toolset when needed.',
         parameters: { type: 'object' },
       },

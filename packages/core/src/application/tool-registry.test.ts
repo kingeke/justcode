@@ -34,7 +34,7 @@ describe('ToolRegistry', () => {
       [fakeTool],
       [
         {
-          name: 'discover_tools',
+          name: 'lazy_load_tools',
           description: 'dispatches to tools',
           parameters: { type: 'object' },
           requiresApproval: false,
@@ -43,7 +43,7 @@ describe('ToolRegistry', () => {
     );
 
     expect(registry.definitions()).toEqual([
-      expect.objectContaining({ name: 'discover_tools' }),
+      expect.objectContaining({ name: 'lazy_load_tools' }),
     ]);
     expect(registry.get('noop')).toBe(fakeTool);
   });

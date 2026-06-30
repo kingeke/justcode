@@ -21,9 +21,9 @@ import {
   DEFAULT_MAX_READ_LINES,
 } from '@runtime/tools/read-file-tool';
 import {
-  DiscoverToolsTool,
-  type DiscoverableToolDefinition,
-} from '@runtime/tools/discover-tools-tool';
+  LazyLoadToolsTool,
+  type LazyLoadableToolDefinition,
+} from '@runtime/tools/lazy-load-tools-tool';
 import { ProviderRegistry } from '@runtime/bootstrap/provider-registry';
 import { NullProvider } from '@runtime/bootstrap/null-provider';
 import { loadAppConfig } from '@runtime/config/app-config';
@@ -55,6 +55,13 @@ export interface RuntimeServices {
    * on the providers already created (they read the flag per `listModels` call).
    */
   setLocalModelAutoRefresh: (enabled: boolean) => void;
+  /** Whether lazy tool loading is on (off = send all tools up front). */
+  lazyToolLoading: boolean;
+  /**
+   * Toggle, at runtime, lazy tool loading. Takes effect on the next turn — the
+   * chat session reads the flag per request through its getter.
+   */
+  setLazyToolLoading: (enabled: boolean) => void;
 }
 
 export interface CreateRuntimeOptions {
@@ -102,6 +109,9 @@ export async function createRuntimeServices(
     maxHistoryMessages:
       options.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES,
   };
+  // Mutable so a runtime toggle reaches the chat session: the service reads
+  // `lazyToolLoadingSettings.enabled` per turn through the getter below.
+  const lazyToolLoadingSettings = { enabled: config.lazyToolLoading };
   const runtimeTools = [
     new WriteFileTool(workspaceFiles),
     new EditFileTool(workspaceFiles),
@@ -116,19 +126,19 @@ export async function createRuntimeServices(
     new QuestionTool(),
     new ViewHistoryTool(),
   ];
-  const discoverableTools: DiscoverableToolDefinition[] = runtimeTools.map(
+  const lazyLoadableTools: LazyLoadableToolDefinition[] = runtimeTools.map(
     (tool) => ({
       ...tool.definition,
       requiresApproval: tool.requiresApproval,
     })
   );
-  const discoverToolsTool = new DiscoverToolsTool(discoverableTools);
+  const lazyLoadToolsTool = new LazyLoadToolsTool(lazyLoadableTools);
   const toolRegistry = new ToolRegistry(
-    [discoverToolsTool, ...runtimeTools],
+    [lazyLoadToolsTool, ...runtimeTools],
     [
       {
-        ...discoverToolsTool.definition,
-        requiresApproval: discoverToolsTool.requiresApproval,
+        ...lazyLoadToolsTool.definition,
+        requiresApproval: lazyLoadToolsTool.requiresApproval,
       },
     ]
   );
@@ -144,6 +154,7 @@ export async function createRuntimeServices(
       workspaceFiles,
       systemPrompt: config.systemPrompt,
       getMaxHistoryMessages: () => historySettings.maxHistoryMessages,
+      getLazyToolLoadingEnabled: () => lazyToolLoadingSettings.enabled,
     }),
     listModelsService: new ListModelsService(provider),
     promptAttachmentService: new PromptAttachmentService(
@@ -162,6 +173,10 @@ export async function createRuntimeServices(
     localModelAutoRefresh: localRefresh.enabled,
     setLocalModelAutoRefresh: (enabled: boolean) => {
       localRefresh.enabled = enabled;
+    },
+    lazyToolLoading: lazyToolLoadingSettings.enabled,
+    setLazyToolLoading: (enabled: boolean) => {
+      lazyToolLoadingSettings.enabled = enabled;
     },
   };
 }

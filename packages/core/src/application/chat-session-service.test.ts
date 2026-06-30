@@ -15,7 +15,7 @@ import {
 import { ProviderId } from '@core/ports/provider-catalog';
 import type { ConversationRepository } from '@core/ports/conversation-repository';
 import type { Tool } from '@core/ports/tool';
-import { DiscoverToolsTool } from '@runtime/tools/discover-tools-tool';
+import { LazyLoadToolsTool } from '@runtime/tools/lazy-load-tools-tool';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 
 class InMemoryConversationRepository implements ConversationRepository {
@@ -846,10 +846,10 @@ describe('ChatSessionService', () => {
     expect(result.conversation.messages[2]?.content).toContain('rejected');
   });
 
-  it('starts with discover_tools only, then exposes full tools after discovery', async () => {
+  it('starts with lazy_load_tools only, then exposes full tools after loading', async () => {
     const repository = new InMemoryConversationRepository();
     const delegatedTool = new RecordingWriteTool();
-    const discoverTool = new DiscoverToolsTool([
+    const lazyLoadTool = new LazyLoadToolsTool([
       {
         ...delegatedTool.definition,
         requiresApproval: delegatedTool.requiresApproval,
@@ -868,7 +868,7 @@ describe('ChatSessionService', () => {
             toolCalls: [
               {
                 id: 'call-discover',
-                name: 'discover_tools',
+                name: 'lazy_load_tools',
                 arguments: '{}',
               },
             ],
@@ -899,11 +899,11 @@ describe('ChatSessionService', () => {
     };
     const service = new ChatSessionService(repository, provider, {
       toolRegistry: new ToolRegistry(
-        [discoverTool, delegatedTool],
+        [lazyLoadTool, delegatedTool],
         [
           {
-            ...discoverTool.definition,
-            requiresApproval: discoverTool.requiresApproval,
+            ...lazyLoadTool.definition,
+            requiresApproval: lazyLoadTool.requiresApproval,
           },
         ]
       ),
@@ -921,10 +921,10 @@ describe('ChatSessionService', () => {
     });
 
     expect(seenRequests[0]).toEqual([
-      expect.objectContaining({ name: 'discover_tools' }),
+      expect.objectContaining({ name: 'lazy_load_tools' }),
     ]);
     expect(seenRequests[1]?.map((tool) => tool.name)).toEqual([
-      'discover_tools',
+      'lazy_load_tools',
       'write_file',
     ]);
     expect(approvals).toEqual(['write_file']);
@@ -932,10 +932,10 @@ describe('ChatSessionService', () => {
     expect(result.reply).toBe('All done.');
   });
 
-  it('keeps the full tool set on later turns once discover_tools has run', async () => {
+  it('advertises the full tool set from the first turn when lazy loading is off', async () => {
     const repository = new InMemoryConversationRepository();
     const delegatedTool = new RecordingWriteTool();
-    const discoverTool = new DiscoverToolsTool([
+    const lazyLoadTool = new LazyLoadToolsTool([
       {
         ...delegatedTool.definition,
         requiresApproval: delegatedTool.requiresApproval,
@@ -948,12 +948,83 @@ describe('ChatSessionService', () => {
       async sendChat(request: ChatRequest): Promise<ChatResult> {
         seenRequests.push(request.tools);
         turn += 1;
-        // First turn discovers, every later turn just replies.
+        // No loading step needed: the model can call write_file immediately
+        // because every tool was advertised up front.
         if (turn === 1) {
           return {
             content: '',
             toolCalls: [
-              { id: 'call-discover', name: 'discover_tools', arguments: '{}' },
+              {
+                id: 'call-write',
+                name: 'write_file',
+                arguments: '{"path":"a.txt","content":"hi"}',
+              },
+            ],
+          };
+        }
+        return { content: 'All done.' };
+      },
+      async listModels() {
+        return [
+          { id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai },
+        ];
+      },
+      getDefaultModel() {
+        return 'gpt';
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry: new ToolRegistry(
+        [lazyLoadTool, delegatedTool],
+        [
+          {
+            ...lazyLoadTool.definition,
+            requiresApproval: lazyLoadTool.requiresApproval,
+          },
+        ]
+      ),
+      getLazyToolLoadingEnabled: () => false,
+    });
+
+    const result = await service.submitMessage({
+      conversation: createConversation('session-1'),
+      model: 'gpt',
+      content: 'create a.txt',
+      requestApproval: async () => true,
+    });
+
+    // The very first request carries the real tools — and not the now-pointless
+    // lazy_load_tools gateway, since everything is already advertised.
+    expect(seenRequests[0]?.map((tool) => tool.name)).toEqual(['write_file']);
+    expect(seenRequests[0]?.map((tool) => tool.name)).not.toContain(
+      'lazy_load_tools'
+    );
+    expect(delegatedTool.executed).toEqual(['{"path":"a.txt","content":"hi"}']);
+    expect(result.reply).toBe('All done.');
+  });
+
+  it('keeps the full tool set on later turns once lazy_load_tools has run', async () => {
+    const repository = new InMemoryConversationRepository();
+    const delegatedTool = new RecordingWriteTool();
+    const lazyLoadTool = new LazyLoadToolsTool([
+      {
+        ...delegatedTool.definition,
+        requiresApproval: delegatedTool.requiresApproval,
+      },
+    ]);
+    const seenRequests: Array<ChatRequest['tools']> = [];
+    let turn = 0;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat(request: ChatRequest): Promise<ChatResult> {
+        seenRequests.push(request.tools);
+        turn += 1;
+        // First turn loads tools, every later turn just replies.
+        if (turn === 1) {
+          return {
+            content: '',
+            toolCalls: [
+              { id: 'call-discover', name: 'lazy_load_tools', arguments: '{}' },
             ],
           };
         }
@@ -970,11 +1041,11 @@ describe('ChatSessionService', () => {
     };
     const service = new ChatSessionService(repository, provider, {
       toolRegistry: new ToolRegistry(
-        [discoverTool, delegatedTool],
+        [lazyLoadTool, delegatedTool],
         [
           {
-            ...discoverTool.definition,
-            requiresApproval: discoverTool.requiresApproval,
+            ...lazyLoadTool.definition,
+            requiresApproval: lazyLoadTool.requiresApproval,
           },
         ]
       ),
@@ -987,7 +1058,7 @@ describe('ChatSessionService', () => {
     });
 
     // Reusing the same conversation, the next turn must advertise the full set
-    // up front instead of falling back to the discovery gateway.
+    // up front instead of falling back to the lazy-loading gateway.
     await service.submitMessage({
       conversation: first.conversation,
       model: 'gpt',
@@ -996,7 +1067,7 @@ describe('ChatSessionService', () => {
 
     const followUpRequest = seenRequests[seenRequests.length - 1];
     expect(followUpRequest?.map((tool) => tool.name)).toEqual([
-      'discover_tools',
+      'lazy_load_tools',
       'write_file',
     ]);
   });

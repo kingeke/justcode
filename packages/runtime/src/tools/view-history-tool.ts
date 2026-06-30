@@ -20,7 +20,7 @@ interface ViewHistoryArguments {
  * `[start, end)`.
  *
  * The actual rendering is performed by `ChatSessionService`, which owns the live
- * message list and intercepts this call by name (mirroring `discover_tools`).
+ * message list and intercepts this call by name (mirroring `lazy_load_tools`).
  * The `execute` here is only a fallback for when the tool is invoked outside a
  * chat session (e.g. in isolation tests).
  */

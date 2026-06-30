@@ -10,6 +10,7 @@ export enum CommandName {
   Reasoning = 'reasoning',
   AutoApprove = 'auto-approve',
   LocalRefresh = 'local-model-refresh',
+  LazyToolLoading = 'toggle-lazy-tool-loading',
   ExpandTools = 'expand-tools',
   ReadLimit = 'read-limit',
   ContextWindow = 'context-window',
@@ -68,6 +69,11 @@ export const COMMANDS: Command[] = [
     description: 'Toggle always refreshing local models (off uses daily cache)',
   },
   {
+    name: CommandName.LazyToolLoading,
+    description:
+      'Toggle lazy tool loading (off sends all tools by default)',
+  },
+  {
     name: CommandName.ExpandTools,
     description: 'Toggle showing full tool input/output inline by default',
   },
@@ -91,9 +97,35 @@ export const COMMANDS: Command[] = [
   },
 ];
 
+/**
+ * Fuzzily ranks commands against a query so a partial name surfaces the command
+ * even when it isn't a prefix — e.g. "lazy" finds `toggle-lazy-tool-loading` via
+ * the `lazy` segment. Ranking, best first: exact, whole-name prefix,
+ * hyphen-segment prefix, then any substring. Ties keep declaration order. An
+ * empty query lists everything.
+ */
 export function filterCommands(query: string): Command[] {
-  const lower = query.toLowerCase();
-  return COMMANDS.filter((cmd) => cmd.name.startsWith(lower));
+  const lower = query.toLowerCase().trim();
+  if (!lower) return COMMANDS;
+
+  return COMMANDS.map((cmd, index) => ({
+    cmd,
+    index,
+    score: scoreCommand(cmd.name, lower),
+  }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((entry) => entry.cmd);
+}
+
+function scoreCommand(name: string, query: string): number {
+  if (name === query) return 1000;
+  if (name.startsWith(query)) return 500;
+  // A hyphen-delimited segment starts with the query ("lazy" in
+  // "toggle-lazy-tool-loading"), the most useful fuzzy hit for these names.
+  if (name.split('-').some((segment) => segment.startsWith(query))) return 300;
+  if (name.includes(query)) return 200;
+  return 0;
 }
 
 export function parseCommandInput(input: string): string | null {

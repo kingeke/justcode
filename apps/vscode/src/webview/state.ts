@@ -119,6 +119,8 @@ export interface ChatState {
   thinkingCollapsed: boolean;
   /** When true (default), local providers refetch their model list every load. */
   localModelAutoRefresh: boolean;
+  /** Whether lazy tool loading is on (off = send all tools up front). */
+  lazyToolLoading: boolean;
   /**
    * The user's chosen reasoning effort per model, nested by provider id. A model
    * absent from the map uses its default effort; `'off'` disables reasoning.
@@ -170,6 +172,7 @@ export const initialState: ChatState = {
   maxHistoryMessages: 50,
   thinkingCollapsed: false,
   localModelAutoRefresh: true,
+  lazyToolLoading: true,
   reasoningEffortByModel: {},
   resolvedFiles: {},
   queuedMessages: [],
@@ -188,6 +191,7 @@ export enum LocalActionType {
   ToggleExpandTools = 'toggleExpandTools',
   ToggleThinkingCollapsed = 'toggleThinkingCollapsed',
   ToggleLocalModelAutoRefresh = 'toggleLocalModelAutoRefresh',
+  ToggleLazyToolLoading = 'toggleLazyToolLoading',
   SetReadLimit = 'setReadLimit',
   SetHistoryLimit = 'setHistoryLimit',
   SetView = 'setView',
@@ -219,6 +223,7 @@ export type LocalAction =
   | { type: LocalActionType.ToggleExpandTools }
   | { type: LocalActionType.ToggleThinkingCollapsed }
   | { type: LocalActionType.ToggleLocalModelAutoRefresh }
+  | { type: LocalActionType.ToggleLazyToolLoading }
   | { type: LocalActionType.SetReadLimit; lines: number }
   | { type: LocalActionType.SetHistoryLimit; count: number }
   | { type: LocalActionType.SetView; view: ChatView }
@@ -271,6 +276,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         maxHistoryMessages: action.maxHistoryMessages,
         thinkingCollapsed: action.thinkingCollapsed,
         localModelAutoRefresh: action.localModelAutoRefresh,
+        lazyToolLoading: action.lazyToolLoading,
         reasoningEffortByModel: action.reasoningEffortByModel,
         sessionTitle: action.sessionTitle,
         // Restore the resolutions saved for this session so a resumed chat keeps
@@ -487,6 +493,9 @@ export function reducer(state: ChatState, action: Action): ChatState {
         ...state,
         localModelAutoRefresh: !state.localModelAutoRefresh,
       };
+
+    case LocalActionType.ToggleLazyToolLoading:
+      return { ...state, lazyToolLoading: !state.lazyToolLoading };
 
     case LocalActionType.SetReadLimit:
       return { ...state, maxReadLines: action.lines };

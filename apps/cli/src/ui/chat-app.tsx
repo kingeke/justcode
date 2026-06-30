@@ -145,6 +145,8 @@ interface ChatAppProps {
   onAutoApproveChange?: (autoApply: boolean) => void;
   initialLocalModelAutoRefresh?: boolean;
   onLocalModelAutoRefreshChange?: (enabled: boolean) => void;
+  initialLazyToolLoading?: boolean;
+  onLazyToolLoadingChange?: (enabled: boolean) => void;
   initialExpandTools?: boolean;
   onExpandToolsChange?: (expand: boolean) => void;
   initialMaxReadLines?: number;
@@ -267,6 +269,7 @@ function commandLineContent(
     thinkingCollapsed: boolean;
     autoApprove: boolean;
     localModelAutoRefresh: boolean;
+    lazyToolLoading: boolean;
     expandTools: boolean;
     maxReadLines: number;
     maxHistoryMessages: number;
@@ -302,6 +305,13 @@ function commandLineContent(
       tc('  '),
       tc(`[${state.localModelAutoRefresh ? 'on' : 'off'}]`, {
         fg: state.localModelAutoRefresh ? 'green' : 'yellow',
+      })
+    );
+  } else if (cmd.name === CommandName.LazyToolLoading) {
+    chunks.push(
+      tc('  '),
+      tc(`[${state.lazyToolLoading ? 'on' : 'off'}]`, {
+        fg: state.lazyToolLoading ? 'green' : 'yellow',
       })
     );
   } else if (cmd.name === CommandName.ExpandTools) {
@@ -671,6 +681,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const autoApproveRef = useRef(props.initialAutoApprove ?? false);
   const [localModelAutoRefresh, setLocalModelAutoRefresh] = useState(
     props.initialLocalModelAutoRefresh ?? true
+  );
+  const [lazyToolLoading, setLazyToolLoading] = useState(
+    props.initialLazyToolLoading ?? true
   );
   const [expandTools, setExpandTools] = useState(
     props.initialExpandTools ?? true
@@ -1643,6 +1656,18 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           next
             ? 'Always refreshing local models'
             : 'Local models use the daily cache'
+        );
+        return;
+      }
+
+      case CommandName.LazyToolLoading: {
+        const next = !lazyToolLoading;
+        setLazyToolLoading(next);
+        props.onLazyToolLoadingChange?.(next);
+        setStatus(
+          next
+            ? 'Lazy tool loading on — model loads tools via lazy_load_tools'
+            : 'Lazy tool loading off — all tools sent by default'
         );
         return;
       }
@@ -2666,6 +2691,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                       thinkingCollapsed,
                       autoApprove,
                       localModelAutoRefresh,
+                      lazyToolLoading,
                       expandTools,
                       maxReadLines,
                       maxHistoryMessages,

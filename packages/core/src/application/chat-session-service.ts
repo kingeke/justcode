@@ -155,6 +155,13 @@ export interface ChatSessionOptions {
    * persist) to keep input tokens down. Falls back to the default when unset.
    */
   getMaxHistoryMessages?: () => number;
+  /**
+   * Whether lazy tool loading is in effect. When true (default), only the
+   * `lazy_load_tools` gateway is advertised up front and the model loads the
+   * rest by calling it. When false, the full tool set is advertised from the
+   * first turn, skipping lazy loading. Falls back to enabled when unset.
+   */
+  getLazyToolLoadingEnabled?: () => boolean;
 }
 
 export class ChatSessionService {
@@ -169,6 +176,7 @@ export class ChatSessionService {
   private readonly systemPrompt: string;
   private readonly describeToolsInSystemPrompt: boolean;
   private readonly getMaxHistoryMessages: () => number;
+  private readonly getLazyToolLoadingEnabled: () => boolean;
   /** Models that rejected tools once; we send their requests chat-only after. */
   private readonly toolUnsupportedModels = new Set<string>();
   /**
@@ -192,6 +200,8 @@ export class ChatSessionService {
       options.describeToolsInSystemPrompt ?? false;
     this.getMaxHistoryMessages =
       options.getMaxHistoryMessages ?? (() => DEFAULT_MAX_HISTORY_MESSAGES);
+    this.getLazyToolLoadingEnabled =
+      options.getLazyToolLoadingEnabled ?? (() => true);
     for (const tool of this.toolRegistry?.definitions() ?? []) {
       this.advertisedToolsByName.set(tool.name, tool);
     }
@@ -269,17 +279,30 @@ export class ChatSessionService {
     const initialToolDefinitions = this.toolRegistry?.definitions() ?? [];
     const fullToolDefinitions =
       this.toolRegistry?.list().map((tool) => tool.definition) ?? [];
+    // The full real toolset minus the `lazy_load_tools` gateway. Used when lazy
+    // loading is off: every tool is already advertised, so the gateway would
+    // just be a dead no-op the model could waste a call on.
+    const eagerToolDefinitions = fullToolDefinitions.filter(
+      (definition) => definition.name !== ToolName.LazyLoadTools
+    );
     const projectInstructions = await this.loadProjectInstructions();
-    // `discover_tools` is a one-way gate per session: once the model has called
-    // it, the full tool set stays unlocked for every later turn instead of
-    // collapsing back to the discovery gateway and forcing it to re-discover.
-    const toolsDiscovered = hasDiscoveredTools(input.conversation.messages);
+    // `lazy_load_tools` is a one-way gate per session: once the model has called
+    // it, the full tool set stays loaded for every later turn instead of
+    // collapsing back to the gateway and forcing it to re-load. The gateway
+    // stays in that set — the model already saw and called it.
+    const toolsLoaded = hasLoadedTools(input.conversation.messages);
+    // With lazy loading off, advertise every real tool from the first turn (no
+    // gateway). With it on, the model sees only `lazy_load_tools` until it calls
+    // it, after which the full set (gateway included) stays loaded all session.
+    const lazyToolLoadingEnabled = this.getLazyToolLoadingEnabled();
     // Models known not to support tools are sent chat-only from the start; the
     // tool section is also dropped from the system prompt so we don't advertise
     // tools the model can't call.
-    let toolDefinitions = toolsDiscovered
-      ? fullToolDefinitions
-      : initialToolDefinitions;
+    let toolDefinitions = !lazyToolLoadingEnabled
+      ? eagerToolDefinitions
+      : toolsLoaded
+        ? fullToolDefinitions
+        : initialToolDefinitions;
     let toolsEnabled =
       toolDefinitions.length > 0 &&
       !this.toolUnsupportedModels.has(input.model);
@@ -412,7 +435,7 @@ export class ChatSessionService {
           })
         );
 
-        if (call.name === ToolName.DiscoverTools) {
+        if (call.name === ToolName.LazyLoadTools) {
           toolDefinitions = fullToolDefinitions;
           toolsEnabled =
             toolDefinitions.length > 0 &&
@@ -691,15 +714,15 @@ export class ChatSessionService {
 }
 
 /**
- * Whether the model has already called `discover_tools` in this conversation.
+ * Whether the model has already called `lazy_load_tools` in this conversation.
  * The call is recorded on the assistant message that requested it, so its
- * presence anywhere in history means tools were unlocked and should stay so.
+ * presence anywhere in history means tools were loaded and should stay so.
  */
-function hasDiscoveredTools(messages: ChatMessage[]): boolean {
+function hasLoadedTools(messages: ChatMessage[]): boolean {
   return messages.some(
     (message) =>
       message.role === 'assistant' &&
-      message.toolCalls?.some((call) => call.name === ToolName.DiscoverTools)
+      message.toolCalls?.some((call) => call.name === ToolName.LazyLoadTools)
   );
 }
 

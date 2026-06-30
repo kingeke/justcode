@@ -102,6 +102,9 @@ export interface ComposerProps {
   /** When true, local providers refetch their model list on every load. */
   localModelAutoRefresh: boolean;
   onToggleLocalModelAutoRefresh: () => void;
+  /** When true, lazy tool loading is on (off = all tools up front). */
+  lazyToolLoading: boolean;
+  onToggleLazyToolLoading: () => void;
 }
 
 /**
@@ -646,6 +649,24 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                             : 'All'}
                         </button>
                       )}
+                    </div>
+                    <div className="settings-popup-row">
+                      <span className="settings-popup-label">
+                        Lazy tool loading
+                      </span>
+                      <button
+                        type="button"
+                        className={`toggle-btn ${props.lazyToolLoading ? 'toggle-on' : ''}`}
+                        title={
+                          props.lazyToolLoading
+                            ? 'On — model loads tools via lazy_load_tools'
+                            : 'Off — all tools sent to the model up front'
+                        }
+                        onClick={props.onToggleLazyToolLoading}
+                        aria-pressed={props.lazyToolLoading}
+                      >
+                        <span className="toggle-knob" />
+                      </button>
                     </div>
                   </div>
 

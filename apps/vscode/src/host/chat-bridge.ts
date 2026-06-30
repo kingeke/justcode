@@ -127,6 +127,10 @@ export class ChatBridge {
   // when false they use the once-a-day cache. Applied to the live runtime via
   // `setLocalModelAutoRefresh` so toggling takes effect without a reload.
   private localModelAutoRefresh = true;
+  // When true (default), the `lazy_load_tools` gateway is on: the model unlocks
+  // the full tool set by calling lazy_load_tools. When false, all tools are sent
+  // up front. Applied to the live runtime via `setLazyToolLoading`.
+  private lazyToolLoading = true;
   // The user's chosen reasoning effort per model, nested by provider id (e.g.
   // `{ openrouter: { "openai/gpt-5": "high" } }`). Mirrors the CLI's per-model
   // store; a model absent here uses its default effort.
@@ -258,6 +262,9 @@ export class ChatBridge {
       case WebviewMessageType.ToggleLocalModelAutoRefresh:
         await this.toggleLocalModelAutoRefresh();
         return;
+      case WebviewMessageType.ToggleLazyToolLoading:
+        await this.toggleLazyToolLoading();
+        return;
       case WebviewMessageType.RevertFile:
         await this.revertFile(message.path, message.oldText, message.created);
         return;
@@ -332,6 +339,7 @@ export class ChatBridge {
       globalConfig.cache?.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES;
     this.thinkingCollapsed = globalConfig.thinkingCollapsed ?? false;
     this.localModelAutoRefresh = globalConfig.localModelAutoRefresh ?? true;
+    this.lazyToolLoading = globalConfig.lazyToolLoading ?? true;
     // The config stores the same string values under @core's ReasoningEffort
     // enum type; the webview protocol re-declares them as string literals.
     this.reasoningEffortByModel = (globalConfig.reasoningEffortByModel ??
@@ -369,6 +377,7 @@ export class ChatBridge {
         maxHistoryMessages: this.maxHistoryMessages,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
+        lazyToolLoading: this.lazyToolLoading,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles: {},
       });
@@ -379,6 +388,7 @@ export class ChatBridge {
     services.setMaxReadLines(this.maxReadLines);
     services.setMaxHistoryMessages(this.maxHistoryMessages);
     services.setLocalModelAutoRefresh(this.localModelAutoRefresh);
+    services.setLazyToolLoading(this.lazyToolLoading);
 
     // With no configured provider the session is backed by a NullProvider whose
     // model listing is empty; surface a notice instead of letting startSession
@@ -397,6 +407,7 @@ export class ChatBridge {
         maxHistoryMessages: this.maxHistoryMessages,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
+        lazyToolLoading: this.lazyToolLoading,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles: {},
       });
@@ -451,6 +462,7 @@ export class ChatBridge {
         maxHistoryMessages: this.maxHistoryMessages,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
+        lazyToolLoading: this.lazyToolLoading,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles,
         ...(session.conversation.title !== undefined
@@ -504,6 +516,7 @@ export class ChatBridge {
         maxHistoryMessages: this.maxHistoryMessages,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
+        lazyToolLoading: this.lazyToolLoading,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles,
         ...(conversation.title !== undefined
@@ -1221,6 +1234,19 @@ export class ChatBridge {
     });
   }
 
+  private async toggleLazyToolLoading(): Promise<void> {
+    this.lazyToolLoading = !this.lazyToolLoading;
+    // Apply to the live runtime so it takes effect on the next turn without a
+    // reload — the chat session reads the flag per request through its getter.
+    this.services?.setLazyToolLoading(this.lazyToolLoading);
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      lazyToolLoading: this.lazyToolLoading,
+    });
+  }
+
   private async setReadLimit(lines: number): Promise<void> {
     this.maxReadLines = lines;
     const services = this.services;
@@ -1406,6 +1432,7 @@ export class ChatBridge {
         maxHistoryMessages: this.maxHistoryMessages,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
+        lazyToolLoading: this.lazyToolLoading,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles: {},
       });

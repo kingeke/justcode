@@ -355,6 +355,11 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.ToggleLocalModelAutoRefresh });
   };
 
+  const toggleLazyToolLoading = (): void => {
+    dispatch({ type: LocalActionType.ToggleLazyToolLoading });
+    postToHost({ type: WebviewMessageType.ToggleLazyToolLoading });
+  };
+
   const setReadLimit = (lines: number): void => {
     dispatch({ type: LocalActionType.SetReadLimit, lines });
     postToHost({ type: WebviewMessageType.SetReadLimit, lines });
@@ -762,10 +767,12 @@ export function App(): React.JSX.Element {
         onSetReasoningEffort={setReasoningEffort}
         thinkingCollapsed={state.thinkingCollapsed}
         localModelAutoRefresh={state.localModelAutoRefresh}
+        lazyToolLoading={state.lazyToolLoading}
         onToggleAutoApprove={toggleAutoApprove}
         onToggleExpandTools={toggleExpandTools}
         onToggleThinkingCollapsed={toggleThinkingCollapsed}
         onToggleLocalModelAutoRefresh={toggleLocalModelAutoRefresh}
+        onToggleLazyToolLoading={toggleLazyToolLoading}
         onSetReadLimit={setReadLimit}
         onSetHistoryLimit={setHistoryLimit}
       />

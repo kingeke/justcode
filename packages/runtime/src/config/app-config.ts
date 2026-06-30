@@ -26,6 +26,12 @@ export interface AppConfig {
   systemPrompt: string;
   /** Whether local providers refetch their model list on every load (default true). */
   localModelAutoRefresh: boolean;
+  /**
+   * Whether lazy tool loading is on (default true): the model is shown only the
+   * `lazy_load_tools` gateway up front and loads the rest by calling it. When
+   * false, all tools are advertised from the first turn.
+   */
+  lazyToolLoading: boolean;
   openai: {
     apiKey: string | undefined;
     baseUrl: string;
@@ -108,6 +114,7 @@ export async function loadAppConfig(
     sessionsDirectory: join(targetConfigDir, 'sessions'),
     systemPrompt: configWithDefaults.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
     localModelAutoRefresh: configWithDefaults.localModelAutoRefresh ?? true,
+    lazyToolLoading: configWithDefaults.lazyToolLoading ?? true,
     openai: {
       apiKey: configWithDefaults.providers?.openai?.apiKey,
       baseUrl:
