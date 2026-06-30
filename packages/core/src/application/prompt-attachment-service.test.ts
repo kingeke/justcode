@@ -189,6 +189,42 @@ describe('prompt mention helpers', () => {
     ).toEqual(['apps/cli/src/index.tsx']);
   });
 
+  it('ranks a file-name match above a directory-name match', () => {
+    expect(
+      filterMentionSuggestions(
+        ['apps/composer/index.ts', 'src/ui/Composer.tsx'],
+        'compo'
+      )
+    ).toEqual(['src/ui/Composer.tsx', 'apps/composer/index.ts']);
+  });
+
+  it('sorts sibling matches by file name, not by directory prefix', () => {
+    expect(
+      filterMentionSuggestions(['z/dir/aaa.ts', 'a/dir/bbb.ts'], 'dir')
+    ).toEqual(['z/dir/aaa.ts', 'a/dir/bbb.ts']);
+  });
+
+  it('prefers the closer (shorter) name when a prefix matches several files', () => {
+    expect(
+      filterMentionSuggestions(
+        [
+          'apps/api/src/app/orm/reports/reports.repository.spec.ts',
+          'apps/api/src/app/orm/reports/reports.repository.ts',
+        ],
+        'reports.repo'
+      )
+    ).toEqual([
+      'apps/api/src/app/orm/reports/reports.repository.ts',
+      'apps/api/src/app/orm/reports/reports.repository.spec.ts',
+    ]);
+  });
+
+  it('lists files sorted by name when no query has been typed yet', () => {
+    expect(
+      filterMentionSuggestions(['src/zebra.ts', 'lib/apple.ts'], '')
+    ).toEqual(['lib/apple.ts', 'src/zebra.ts']);
+  });
+
   it('applies the selected suggestion to the current mention, with a trailing space', () => {
     expect(
       applyMentionSuggestion('Review @apps/cli/s', 'apps/cli/src/index.tsx')

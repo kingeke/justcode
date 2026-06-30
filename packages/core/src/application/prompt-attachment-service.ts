@@ -232,67 +232,79 @@ export function filterMentionSuggestions(
   const scoredFiles = files
     .map((filePath) => {
       const lowerPath = filePath.toLowerCase();
-      const score = calculateMatchScore(lowerPath, normalizedQuery);
-      return { filePath, score };
+      return {
+        filePath,
+        baseName: basename(lowerPath),
+        score: calculateMatchScore(lowerPath, normalizedQuery),
+      };
     })
     .filter(({ score }) => score > 0)
-    .sort((a, b) => b.score - a.score || a.filePath.localeCompare(b.filePath))
+    // Rank by score, then prefer the shorter file name (the closer match — e.g.
+    // `reports.repository.ts` over `reports.repository.spec.ts`), then fall back
+    // to the file name and finally the full path so ordering stays stable.
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        a.baseName.length - b.baseName.length ||
+        a.baseName.localeCompare(b.baseName) ||
+        a.filePath.localeCompare(b.filePath)
+    )
     .slice(0, limit)
     .map(({ filePath }) => filePath);
 
   return scoredFiles;
 }
 
+/** The file name portion of a path (everything after the last `/`). */
+function basename(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1);
+}
+
+/**
+ * Scores a file against the query, weighting matches on the file *name* far
+ * above matches that only appear in the directory path, so e.g. `@comp` ranks
+ * `Composer.tsx` above `apps/components/index.ts`. An empty query scores every
+ * file equally (a name-prefix match against ''), so the picker lists files
+ * sorted by name before anything is typed.
+ */
 function calculateMatchScore(filePath: string, query: string): number {
+  const name = basename(filePath);
   let score = 0;
 
-  if (filePath.toLowerCase().startsWith(query)) {
-    score += 30;
-  } else if (filePath.includes(`/${query}`) || filePath.endsWith(`/${query}`)) {
-    score += 25;
-  } else if (filePath.toLowerCase().includes(query)) {
-    score += 10;
+  // Name matches dominate, strongest for an exact name or a name prefix.
+  if (name === query) {
+    score += 100;
+  } else if (name.startsWith(query)) {
+    score += 60;
+  } else if (name.includes(query)) {
+    score += 35;
   }
 
-  if (filePath.toLowerCase() === query) {
-    score += 50;
+  // Path matches are a weaker fallback, always below any name match.
+  if (filePath.startsWith(query)) {
+    score += 15;
+  } else if (filePath.includes(`/${query}`)) {
+    score += 12;
+  } else if (filePath.includes(query)) {
+    score += 5;
   }
 
-  if (filePath.toLowerCase().startsWith(query)) {
+  // A subsequence match on the name (e.g. `cmp` → `Composer`) catches gappy
+  // queries, ranked just under a contiguous name match.
+  if (query.length >= 2 && isSubsequence(query, name)) {
     score += 15;
   }
 
-  if (query.length >= 3) {
-    const parts = query.split('');
-    let matchIndex = -1;
-    let matchCount = 0;
-
-    for (let i = 0; i < filePath.length; i++) {
-      if (filePath[i] === parts[0]) {
-        matchIndex = i;
-        matchCount++;
-        break;
-      }
-    }
-
-    if (matchCount > 0) {
-      for (let i = 1; i < parts.length; i++) {
-        for (let j = matchIndex + 1; j < filePath.length; j++) {
-          if (filePath[j] === parts[i]) {
-            matchCount++;
-            matchIndex = j;
-            break;
-          }
-        }
-      }
-
-      if (matchCount === parts.length) {
-        score += 20;
-      }
-    }
-  }
-
   return score;
+}
+
+/** Whether every character of `query` appears in `text`, in order (gaps ok). */
+function isSubsequence(query: string, text: string): boolean {
+  let i = 0;
+  for (let j = 0; j < text.length && i < query.length; j++) {
+    if (text[j] === query[i]) i++;
+  }
+  return i === query.length;
 }
 
 /**
