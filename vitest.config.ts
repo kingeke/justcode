@@ -20,8 +20,11 @@ export default defineConfig({
     // Redirects cache writes to a throwaway folder so tests never touch the
     // real ~/.cache/justcode.
     setupFiles: ['./vitest.setup.ts'],
-    // `opencode/` is a vendored reference checkout (gitignored); never run its tests.
-    exclude: ['**/node_modules/**', '**/dist/**', 'opencode/**'],
+    // `opencode/` is a vendored reference checkout (gitignored); never run its
+    // tests. `.claude/` holds git worktrees and agent scratch that duplicate the
+    // source tree — running those stale copies double-counts and breaks on
+    // in-progress branches, so exclude it too.
+    exclude: ['**/node_modules/**', '**/dist/**', 'opencode/**', '.claude/**'],
     coverage: {
       reporter: ['text', 'lcov'],
     },

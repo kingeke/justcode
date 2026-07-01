@@ -234,16 +234,17 @@ export async function requestSseStream(
   let buffer = '';
   const usage: SseUsage = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
   const toolCalls = new ToolCallAccumulator();
-  // Accumulated only so the debug log captures the full streamed reply; the
-  // tokens themselves are delivered live via onToken/onThinkingToken.
-  let content = '';
-  let reasoning = '';
+  // The full, verbatim SSE response as received from the provider — logged as-is
+  // so debug.log shows exactly what the provider sent, not a reconstruction.
+  let rawResponse = '';
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
+    const chunk = decoder.decode(value, { stream: true });
+    rawResponse += chunk;
+    buffer += chunk;
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
 
@@ -259,7 +260,7 @@ export async function requestSseStream(
             url,
             status: response.status,
             ok: true,
-            body: { ...result, content, ...(reasoning ? { reasoning } : {}) },
+            body: rawResponse,
           },
         });
         return result;
@@ -290,11 +291,9 @@ export async function requestSseStream(
         const deltaContent = delta?.content;
         const thinking = delta?.reasoning ?? delta?.reasoning_content;
         if (deltaContent) {
-          content += deltaContent;
           onToken(deltaContent);
         }
         if (thinking) {
-          reasoning += thinking;
           if (onThinkingToken) onThinkingToken(thinking);
         }
         toolCalls.addDelta(delta?.tool_calls);
@@ -320,7 +319,7 @@ export async function requestSseStream(
       url,
       status: response.status,
       ok: true,
-      body: { ...result, content, ...(reasoning ? { reasoning } : {}) },
+      body: rawResponse,
     },
   });
   return result;
@@ -383,12 +382,16 @@ export async function requestNdjsonStream(
   // Ollama emits each tool call complete within a single message chunk (no
   // cross-chunk deltas), so we collect them as they arrive.
   const toolCalls: ToolCall[] = [];
+  // The full, verbatim NDJSON response as received — logged as-is.
+  let rawResponse = '';
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
+    const chunk = decoder.decode(value, { stream: true });
+    rawResponse += chunk;
+    buffer += chunk;
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
 
@@ -435,7 +438,12 @@ export async function requestNdjsonStream(
           };
           await logRequestResponse({
             request,
-            response: { url, status: response.status, ok: true, body: result },
+            response: {
+              url,
+              status: response.status,
+              ok: true,
+              body: rawResponse,
+            },
           });
           return result;
         }
@@ -448,7 +456,7 @@ export async function requestNdjsonStream(
   const result = { usage, toolCalls: toolCalls.filter((call) => call.name) };
   await logRequestResponse({
     request,
-    response: { url, status: response.status, ok: true, body: result },
+    response: { url, status: response.status, ok: true, body: rawResponse },
   });
   return result;
 }

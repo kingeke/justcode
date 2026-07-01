@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -72,5 +72,92 @@ describe('LocalWorkspaceFileService.listFiles', () => {
 
     expect(files).not.toContain('drop.log');
     expect(files).toContain('keep.log');
+  });
+});
+
+describe('LocalWorkspaceFileService path containment', () => {
+  let root: string;
+  let outside: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'justcode-ws-'));
+    outside = await mkdtemp(join(tmpdir(), 'justcode-outside-'));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  it('rejects `..` traversal and absolute paths outside the root', async () => {
+    const service = new LocalWorkspaceFileService(root);
+
+    await expect(service.readFile('../escape.txt')).rejects.toThrow(
+      /outside the workspace/
+    );
+    await expect(service.readFile(join(outside, 'escape.txt'))).rejects.toThrow(
+      /outside the workspace/
+    );
+  });
+
+  it('refuses to READ through a symlink that points outside the root', async () => {
+    // A secret living outside the workspace, reachable only via an in-workspace
+    // symlink — the lexical guard alone would let this through.
+    await writeFile(join(outside, 'secret.txt'), 'TOP SECRET', 'utf8');
+    await symlink(outside, join(root, 'link'));
+
+    const service = new LocalWorkspaceFileService(root);
+
+    await expect(service.readFile('link/secret.txt')).rejects.toThrow(
+      /outside the workspace/
+    );
+  });
+
+  it('refuses to WRITE through a symlinked directory that escapes the root', async () => {
+    await symlink(outside, join(root, 'link'));
+
+    const service = new LocalWorkspaceFileService(root);
+
+    await expect(
+      service.writeFile('link/planted.txt', 'malicious')
+    ).rejects.toThrow(/outside the workspace/);
+  });
+
+  it('still allows genuine in-workspace reads and writes', async () => {
+    const service = new LocalWorkspaceFileService(root);
+
+    await service.writeFile('nested/note.txt', 'hello');
+    expect(await service.readFile('nested/note.txt')).toBe('hello');
+    // And a symlink that stays inside the workspace is fine.
+    await writeFile(join(root, 'real.txt'), 'inside', 'utf8');
+    await symlink(join(root, 'real.txt'), join(root, 'alias.txt'));
+    expect(await service.readFile('alias.txt')).toBe('inside');
+  });
+});
+
+describe('LocalWorkspaceFileService read size limit', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'justcode-ws-'));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('refuses to read a file larger than the limit', async () => {
+    // One byte over the 20 MB cap.
+    const huge = Buffer.alloc(20 * 1024 * 1024 + 1, 0x61);
+    await writeFile(join(root, 'huge.txt'), huge);
+
+    const service = new LocalWorkspaceFileService(root);
+
+    await expect(service.readFile('huge.txt')).rejects.toThrow(
+      /exceeds the .* read limit/
+    );
+    await expect(service.readFileBytes('huge.txt')).rejects.toThrow(
+      /exceeds the .* read limit/
+    );
   });
 });

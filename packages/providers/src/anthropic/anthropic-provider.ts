@@ -216,11 +216,15 @@ export class AnthropicProvider implements ProviderClient {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    // The full, verbatim SSE response as received from Anthropic — logged as-is.
+    let rawResponse = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+      const chunk = decoder.decode(value, { stream: true });
+      rawResponse += chunk;
+      buffer += chunk;
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
       for (const line of lines) {
@@ -244,7 +248,9 @@ export class AnthropicProvider implements ProviderClient {
         headers: requestOptions.headers as Record<string, string>,
         body,
       },
-      response: { url, status: response.status, ok: true, body: result },
+      // Log the full, verbatim provider response (raw SSE), not the
+      // reconstructed result, so debug.log shows exactly what came back.
+      response: { url, status: response.status, ok: true, body: rawResponse },
     });
     return result;
   }

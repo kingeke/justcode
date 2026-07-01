@@ -1,0 +1,17 @@
+# Build output and dependencies
+dist/
+dist-bin/
+node_modules/
+coverage/
+
+# Generated sources (not hand-edited)
+apps/cli/src/generated/
+apps/vscode/media/
+
+# Vendored reference checkout and agent worktrees
+opencode/
+.claude/
+
+# Large data fixtures
+moby-dick.txt
+*.log

@@ -83,24 +83,38 @@ export async function sendResponsesRequest({
     );
   }
 
-  const result = await consumeResponsesStream(
+  const { result, reasoning } = await consumeResponsesStream(
     response.body,
     request,
     providerId
   );
+  // Log the reconstructed result plus the model's reasoning output. We keep the
+  // reasoning (the provider's streamed thinking) alongside the answer because it
+  // isn't part of `result.content`, but drop the raw per-token SSE events, which
+  // are enormous and add no signal over the assembled text.
   await logRequestResponse({
     request: requestLog,
-    response: { url, status: response.status, ok: true, body: result },
+    response: {
+      url,
+      status: response.status,
+      ok: true,
+      body: reasoning ? { ...result, reasoning } : result,
+    },
   });
   return result;
 }
 
-/** Reads the Responses SSE stream, dispatching text/reasoning/tool events. */
-async function consumeResponsesStream(
+/**
+ * Reads the Responses SSE stream, dispatching text/reasoning/tool events.
+ * Returns the {@link ChatResult} plus the model's accumulated `reasoning`
+ * output (the provider's streamed thinking), which callers log alongside the
+ * answer since it isn't part of `result.content`.
+ */
+export async function consumeResponsesStream(
   stream: ReadableStream<Uint8Array>,
   request: ChatRequest,
   providerId: string
-): Promise<ChatResult> {
+): Promise<{ result: ChatResult; reasoning: string }> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -163,15 +177,26 @@ async function consumeResponsesStream(
     }
   }
 
-  const finalContent = content.trim() ? content : reasoning;
+  // Some reasoning models (e.g. gpt-oss) stream their whole turn on the
+  // reasoning channel and emit no separate output text; there we surface the
+  // reasoning as the answer. But that fallback must NOT apply on a tool-call
+  // step: the model legitimately produced only reasoning + a tool call, and the
+  // reasoning is *thinking*, not the reply. Promoting it to content there makes
+  // the thought process render as a response. So only fall back when there are
+  // no tool calls.
+  const finalContent =
+    content.trim() || toolCalls.length > 0 ? content : reasoning;
   if (!finalContent.trim() && toolCalls.length === 0) {
     throw new Error(`Provider '${providerId}' returned an empty response.`);
   }
 
   return {
-    content: finalContent,
-    ...(usage ? { usage } : {}),
-    ...(toolCalls.length ? { toolCalls } : {}),
+    result: {
+      content: finalContent,
+      ...(usage ? { usage } : {}),
+      ...(toolCalls.length ? { toolCalls } : {}),
+    },
+    reasoning,
   };
 }
 

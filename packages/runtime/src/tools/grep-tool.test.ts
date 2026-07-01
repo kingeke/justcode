@@ -80,4 +80,18 @@ describe('GrepTool', () => {
   it('requires approval', () => {
     expect(tool.requiresApproval).toBe(true);
   });
+
+  it('stays bounded against a catastrophic-backtracking pattern', async () => {
+    // A long line with no trailing digit is the classic ReDoS trigger for
+    // `(a+)+$`; without input-length bounding this can hang for seconds+.
+    await seed('big.txt', `${'a'.repeat(50_000)}!`);
+
+    const started = Date.now();
+    const result = await run({ pattern: '(a+)+$' });
+    const elapsed = Date.now() - started;
+
+    // Should complete well within the search budget rather than spinning.
+    expect(elapsed).toBeLessThan(5_000);
+    expect(result.isError).toBeFalsy();
+  });
 });

@@ -1,5 +1,7 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+
+import { writeSecureFile } from '@runtime/persistence/secure-file';
 
 /**
  * Configuration for a single MCP server, mirroring the shape used by LM Studio,
@@ -89,8 +91,9 @@ export async function ensureMcpConfigFile(
     await readFile(path, 'utf8');
     return path;
   } catch {
-    await mkdir(configDirectory, { recursive: true });
-    await writeFile(path, `${JSON.stringify(TEMPLATE, null, 2)}\n`, 'utf8');
+    // mcp.json can hold remote-server bearer headers and per-server env, so it
+    // is created owner-only like config.json (see writeSecureFile).
+    await writeSecureFile(path, `${JSON.stringify(TEMPLATE, null, 2)}\n`);
     return path;
   }
 }

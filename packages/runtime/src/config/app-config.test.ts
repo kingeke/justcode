@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 
 import { loadAppConfig, parseProviderId } from '@runtime/config/app-config';
 import { join } from 'node:path';
@@ -9,6 +9,7 @@ vi.mock('node:fs/promises', () => ({
   mkdir: vi.fn(),
   readFile: vi.fn(),
   writeFile: vi.fn(),
+  chmod: vi.fn(),
 }));
 
 describe('loadAppConfig', () => {
@@ -18,6 +19,7 @@ describe('loadAppConfig', () => {
     vi.mocked(mkdir).mockReset();
     vi.mocked(readFile).mockReset();
     vi.mocked(writeFile).mockReset();
+    vi.mocked(chmod).mockReset();
   });
 
   it('has no default provider when nothing is configured', async () => {
@@ -29,10 +31,11 @@ describe('loadAppConfig', () => {
     expect(config.configuredProviders).toEqual([]);
     expect(config.ollama.baseUrl).toBe('http://127.0.0.1:11434');
     expect(config.systemPrompt).toBe(DEFAULT_SYSTEM_PROMPT);
+    // config.json is written owner-only via writeSecureFile.
     expect(writeFile).toHaveBeenCalledWith(
       join(mockConfigDir, 'config.json'),
       expect.stringContaining('systemPrompt'),
-      'utf8'
+      expect.objectContaining({ encoding: 'utf8' })
     );
   });
 

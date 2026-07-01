@@ -1,9 +1,10 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { ReasoningEffort } from '@core/ports/chat-model';
 import type { CustomModeConfig } from '@core/domain/chat-mode';
 import { ProviderId } from '@core/ports/provider-catalog';
+import { writeSecureFile } from '@runtime/persistence/secure-file';
 import type { ProviderConfig } from '@core/ports/provider-catalog';
 
 export interface GlobalConfig {
@@ -88,11 +89,11 @@ export async function writeGlobalConfig(
   configDirectory: string,
   config: GlobalConfig
 ): Promise<void> {
-  await mkdir(configDirectory, { recursive: true });
-  await writeFile(
+  // config.json holds provider API keys and OAuth tokens in plaintext, so it and
+  // its directory are written owner-only (see writeSecureFile).
+  await writeSecureFile(
     join(configDirectory, 'config.json'),
-    `${JSON.stringify(config, null, 2)}\n`,
-    'utf8'
+    `${JSON.stringify(config, null, 2)}\n`
   );
 }
 

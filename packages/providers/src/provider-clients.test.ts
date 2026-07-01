@@ -9,6 +9,7 @@ import { OllamaProvider } from '@providers/ollama/ollama-provider';
 import { OpenRouterProvider } from '@providers/openrouter/openrouter-provider';
 import { OpenAiCompatibleProvider } from '@providers/openai-compatible/openai-compatible-provider';
 import { ProviderId } from '@core/ports/provider-catalog';
+import { setDebugLoggingEnabled } from '@core/application/debug-log';
 import { ReasoningEffort } from '@core/ports/chat-model';
 import type { ChatMessage } from '@core/domain/message';
 
@@ -260,6 +261,8 @@ describe('provider clients', () => {
   });
 
   it('writes request and response logs to debug.log', async () => {
+    // Logging defaults to off (production-safe); turn it on for this assertion.
+    setDebugLoggingEnabled(true);
     const tempDir = await mkdtemp(join(tmpdir(), 'justcode-debug-'));
     const filePath = join(tempDir, 'debug.log');
     const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tempDir);
@@ -280,6 +283,7 @@ describe('provider clients', () => {
       expect(contents).toContain('/v1/models');
     } finally {
       cwdSpy.mockRestore();
+      setDebugLoggingEnabled(false);
     }
   });
 });

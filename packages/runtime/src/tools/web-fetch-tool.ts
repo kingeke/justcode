@@ -1,3 +1,6 @@
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
+
 import type {
   Tool,
   ToolDefinition,
@@ -11,6 +14,20 @@ interface WebFetchArguments {
   url: string;
   max_length?: number;
 }
+
+/**
+ * Resolves a hostname to its IP addresses. Injectable so the SSRF guard can be
+ * tested without real DNS; defaults to the system resolver.
+ */
+export type HostResolver = (hostname: string) => Promise<string[]>;
+
+const defaultHostResolver: HostResolver = async (hostname) => {
+  const records = await lookup(hostname, { all: true });
+  return records.map((record) => record.address);
+};
+
+/** How many redirect hops to follow before giving up. */
+const MAX_REDIRECTS = 5;
 
 /** Default time a request may take before it is aborted. */
 export const DEFAULT_WEB_FETCH_TIMEOUT_MS = 30_000;
@@ -31,6 +48,10 @@ const MAX_DOWNLOAD_BYTES = 5_000_000;
  */
 export class WebFetchTool implements Tool {
   public readonly requiresApproval = true;
+
+  public constructor(
+    private readonly resolveHost: HostResolver = defaultHostResolver
+  ) {}
 
   public readonly definition: ToolDefinition = {
     name: 'webfetch',
@@ -120,11 +141,58 @@ export class WebFetchTool implements Tool {
     }
 
     try {
-      const response = await fetch(url, {
-        signal: controller.signal,
-        redirect: 'follow',
-        headers: { accept: 'text/html,text/plain,*/*' },
-      });
+      // Follow redirects manually so every hop's host is re-validated against
+      // the SSRF block-list — otherwise an allowed public URL could 302 into an
+      // internal target (cloud metadata, localhost, RFC-1918).
+      const requestHeaders = { accept: 'text/html,text/plain,*/*' };
+      let currentUrl = url;
+      let response: Response | undefined;
+
+      for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+        const blockedReason = await this.checkSsrf(currentUrl);
+        if (blockedReason) {
+          return {
+            content: `Refusing to fetch ${currentUrl.href}: ${blockedReason}`,
+            isError: true,
+          };
+        }
+
+        response = await fetch(currentUrl, {
+          signal: controller.signal,
+          redirect: 'manual',
+          headers: requestHeaders,
+        });
+
+        if (!isRedirect(response.status)) {
+          break;
+        }
+
+        const location = response.headers.get('location');
+        if (!location) {
+          break;
+        }
+        const nextUrl = parseUrl(new URL(location, currentUrl).href);
+        if (!nextUrl) {
+          return {
+            content: `Refusing to follow redirect to a non-http(s) URL from ${currentUrl.href}`,
+            isError: true,
+          };
+        }
+        currentUrl = nextUrl;
+        if (hop === MAX_REDIRECTS) {
+          return {
+            content: `Too many redirects (>${MAX_REDIRECTS}) starting from ${url.href}`,
+            isError: true,
+          };
+        }
+      }
+
+      if (!response) {
+        return {
+          content: `Request failed: no response for ${url.href}`,
+          isError: true,
+        };
+      }
 
       if (!response.ok) {
         await logRequestResponse({
@@ -216,6 +284,121 @@ export class WebFetchTool implements Tool {
       context?.signal?.removeEventListener('abort', onAbort);
     }
   }
+
+  /**
+   * Returns a reason string if {@link target} must not be fetched (loopback,
+   * link-local/metadata, private, or otherwise reserved address), or undefined
+   * when it is a safe public destination. Hostnames are resolved through
+   * {@link resolveHost} so a public name that maps to an internal IP (DNS
+   * rebinding) is still caught.
+   */
+  private async checkSsrf(target: URL): Promise<string | undefined> {
+    const host = target.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+
+    if (isBlockedHostname(host)) {
+      return 'host resolves to a loopback or internal address';
+    }
+    if (isIP(host)) {
+      return isBlockedAddress(host)
+        ? 'host is a private, loopback, or reserved IP address'
+        : undefined;
+    }
+
+    let addresses: string[];
+    try {
+      addresses = await this.resolveHost(host);
+    } catch {
+      return `could not resolve host '${host}'`;
+    }
+    if (addresses.length === 0) {
+      return `could not resolve host '${host}'`;
+    }
+    if (addresses.some(isBlockedAddress)) {
+      return 'host resolves to a private, loopback, or reserved IP address';
+    }
+    return undefined;
+  }
+}
+
+/** 3xx statuses that carry a `Location` we would otherwise follow. */
+function isRedirect(status: number): boolean {
+  return (
+    status === 301 ||
+    status === 302 ||
+    status === 303 ||
+    status === 307 ||
+    status === 308
+  );
+}
+
+/** Hostnames that always denote the local machine or a private network. */
+function isBlockedHostname(host: string): boolean {
+  return (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    host.endsWith('.home.arpa') ||
+    host === '0.0.0.0'
+  );
+}
+
+/**
+ * True when an IP literal falls in a loopback, link-local (incl. the
+ * 169.254.169.254 cloud-metadata address), private, or otherwise reserved
+ * range that a fetch tool should never reach.
+ */
+function isBlockedAddress(address: string): boolean {
+  const version = isIP(address);
+  if (version === 4) {
+    return isBlockedIpv4(address);
+  }
+  if (version === 6) {
+    return isBlockedIpv6(address);
+  }
+  // Not a parseable IP — treat as unsafe rather than guess.
+  return true;
+}
+
+function isBlockedIpv4(address: string): boolean {
+  const octets = address.split('.').map(Number);
+  if (octets.length !== 4 || octets.some((o) => !Number.isInteger(o))) {
+    return true;
+  }
+  const [a = -1, b = -1] = octets;
+  return (
+    a === 0 || // 0.0.0.0/8 "this host"
+    a === 10 || // 10.0.0.0/8 private
+    a === 127 || // 127.0.0.0/8 loopback
+    (a === 100 && b >= 64 && b <= 127) || // 100.64.0.0/10 CGNAT
+    (a === 169 && b === 254) || // 169.254.0.0/16 link-local + metadata
+    (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12 private
+    (a === 192 && b === 168) || // 192.168.0.0/16 private
+    (a === 198 && (b === 18 || b === 19)) || // 198.18.0.0/15 benchmarking
+    a >= 224 // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved
+  );
+}
+
+function isBlockedIpv6(address: string): boolean {
+  const ip = address.toLowerCase();
+  if (ip === '::1' || ip === '::') {
+    return true; // loopback / unspecified
+  }
+  // IPv4-mapped (::ffff:a.b.c.d) — validate the embedded v4 address.
+  const mapped = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) {
+    return isBlockedIpv4(mapped[1] ?? '');
+  }
+  const firstHextet = ip.split(':')[0] ?? '';
+  return (
+    firstHextet.startsWith('fc') || // fc00::/7 unique-local
+    firstHextet.startsWith('fd') ||
+    firstHextet.startsWith('fe8') || // fe80::/10 link-local
+    firstHextet.startsWith('fe9') ||
+    firstHextet.startsWith('fea') ||
+    firstHextet.startsWith('feb') ||
+    firstHextet.startsWith('ff') // ff00::/8 multicast
+  );
 }
 
 function tryParse(rawArguments: string): WebFetchArguments | undefined {

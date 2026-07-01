@@ -5,9 +5,12 @@ import { WebFetchTool } from '@runtime/tools/web-fetch-tool';
 describe('WebFetchTool', () => {
   let tool: WebFetchTool;
   const fetchMock = vi.fn<typeof fetch>();
+  // Default resolver maps every hostname to a public IP so the SSRF guard never
+  // makes a real DNS query in the non-SSRF tests.
+  const publicResolver = async () => ['93.184.216.34'];
 
   beforeEach(() => {
-    tool = new WebFetchTool();
+    tool = new WebFetchTool(publicResolver);
     vi.stubGlobal('fetch', fetchMock);
     fetchMock.mockReset();
   });
@@ -125,5 +128,52 @@ describe('WebFetchTool', () => {
 
     expect(view.title).toBe('webfetch: https://example.com');
     expect(view.preview).toBe('https://example.com');
+  });
+
+  describe('SSRF protection', () => {
+    it.each([
+      ['loopback', 'http://127.0.0.1/'],
+      ['loopback ipv6', 'http://[::1]/'],
+      ['cloud metadata', 'http://169.254.169.254/latest/meta-data/'],
+      ['private 10.x', 'http://10.0.0.5/'],
+      ['private 192.168.x', 'http://192.168.1.1/admin'],
+      ['localhost name', 'http://localhost:8080/'],
+      ['unspecified', 'http://0.0.0.0/'],
+    ])('refuses to fetch %s without a network call', async (_label, url) => {
+      const result = await run({ url });
+
+      expect(result.isError).toBe(true);
+      expect(result.content).toContain('Refusing to fetch');
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('refuses a public hostname that resolves to a private IP (DNS rebinding)', async () => {
+      const rebinding = new WebFetchTool(async () => ['10.1.2.3']);
+
+      const result = await rebinding.execute(
+        JSON.stringify({ url: 'https://evil.example.com/' }),
+        { workspaceRoot: '/tmp' }
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content).toContain('Refusing to fetch');
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('re-validates redirect targets and blocks an internal hop', async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: { location: 'http://169.254.169.254/latest/meta-data/' },
+        })
+      );
+
+      const result = await run({ url: 'https://example.com/redirect' });
+
+      expect(result.isError).toBe(true);
+      expect(result.content).toContain('Refusing to fetch');
+      // The first hop was fetched; the internal redirect target was not.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -864,9 +864,13 @@ export class ChatBridge {
           });
         },
         onToolActivity: (event) => this.postToolActivity(event),
-        ...(!this.autoApprove && {
-          requestApproval: (request) => this.requestApproval(request),
-        }),
+        // Auto-approve runs approval-gated tools without prompting. Express that
+        // as an explicit `allowUnattended` opt-in — the engine fails closed when
+        // neither an approver nor this flag is present, so simply omitting
+        // requestApproval would (correctly) reject every gated tool.
+        ...(this.autoApprove
+          ? { allowUnattended: true }
+          : { requestApproval: (request) => this.requestApproval(request) }),
         requestUserInput: (request) => this.requestUserInput(request),
         onTitle: (_sessionId, title) => {
           // Fold the generated title into the in-memory conversation so the next

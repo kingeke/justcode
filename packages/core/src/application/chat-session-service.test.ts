@@ -677,6 +677,9 @@ describe('ChatSessionService', () => {
       conversation: createConversation('session-1'),
       model: 'gpt',
       content: 'create a.txt',
+      // No interactive approver here; opt into unattended execution so the
+      // approval-gated write tool runs (see the fail-closed test below).
+      allowUnattended: true,
     });
 
     expect(tool.executed).toEqual(['{"path":"a.txt","content":"hi"}']);
@@ -843,6 +846,29 @@ describe('ChatSessionService', () => {
 
     expect(tool.executed).toEqual([]);
     expect(result.reply).toBe('All done.');
+    expect(result.conversation.messages[2]?.content).toContain('rejected');
+  });
+
+  it('fails closed: refuses an approval-gated tool when no approver is wired', async () => {
+    const repository = new InMemoryConversationRepository();
+    const tool = new RecordingWriteTool();
+    const service = new ChatSessionService(
+      repository,
+      createToolCallingProvider(),
+      {
+        toolRegistry: new ToolRegistry([tool]),
+      }
+    );
+
+    // Neither requestApproval nor allowUnattended: the write tool
+    // (requiresApproval = true) must NOT run.
+    const result = await service.submitMessage({
+      conversation: createConversation('session-1'),
+      model: 'gpt',
+      content: 'create a.txt',
+    });
+
+    expect(tool.executed).toEqual([]);
     expect(result.conversation.messages[2]?.content).toContain('rejected');
   });
 

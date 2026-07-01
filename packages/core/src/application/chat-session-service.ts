@@ -109,8 +109,19 @@ export interface SubmitMessageInput {
    * an agentic turn progresses instead of only when the whole turn returns.
    */
   onUsage?: (usage: TokenUsage) => void;
-  /** Asked before a tool that `requiresApproval` runs. Absent → auto-approved. */
+  /**
+   * Asked before a tool that `requiresApproval` runs. When absent, such tools
+   * are refused by default (fail-closed) so an embedding that forgets to wire an
+   * approver can't silently run `bash`/file writes/MCP tools unattended. Set
+   * {@link allowUnattended} to opt into running them without a prompt.
+   */
   requestApproval?: (request: ToolApprovalRequest) => Promise<boolean>;
+  /**
+   * Explicitly allow tools that `requiresApproval` to run without prompting when
+   * no {@link requestApproval} handler is provided (headless/automation). Has no
+   * effect when an approver is wired — that always takes precedence.
+   */
+  allowUnattended?: boolean;
   /** Lets a tool prompt the user for input mid-turn (e.g. the question tool). */
   requestUserInput?: (request: UserQuestionRequest) => Promise<string>;
   onToolActivity?: (event: ToolActivityEvent) => void;
@@ -783,8 +794,15 @@ export class ChatSessionService {
     _call: ToolCall,
     input: SubmitMessageInput
   ): Promise<boolean> {
-    if (!requiresApproval || !input.requestApproval) {
+    if (!requiresApproval) {
       return true;
+    }
+
+    // No approver wired: refuse by default so a headless embedding can't run
+    // approval-gated tools (bash, writes, MCP) silently. Automation that wants
+    // this must opt in explicitly via `allowUnattended`.
+    if (!input.requestApproval) {
+      return input.allowUnattended === true;
     }
 
     return awaitWithAbort(

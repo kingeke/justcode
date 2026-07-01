@@ -1,9 +1,23 @@
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, relative, resolve, sep } from 'node:path';
+import {
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 
 import ignore, { type Ignore } from 'ignore';
 
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
+
+/**
+ * Upper bound on a single file read. Files this large are never useful to pull
+ * into the model's context and, read whole into a JS string, risk exhausting
+ * memory — so we refuse rather than OOM the process.
+ */
+export const MAX_READABLE_FILE_BYTES = 20 * 1024 * 1024;
 
 // Always skipped, regardless of .gitignore: `.git` is never useful to surface,
 // and these are the conventional heavyweights that are almost always ignored
@@ -25,17 +39,41 @@ export class LocalWorkspaceFileService implements WorkspaceFilePort {
   }
 
   public async readFile(relativePath: string): Promise<string> {
-    const absolutePath = this.resolveWorkspacePath(relativePath);
+    const absolutePath = await this.resolveWorkspacePath(relativePath);
+    await this.assertReadableSize(absolutePath, relativePath);
     return readFile(absolutePath, 'utf8');
   }
 
   public async readFileBytes(relativePath: string): Promise<Uint8Array> {
-    const absolutePath = this.resolveWorkspacePath(relativePath);
+    const absolutePath = await this.resolveWorkspacePath(relativePath);
+    await this.assertReadableSize(absolutePath, relativePath);
     return readFile(absolutePath);
   }
 
+  /** Rejects files above {@link MAX_READABLE_FILE_BYTES} before reading them. */
+  private async assertReadableSize(
+    absolutePath: string,
+    relativePath: string
+  ): Promise<void> {
+    let size: number;
+    try {
+      size = (await stat(absolutePath)).size;
+    } catch {
+      // Missing/inaccessible file: let the subsequent read surface the real
+      // error rather than masking it here.
+      return;
+    }
+    if (size > MAX_READABLE_FILE_BYTES) {
+      const mb = (MAX_READABLE_FILE_BYTES / (1024 * 1024)).toFixed(0);
+      throw new Error(
+        `File '${relativePath}' is ${(size / (1024 * 1024)).toFixed(1)} MB, ` +
+          `which exceeds the ${mb} MB read limit.`
+      );
+    }
+  }
+
   public async writeFile(relativePath: string, content: string): Promise<void> {
-    const absolutePath = this.resolveWorkspacePath(relativePath);
+    const absolutePath = await this.resolveWorkspacePath(relativePath);
     await mkdir(dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, content, 'utf8');
   }
@@ -117,10 +155,11 @@ export class LocalWorkspaceFileService implements WorkspaceFilePort {
     return relative(this.workspaceRoot, absolutePath).split(sep).join('/');
   }
 
-  private resolveWorkspacePath(relativePath: string): string {
+  private async resolveWorkspacePath(relativePath: string): Promise<string> {
     const absolutePath = resolve(this.workspaceRoot, relativePath);
     const pathFromRoot = relative(this.workspaceRoot, absolutePath);
 
+    // Fast, cheap lexical reject for `..`/absolute escapes before any I/O.
     if (
       pathFromRoot.startsWith('..') ||
       pathFromRoot.includes(`${sep}..${sep}`)
@@ -128,7 +167,47 @@ export class LocalWorkspaceFileService implements WorkspaceFilePort {
       throw new Error(`File '${relativePath}' is outside the workspace.`);
     }
 
+    // The lexical check above can't see through symlinks: a symlink *inside* the
+    // workspace pointing outside it resolves to an external path but reads as
+    // in-workspace. Canonicalize with realpath and re-assert containment. The
+    // target may not exist yet (writes create it), so canonicalize the deepest
+    // existing ancestor and append the not-yet-created tail literally — the tail
+    // can't contain a symlink because it doesn't exist on disk.
+    const realRoot = await realpath(this.workspaceRoot);
+    const canonical = await this.canonicalize(absolutePath);
+    if (canonical !== realRoot && !canonical.startsWith(realRoot + sep)) {
+      throw new Error(`File '${relativePath}' is outside the workspace.`);
+    }
+
     return absolutePath;
+  }
+
+  /**
+   * Returns the canonical (symlink-resolved) form of {@link target}, resolving
+   * as much of the path as exists on disk and appending any not-yet-created
+   * trailing segments verbatim.
+   */
+  private async canonicalize(target: string): Promise<string> {
+    const pending: string[] = [];
+    let current = target;
+
+    for (;;) {
+      try {
+        const resolved = await realpath(current);
+        return pending.length > 0
+          ? join(resolved, ...pending.reverse())
+          : resolved;
+      } catch {
+        const parent = dirname(current);
+        if (parent === current) {
+          // Reached the filesystem root without finding an existing ancestor;
+          // fall back to the lexically-resolved path.
+          return target;
+        }
+        pending.push(basename(current));
+        current = parent;
+      }
+    }
   }
 }
 

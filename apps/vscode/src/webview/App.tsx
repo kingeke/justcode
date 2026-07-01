@@ -32,6 +32,7 @@ import {
 } from '@ext/webview/components/Icons';
 import { ChangesPanel } from '@ext/webview/components/ChangesPanel';
 import { deriveChangedFiles, type ChangedFile } from '@ext/webview/changes';
+import { selectThinkingItems } from '@ext/webview/thinking-items';
 import { BUILD_MODE_ID } from '@core/domain/chat-mode';
 import { ToolName } from '@core/domain/tool-name';
 
@@ -620,6 +621,17 @@ export function App(): React.JSX.Element {
     }
   }
 
+  // The committed transcript carries thinking per assistant step, so each
+  // "Thought" block renders inline before its own step (correctly interleaved
+  // with the tool cards). `completedThinkingItems` is a fallback for providers
+  // whose committed messages don't include thinking at all — using it *as well*
+  // would re-render the same segments dumped after the tool calls. So only fall
+  // back to it when no committed message already carries thinking.
+  const committedMessagesHaveThinking = state.messages.some(
+    (message) =>
+      message.role === WebviewRole.Assistant && Boolean(message.thinking)
+  );
+
   return (
     <div className="app">
       <div className="chat-header">
@@ -690,18 +702,12 @@ export function App(): React.JSX.Element {
               !state.busy &&
               isLastMsg &&
               message.role === WebviewRole.Assistant;
-            const thinkingItems =
-              message.role === WebviewRole.Assistant && message.thinking
-                ? [
-                    {
-                      id: `${message.id}-thinking`,
-                      content: message.thinking.content,
-                      durationMs: message.thinking.durationMs,
-                    },
-                  ]
-                : isLastAssistant
-                  ? state.completedThinkingItems
-                  : [];
+            const thinkingItems = selectThinkingItems({
+              message,
+              isLastAssistant,
+              committedMessagesHaveThinking,
+              completedThinkingItems: state.completedThinkingItems,
+            });
             return (
               <React.Fragment key={message.id}>
                 {thinkingItems.map((item) => (

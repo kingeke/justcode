@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import {
   deleteDebugLog,
   setDebugLogDirectory,
+  setDebugLoggingEnabled,
 } from '@core/application/debug-log';
 import { cacheDirectory } from '@core/application/cache-dir';
 import type { ProviderId } from '@core/ports/provider-catalog';
@@ -43,6 +44,13 @@ interface StartupProviderSelection {
 export function createCli(): Command {
   const program = new Command();
 
+  // Debug logging can capture request/response payloads, so it's a dev-only
+  // convenience: enable it only when the `dev`/`dev:watch` scripts set
+  // JUSTCODE_DEBUG. The compiled production binary never sets it, so shipped
+  // builds write no debug.log at all (even with redaction, we don't want token
+  // traffic on a user's disk). Must run before the startup cleanup so the stale
+  // log is actually removed in dev.
+  setDebugLoggingEnabled(process.env.JUSTCODE_DEBUG === '1');
   // Keep debug.log out of whatever project the CLI is launched in: write it to
   // the shared cache dir (~/.cache/justcode) instead of process.cwd(), matching
   // the VSCode host. Must run before any logging or the startup cleanup below.

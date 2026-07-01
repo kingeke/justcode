@@ -18,6 +18,20 @@ interface GrepArguments {
 
 const DEFAULT_MAX_RESULTS = 50;
 const MAX_LINE_LENGTH = 240;
+/**
+ * Longest slice of a line fed to the regex engine. Catastrophic backtracking is
+ * (super)linear in input length, so bounding the input bounds the worst case a
+ * single `.test()` can cost — a pattern like `(a+)+$` can still be slow, but not
+ * unbounded. Lines longer than this are truncated only for matching (display
+ * uses {@link MAX_LINE_LENGTH}).
+ */
+const MAX_SCAN_LINE_LENGTH = 2_000;
+/**
+ * Wall-clock budget for a whole search. Checked between files/lines so a
+ * pathological pattern can't hang the single-threaded process indefinitely;
+ * whatever matched so far is returned with a note.
+ */
+const SEARCH_TIME_BUDGET_MS = 5_000;
 
 /**
  * Searches workspace files for a text or regular-expression pattern and
@@ -134,8 +148,13 @@ export class GrepTool implements Tool {
     );
     const matches: string[] = [];
     let fileCount = 0;
+    const deadline = Date.now() + SEARCH_TIME_BUDGET_MS;
 
     for (const file of scopedFiles) {
+      if (Date.now() > deadline) {
+        return this.formatResult(matches, fileCount, true, maxResults, parsed);
+      }
+
       let text: string;
       try {
         text = await this.workspace.readFile(file);
@@ -146,7 +165,24 @@ export class GrepTool implements Tool {
       const lines = splitLines(text);
       let fileMatched = false;
       for (let index = 0; index < lines.length; index += 1) {
-        if (!regex.test(lines[index] ?? '')) {
+        // Re-check the time budget periodically so a slow pattern on many lines
+        // of one file can't run past the deadline.
+        if ((index & 0x3ff) === 0 && Date.now() > deadline) {
+          return this.formatResult(
+            matches,
+            fileCount,
+            true,
+            maxResults,
+            parsed
+          );
+        }
+
+        const line = lines[index] ?? '';
+        const scanned =
+          line.length > MAX_SCAN_LINE_LENGTH
+            ? line.slice(0, MAX_SCAN_LINE_LENGTH)
+            : line;
+        if (!regex.test(scanned)) {
           continue;
         }
 

@@ -14,6 +14,35 @@ interface PendingRequest {
 }
 
 /**
+ * Environment variable names that look like secrets and should not be inherited
+ * by third-party MCP server processes. A stdio server is arbitrary local code
+ * (from a user-editable, pasteable `mcp.json`); there's no reason it should see
+ * the API keys/tokens the user exported for other tools. Anything a server
+ * legitimately needs can be granted explicitly via the server's `env` config.
+ */
+const SECRET_ENV_PATTERN = /(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)/i;
+
+/**
+ * Builds the environment for a spawned stdio MCP server: the parent environment
+ * minus secret-shaped variables, with the server's configured `env` overlaid on
+ * top (so an explicitly-configured secret still passes through). Exposed for
+ * testing.
+ */
+export function buildStdioEnv(
+  configEnv: Record<string, string> | undefined,
+  sourceEnv: NodeJS.ProcessEnv = process.env
+): NodeJS.ProcessEnv {
+  const scoped: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(sourceEnv)) {
+    if (value === undefined || SECRET_ENV_PATTERN.test(key)) {
+      continue;
+    }
+    scoped[key] = value;
+  }
+  return { ...scoped, ...configEnv };
+}
+
+/**
  * Speaks JSON-RPC 2.0 to a local MCP server over a child process's stdio, using
  * MCP's newline-delimited framing (one JSON message per line). Requests are
  * correlated to responses by id over the long-lived stdout stream.
@@ -37,7 +66,7 @@ export class StdioTransport implements McpTransport {
     }
     const child = spawn(this.config.command, this.config.args ?? [], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...this.config.env },
+      env: buildStdioEnv(this.config.env),
     });
     this.child = child;
 
