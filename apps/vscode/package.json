@@ -6,6 +6,10 @@
   "publisher": "kingeke",
   "license": "MIT",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kingeke/justcode.git"
+  },
   "engines": {
     "vscode": "^1.84.0"
   },
@@ -69,6 +73,7 @@
   "scripts": {
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "vscode:prepublish": "node esbuild.mjs"
   }
 }

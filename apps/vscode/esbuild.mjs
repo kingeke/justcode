@@ -3,8 +3,14 @@ import { fileURLToPath } from 'node:url';
 
 import esbuild from 'esbuild';
 
+import { syncExtensionVersion } from '../../scripts/sync-extension-version.mjs';
+
 const root = dirname(fileURLToPath(import.meta.url));
 const watch = process.argv.includes('--watch');
+
+// Derive the extension manifest version from the root package.json (the single
+// source of truth) before bundling, so any package/publish ships the right one.
+syncExtensionVersion();
 
 // The same path aliases the CLI build uses, so the extension reuses the core /
 // runtime / providers packages straight from source. `@ext` is the extension's

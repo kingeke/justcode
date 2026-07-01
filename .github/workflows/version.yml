@@ -1,0 +1,57 @@
+name: Version
+
+# Manually cut a release. Pick the semver bump; the new version is computed from
+# the current root package.json (the single source of truth):
+#   patch: 0.1.1 -> 0.1.2   minor: 0.1.1 -> 0.2.0   major: 0.1.1 -> 1.0.0
+#
+# It bumps both package manifests, commits, and creates + pushes a `vX.Y.Z` tag
+# (the tag is the rollback point). It then dispatches the Release workflow on
+# that tag to build the binaries and publish. We dispatch explicitly because a
+# tag pushed with GITHUB_TOKEN does not trigger `on: push` workflows, whereas
+# workflow_dispatch is allowed — so no personal access token is needed.
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Which part of the version to increment
+        type: choice
+        required: true
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write # push the bump commit + tag
+  actions: write # dispatch the Release workflow
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version and sync the extension manifest
+        id: bump
+        run: node scripts/bump-version.mjs "${{ inputs.release_type }}"
+
+      - name: Commit, tag, and push
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json apps/vscode/package.json
+          git commit -m "chore(release): v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin HEAD:${GITHUB_REF_NAME}
+          git push origin "v${VERSION}"
+
+      - name: Trigger the Release build for the new tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: gh workflow run release.yml --ref "v${VERSION}"

@@ -1,0 +1,13 @@
+# Everything is bundled into dist/ (host) and media/ (webview) by esbuild, so
+# the VSIX ships only the built output plus package.json / README / media.
+.vscode/**
+src/**
+test/**
+node_modules/**
+esbuild.mjs
+tsconfig.json
+**/*.ts
+**/*.tsx
+**/*.map
+.gitignore
+.vscodeignore
