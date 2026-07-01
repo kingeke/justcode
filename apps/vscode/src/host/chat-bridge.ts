@@ -1197,7 +1197,7 @@ export class ChatBridge {
     });
   }
 
-  private async sendSessionsList(): Promise<void> {
+  private async sendSessionsList(focus = true): Promise<void> {
     try {
       const services = await this.ensureServices();
       const summaries = await services.chatSessionService.listSessions();
@@ -1220,12 +1220,14 @@ export class ChatBridge {
           messageCount: s.messageCount,
         })),
         hasConnectedProvider: services.allProviders.length > 0,
+        focus,
       });
     } catch (error) {
       this.post({
         type: HostMessageType.SessionsList,
         sessions: [],
         hasConnectedProvider: false,
+        focus,
       });
     }
   }
@@ -1649,7 +1651,9 @@ export class ChatBridge {
     // `sendSessionsList` refreshes the session dropdown from disk (now empty
     // after a reset), so neither goes stale until the next manual reload.
     await this.sendReady();
-    await this.sendSessionsList();
+    // Only pull the user to the sessions list when the active conversation was
+    // dropped (reset/disconnect); merely adding a provider keeps them in chat.
+    await this.sendSessionsList(!stillConfigured);
   }
 
   /**

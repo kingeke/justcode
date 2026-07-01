@@ -353,6 +353,12 @@ export interface SessionsListMessage {
   sessions: WebviewSessionSummary[];
   /** True when at least one provider has credentials saved. */
   hasConnectedProvider: boolean;
+  /**
+   * When true (default), switch the webview to the sessions view. When false,
+   * only refresh the session data in place — used after a provider change so
+   * an in-progress chat isn't yanked back to the sessions list.
+   */
+  focus?: boolean;
 }
 
 /** The session title was generated; updates the chat header live. */

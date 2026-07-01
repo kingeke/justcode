@@ -371,6 +371,15 @@ export function reducer(state: ChatState, action: Action): ChatState {
     }
 
     case HostMessageType.SessionsList:
+      // A non-focusing refresh (e.g. after connecting a provider mid-chat) just
+      // updates the session data without pulling the user out of their view.
+      if (action.focus === false) {
+        return {
+          ...state,
+          sessions: action.sessions,
+          hasConnectedProvider: action.hasConnectedProvider,
+        };
+      }
       return {
         ...state,
         status: ChatStatus.Ready,
