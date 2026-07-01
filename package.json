@@ -46,7 +46,8 @@
     "install:local": "node scripts/install-local.mjs",
     "update:local": "npm run build:binary",
     "uninstall:local": "node scripts/uninstall-local.mjs",
-    "postinstall": "node scripts/postinstall.mjs"
+    "postinstall": "node scripts/postinstall.mjs",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "dependencies": {
     "@opentui/core": "^0.4.2",

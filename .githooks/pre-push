@@ -1,0 +1,13 @@
+#!/bin/sh
+# Pre-push hook: run Prettier formatting check and tests before allowing a push.
+# Bypass with `git push --no-verify` when needed.
+
+set -e
+
+echo "▶ Running Prettier check..."
+bun run prettier --check .
+
+echo "▶ Running tests..."
+bun run test
+
+echo "✓ Pre-push checks passed."
