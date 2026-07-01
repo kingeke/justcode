@@ -18,7 +18,7 @@ run('node', ['scripts/build-binary.mjs']);
 
 const binaryPath = join(repoDir, 'dist-bin', assetName());
 if (!existsSync(binaryPath)) {
-  console.error(`[just-code] expected binary not found at ${binaryPath}`);
+  console.error(`[justcode] expected binary not found at ${binaryPath}`);
   process.exit(1);
 }
 
@@ -36,7 +36,7 @@ mkdirSync(binDir, { recursive: true });
 
 // 3. Remove any prior install (including an old `npm link`) and symlink.
 try {
-  execFileSync('npm', ['rm', '-g', 'just-code'], { stdio: 'ignore' });
+  execFileSync('npm', ['rm', '-g', 'justcode'], { stdio: 'ignore' });
 } catch {
   /* nothing to unlink */
 }

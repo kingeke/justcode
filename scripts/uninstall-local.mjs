@@ -16,7 +16,7 @@ try {
 
 // Clean up an old `npm link` registration too, if present.
 try {
-  execFileSync('npm', ['rm', '-g', 'just-code'], { stdio: 'ignore' });
+  execFileSync('npm', ['rm', '-g', 'justcode'], { stdio: 'ignore' });
 } catch {
   /* ignore */
 }

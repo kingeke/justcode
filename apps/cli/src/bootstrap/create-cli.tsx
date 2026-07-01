@@ -29,6 +29,7 @@ import {
   resolveModeSystemPrompt,
 } from '@core/domain/chat-mode';
 import { APP_NAME, APP_NAME_LOWERED } from '@core/branding';
+import { getUpdateNotice } from '@core/application/update-check';
 
 interface SharedOptions {
   provider?: string;
@@ -60,6 +61,7 @@ export function createCli(): Command {
   program
     .name(APP_NAME)
     .description(`${APP_NAME} CLI`)
+    .option('-v, --version', 'Output the version number and check for updates')
     .option(
       '-p, --provider <provider>',
       'Provider to use: openai, openrouter, alibaba, ollama, lmstudio'
@@ -67,7 +69,13 @@ export function createCli(): Command {
     .option('-m, --model <model>', 'Model to use')
     .option('-s, --session <session>', 'Session identifier')
     .action(async (...args: unknown[]) => {
-      const options = getActionOptions<SharedOptions>(args);
+      const options = getActionOptions<SharedOptions & { version?: boolean }>(
+        args
+      );
+      if (options.version) {
+        await printVersion();
+        return;
+      }
       await runChat(options);
     });
 
@@ -188,6 +196,21 @@ async function confirmReset(): Promise<boolean> {
   }
 }
 
+/**
+ * Prints `<name> vX.Y.Z` and, when a newer release is known, the update notice.
+ * Backs `justcode --version` and doubles as a TUI-free way to smoke-test the
+ * update check (seed `~/.cache/justcode/update-check.json` and run it).
+ */
+async function printVersion(): Promise<void> {
+  process.stdout.write(`${APP_NAME} v${appVersion}\n`);
+  const notice = await getUpdateNotice(appVersion);
+  if (notice) {
+    process.stdout.write(
+      `Update available: v${notice.latestVersion} — ${notice.upgradeCommand}\n`
+    );
+  }
+}
+
 async function runChat(options: SharedOptions): Promise<void> {
   const appConfig = await loadAppConfig();
   const savedConfig = await readGlobalConfig(appConfig.configDirectory);
@@ -236,6 +259,10 @@ async function runChat(options: SharedOptions): Promise<void> {
   };
   applyMode(initialMode);
 
+  // Non-blocking notify-only update check: reads the cached result from a prior
+  // run (fast file read) and refreshes the cache in the background for next time.
+  const updateNotice = await getUpdateNotice(appVersion);
+
   // Point OpenTUI at our embedded, self-contained tree-sitter worker before it
   // ever spawns one, so markdown highlights in the compiled binary (see
   // configure-tree-sitter.ts). Must run before the first <markdown> renders.
@@ -265,6 +292,7 @@ async function runChat(options: SharedOptions): Promise<void> {
     React.createElement(ChatApp, {
       onExit: exit,
       version: appVersion,
+      updateNotice,
       providerId: runtime.providerId,
       savedConfig,
       configFilePath: join(appConfig.configDirectory, 'config.json'),

@@ -101,6 +101,7 @@ import { SessionPicker } from '@cli/ui/session-picker.js';
 import { ProviderId } from '@core/ports/provider-catalog.js';
 import type { ConversationSummary } from '@core/ports/conversation-repository';
 import { APP_NAME, APP_NAME_LOWERED } from '@core/branding';
+import type { UpdateNotice } from '@core/application/update-check';
 
 const MAX_COMMAND_ITEMS = 8;
 
@@ -136,6 +137,8 @@ interface ChatAppProps {
   onExit: () => void;
   /** App version, shown next to the title (e.g. "0.1.0"). */
   version: string;
+  /** A newer release, when one is available; drives the update banner. */
+  updateNotice?: UpdateNotice | null;
   /** Active provider, or undefined when nothing is connected yet. */
   providerId: ProviderId | undefined;
   savedConfig: GlobalConfig;
@@ -2748,6 +2751,19 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             ])
           }
         />
+        {props.updateNotice ? (
+          <text
+            flexShrink={0}
+            content={
+              new StyledText([
+                tc(`Update available: v${props.updateNotice.latestVersion} `, {
+                  fg: 'yellow',
+                }),
+                tc(`— ${props.updateNotice.upgradeCommand}`, { fg: MUTED }),
+              ])
+            }
+          />
+        ) : null}
         <text fg={MUTED} flexShrink={0}>
           Provider: {activeProviderId} | Session: {currentSessionLabel}
         </text>

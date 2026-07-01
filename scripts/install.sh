@@ -3,14 +3,14 @@
 # No Bun, Node, or package manager required: the binary embeds its runtime.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/kingeke/just-code/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/kingeke/justcode/main/scripts/install.sh | sh
 #
 # Environment overrides:
 #   JUSTCODE_VERSION   release tag to install (default: latest, e.g. v0.1.0)
 #   JUSTCODE_INSTALL   install directory (default: $HOME/.justcode/bin)
 set -eu
 
-REPO="kingeke/just-code"
+REPO="kingeke/justcode"
 INSTALL_DIR="${JUSTCODE_INSTALL:-$HOME/.justcode/bin}"
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$1"; }

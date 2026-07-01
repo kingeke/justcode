@@ -18,14 +18,14 @@ try {
   binary = await ensureBinary(binary);
 } catch (err) {
   console.error(
-    `[just-code] Could not obtain the platform binary: ${err.message}`
+    `[justcode] Could not obtain the platform binary: ${err.message}`
   );
   process.exit(1);
 }
 
 const child = spawn(binary, process.argv.slice(2), { stdio: 'inherit' });
 child.on('error', (err) => {
-  console.error(`[just-code] Failed to launch: ${err.message}`);
+  console.error(`[justcode] Failed to launch: ${err.message}`);
   process.exit(1);
 });
 child.on('exit', (code, signal) => {

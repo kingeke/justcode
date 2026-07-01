@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "just-code",
+      "name": "justcode",
       "dependencies": {
         "@opentui/core": "^0.4.2",
         "@opentui/react": "^0.4.2",
@@ -12,6 +12,7 @@
         "commander": "^13.1.0",
         "dedent": "^1.7.2",
         "diff": "^9.0.0",
+        "highlight.js": "^10.7.3",
         "ignore": "^7.0.5",
         "marked": "^15.0.12",
         "marked-shiki": "^1.2.1",
