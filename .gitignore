@@ -12,3 +12,4 @@ debug.log
 .test-cache/
 release.md
 .claude
+.agent
