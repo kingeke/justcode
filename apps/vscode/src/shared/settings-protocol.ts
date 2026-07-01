@@ -6,7 +6,7 @@
  * protocol since both surfaces describe the same providers.
  */
 
-import type { WebviewProvider } from '@ext/shared/protocol';
+import type { SettingsSection, WebviewProvider } from '@ext/shared/protocol';
 
 /** Discriminator for messages sent from the host to the settings webview. */
 export enum SettingsHostMessageType {
@@ -126,7 +126,7 @@ export interface SettingsMcpSaveResultMessage {
 /** Asks the settings UI to switch to a section (e.g. when opened for MCP). */
 export interface SettingsFocusSectionMessage {
   type: SettingsHostMessageType.FocusSection;
-  section: 'mcp';
+  section: SettingsSection;
 }
 
 export type SettingsHostToWebview =

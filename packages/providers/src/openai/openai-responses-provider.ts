@@ -26,13 +26,8 @@ interface OpenAiResponsesProviderOptions {
  */
 const CODEX_MODELS: ReadonlyArray<{ id: string; displayName: string }> = [
   { id: 'gpt-5.5', displayName: 'GPT-5.5' },
-  { id: 'gpt-5.5-fast', displayName: 'GPT-5.5 Fast' },
-  { id: 'gpt-5.5-pro', displayName: 'GPT-5.5 Pro' },
   { id: 'gpt-5.4', displayName: 'GPT-5.4' },
-  { id: 'gpt-5.4-fast', displayName: 'GPT-5.4 Fast' },
   { id: 'gpt-5.4-mini', displayName: 'GPT-5.4 mini' },
-  { id: 'gpt-5.4-mini-fast', displayName: 'GPT-5.4 mini Fast' },
-  { id: 'gpt-5.3-codex-spark', displayName: 'GPT-5.3 Codex Spark' },
 ];
 
 const DEFAULT_CODEX_MODEL = 'gpt-5.5';

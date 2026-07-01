@@ -643,9 +643,17 @@ export interface ConnectProviderMessage {
   type: WebviewMessageType.ConnectProvider;
 }
 
+/** A focusable tab in the Settings editor, shared across both webview protocols. */
+export enum SettingsSection {
+  Providers = 'providers',
+  Mcp = 'mcp',
+}
+
 /** The user opened Settings; the host reveals the settings editor tab. */
 export interface OpenSettingsMessage {
   type: WebviewMessageType.OpenSettings;
+  /** Optional tab to focus on open (e.g. Providers from the connect CTA). */
+  section?: SettingsSection;
 }
 
 /** The user toggled auto-approval for write tools. */

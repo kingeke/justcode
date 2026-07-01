@@ -47,7 +47,13 @@ function CopyButton({ value, label }: { value: string; label?: string }) {
 /** The VS Code "Extensions" glyph, used on the Marketplace button. */
 function MarketplaceIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      aria-hidden="true"
+    >
       <path d="M2 2h4.2v4.2H2V2Zm7.8 0H14v4.2H9.8V2ZM2 9.8h4.2V14H2V9.8Z" />
       <path d="M12.6 9.8v1.6H14.2v1.2h-1.6V14.2h-1.2v-1.6H9.8v-1.2h1.6V9.8h1.2Z" />
     </svg>
@@ -86,7 +92,13 @@ export function App() {
     <>
       <header className="nav">
         <a className="brand" href="#top">
-          <img className="brand-mark" src={emblemUrl} alt="" width={26} height={26} />
+          <img
+            className="brand-mark"
+            src={emblemUrl}
+            alt=""
+            width={26}
+            height={26}
+          />
           {APP_NAME}
         </a>
         <nav>
@@ -96,7 +108,12 @@ export function App() {
             </a>
           ))}
         </nav>
-        <a className="ghost-btn" href={repoUrl} target="_blank" rel="noreferrer">
+        <a
+          className="ghost-btn"
+          href={repoUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
           GitHub ↗
         </a>
       </header>
@@ -104,7 +121,13 @@ export function App() {
       <main id="top">
         {/* Hero */}
         <section className="hero">
-          <img className="hero-mark" src={emblemUrl} alt={`${APP_NAME} logo`} width={96} height={96} />
+          <img
+            className="hero-mark"
+            src={emblemUrl}
+            alt={`${APP_NAME} logo`}
+            width={96}
+            height={96}
+          />
           <p className="tag">Terminal · VS Code · v{__APP_VERSION__}</p>
           <h1>
             A lean, transparent coding assistant
@@ -112,8 +135,8 @@ export function App() {
           </h1>
           <p className="hero-lead">
             {APP_NAME} sends roughly <strong>550 tokens per request</strong> —
-            most of it a system prompt you can read and edit. No hidden bloat, no
-            wasted spend. Bring your own provider and your own rules.
+            most of it a system prompt you can read and edit. No hidden bloat,
+            no wasted spend. Bring your own provider and your own rules.
           </p>
 
           <div className="stats">
@@ -157,7 +180,12 @@ export function App() {
           </div>
 
           <div className="cta">
-            <a className="primary-btn" href={repoUrl} target="_blank" rel="noreferrer">
+            <a
+              className="primary-btn"
+              href={repoUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
               Get started on GitHub
             </a>
             <a className="ghost-btn" href="#support">
@@ -205,7 +233,9 @@ export function App() {
           </div>
 
           <div className="ext-install">
-            <span className="ext-install-label">Install the VS Code extension</span>
+            <span className="ext-install-label">
+              Install the VS Code extension
+            </span>
             <div className="cmd">
               <span className="cmd-label">code</span>
               <code>{extensionInstall}</code>

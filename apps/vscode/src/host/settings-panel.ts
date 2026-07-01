@@ -14,6 +14,7 @@ import {
   type SettingsMcpServerStatus,
   type SettingsWebviewToHost,
 } from '@ext/shared/settings-protocol';
+import type { SettingsSection } from '@ext/shared/protocol';
 import {
   addCustomProvider,
   disconnectProvider,
@@ -45,7 +46,7 @@ export class SettingsPanel {
   /** Resolves the OAuth flow's pending promptInput() with the user's reply. */
   private oauthInputResolve: ((value: string) => void) | undefined;
   /** A section to focus once the webview has loaded (e.g. opened for MCP). */
-  private pendingSection: 'mcp' | undefined;
+  private pendingSection: SettingsSection | undefined;
 
   public constructor(
     private readonly extensionUri: vscode.Uri,
@@ -66,9 +67,10 @@ export class SettingsPanel {
 
   /**
    * Creates the Settings tab if needed, then brings it to the foreground.
-   * An optional section focuses a specific tab (e.g. `'mcp'`) once loaded.
+   * An optional section focuses a specific tab (e.g. `'mcp'` or `'providers'`)
+   * once loaded.
    */
-  public reveal(section?: 'mcp'): void {
+  public reveal(section?: SettingsSection): void {
     this.pendingSection = section;
     if (this.panel) {
       this.panel.reveal(vscode.ViewColumn.Active);

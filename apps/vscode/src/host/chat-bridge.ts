@@ -64,6 +64,7 @@ import {
 
 import {
   HostMessageType,
+  SettingsSection,
   ToolPhase,
   WebviewMessageType,
   WebviewRole,
@@ -204,7 +205,7 @@ export class ChatBridge {
      * Reveals the Settings editor tab; injected by the view provider. An
      * optional section focuses a specific tab (e.g. `'mcp'` for MCP servers).
      */
-    private readonly onOpenSettings?: (section?: 'mcp') => void,
+    private readonly onOpenSettings?: (section?: SettingsSection) => void,
     /** Opens a workspace file in the editor; injected by the view provider. */
     private readonly onOpenFile?: (absolutePath: string) => void
   ) {
@@ -253,7 +254,7 @@ export class ChatBridge {
         this.onConnectProvider?.();
         return;
       case WebviewMessageType.OpenSettings:
-        this.onOpenSettings?.();
+        this.onOpenSettings?.(message.section);
         return;
       case WebviewMessageType.SelectProvider:
         await this.selectProvider(message.providerId);
@@ -328,7 +329,7 @@ export class ChatBridge {
       case WebviewMessageType.OpenMcpConfig:
         // Open the Settings tab's MCP section, where the user edits mcp.json in a
         // textarea and saves — which reconnects servers live (see reloadMcp).
-        this.onOpenSettings?.('mcp');
+        this.onOpenSettings?.(SettingsSection.Mcp);
         return;
       case WebviewMessageType.SyncSteeringQueue:
         // Mirror the webview's editable follow-up queue so the in-flight turn
@@ -1630,21 +1631,25 @@ export class ChatBridge {
     this.services?.disposeMcp();
     this.services = undefined;
 
-    if (!this.conversation) return;
-
-    // The active provider may have been disconnected; reload from config and
-    // re-render. Clear the model so a now-missing provider's model isn't
-    // requested.
-    const configDir = cacheDirectory();
-    const config = await readGlobalConfig(configDir);
-    const stillConfigured = Object.keys(config.providers ?? {}).includes(
-      previousProvider ?? ''
-    );
+    // If the previously active provider is no longer configured — disconnected,
+    // or wiped by a reset — drop the stale conversation and model so we don't
+    // request a now-missing provider's model.
+    const config = await readGlobalConfig(cacheDirectory());
+    const stillConfigured =
+      previousProvider !== undefined &&
+      Object.keys(config.providers ?? {}).includes(previousProvider);
     if (!stillConfigured) {
       this.conversation = undefined;
       this.activeModel = undefined;
     }
+
+    // Always re-render the live view — even with no conversation yet. Connecting
+    // a first provider must surface it without a reload, and a reset must clear
+    // the transcript. `sendReady` reflects the provider/model state;
+    // `sendSessionsList` refreshes the session dropdown from disk (now empty
+    // after a reset), so neither goes stale until the next manual reload.
     await this.sendReady();
+    await this.sendSessionsList();
   }
 
   /**

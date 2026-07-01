@@ -75,6 +75,18 @@ class InMemoryWorkspaceFiles implements WorkspaceFilePort {
   }
 }
 
+/**
+ * A conversation that already carries a title, so background title generation is
+ * skipped. Tests that record the turn's sendChat calls by order use this to keep
+ * the (separately fired) title request out of the recorded sequence. Titling
+ * itself is covered by the dedicated title tests.
+ */
+function titledConversation(
+  sessionId: string
+): ReturnType<typeof createConversation> {
+  return { ...createConversation(sessionId), title: 'Session Title' };
+}
+
 function createProviderStub(): ProviderClient {
   return {
     providerId: ProviderId.Ollama,
@@ -196,20 +208,24 @@ function createAbortableProvider(): ProviderClient {
 }
 
 function createTitleGeneratingProvider(): ProviderClient {
-  let callCount = 0;
   return {
     providerId: ProviderId.Ollama,
     async sendChat({ messages }): Promise<ChatResult> {
-      callCount += 1;
-      if (callCount === 1) {
-        return { content: 'reply:Hello there' };
+      // The title call is fired before the main turn, so identify it by its
+      // wrapped user message rather than call order.
+      const isTitleCall = messages.some(
+        (message) =>
+          message.role === 'user' && message.content.includes('<message>')
+      );
+      if (isTitleCall) {
+        expect(messages.map((message) => message.role)).toEqual([
+          'system',
+          'user',
+        ]);
+        return { content: 'Project Planning' };
       }
 
-      expect(messages.map((message) => message.role)).toEqual([
-        'system',
-        'user',
-      ]);
-      return { content: 'Project Planning' };
+      return { content: 'reply:Hello there' };
     },
     async listModels() {
       return [
@@ -367,7 +383,7 @@ describe('ChatSessionService', () => {
     const started = await service.startSession({ sessionId: 'session-1' });
     const usageEvents: number[] = [];
     const result = await service.submitMessage({
-      conversation: started.conversation,
+      conversation: { ...started.conversation, title: 'Session Title' },
       model: started.activeModel,
       content: 'Do the thing',
       requestApproval: async () => true,
@@ -470,15 +486,17 @@ describe('ChatSessionService', () => {
   it('frames the title request as data and sanitizes a runaway reply', async () => {
     const repository = new InMemoryConversationRepository();
     let titleUserMessage: string | undefined;
-    let callCount = 0;
     const provider: ProviderClient = {
       providerId: ProviderId.Ollama,
       async sendChat({ messages }): Promise<ChatResult> {
-        callCount += 1;
-        if (callCount === 1) {
+        // The title call is fired before the main turn; identify it by its
+        // wrapped user message rather than call order.
+        const userContent = messages.find((m) => m.role === 'user')?.content;
+        const isTitleCall = userContent?.includes('<message>') ?? false;
+        if (!isTitleCall) {
           return { content: 'reply:sure' };
         }
-        titleUserMessage = messages.find((m) => m.role === 'user')?.content;
+        titleUserMessage = userContent;
         // Model ignored the prompt and answered with a markdown table.
         return {
           content: '| Category | Examples |\n|---|---|\n| Grains | Rice |',
@@ -560,7 +578,7 @@ describe('ChatSessionService', () => {
     });
 
     await service.submitMessage({
-      conversation: createConversation('session-1'),
+      conversation: titledConversation('session-1'),
       model: 'llama3.1',
       content: 'Hello',
     });
@@ -606,7 +624,7 @@ describe('ChatSessionService', () => {
     });
 
     await service.submitMessage({
-      conversation: createConversation('session-1'),
+      conversation: titledConversation('session-1'),
       model: 'llama3.1',
       content: 'Hello',
     });
@@ -674,7 +692,7 @@ describe('ChatSessionService', () => {
     );
 
     const result = await service.submitMessage({
-      conversation: createConversation('session-1'),
+      conversation: titledConversation('session-1'),
       model: 'gpt',
       content: 'create a.txt',
       // No interactive approver here; opt into unattended execution so the
@@ -737,7 +755,7 @@ describe('ChatSessionService', () => {
     // while the turn runs.
     let drainCalls = 0;
     const result = await service.submitMessage({
-      conversation: createConversation('session-1'),
+      conversation: titledConversation('session-1'),
       model: 'gpt',
       content: 'create a.txt',
       drainSteering: () => {
@@ -791,7 +809,7 @@ describe('ChatSessionService', () => {
     });
 
     const result = await service.submitMessage({
-      conversation: createConversation('session-1'),
+      conversation: titledConversation('session-1'),
       model: 'gemma',
       content: 'hello',
     });
@@ -838,7 +856,7 @@ describe('ChatSessionService', () => {
     );
 
     const result = await service.submitMessage({
-      conversation: createConversation('session-1'),
+      conversation: titledConversation('session-1'),
       model: 'gpt',
       content: 'create a.txt',
       requestApproval: async () => false,
@@ -863,7 +881,7 @@ describe('ChatSessionService', () => {
     // Neither requestApproval nor allowUnattended: the write tool
     // (requiresApproval = true) must NOT run.
     const result = await service.submitMessage({
-      conversation: createConversation('session-1'),
+      conversation: titledConversation('session-1'),
       model: 'gpt',
       content: 'create a.txt',
     });
@@ -937,7 +955,7 @@ describe('ChatSessionService', () => {
 
     const approvals: string[] = [];
     const result = await service.submitMessage({
-      conversation: createConversation('session-1'),
+      conversation: titledConversation('session-1'),
       model: 'gpt',
       content: 'create a.txt',
       requestApproval: async ({ toolName }) => {
@@ -1023,7 +1041,7 @@ describe('ChatSessionService', () => {
     });
 
     await service.submitMessage({
-      conversation: createConversation('session-1'),
+      conversation: titledConversation('session-1'),
       model: 'gpt',
       content: 'do something',
       requestApproval: async () => true,
@@ -1092,7 +1110,7 @@ describe('ChatSessionService', () => {
     });
 
     const result = await service.submitMessage({
-      conversation: createConversation('session-1'),
+      conversation: titledConversation('session-1'),
       model: 'gpt',
       content: 'create a.txt',
       requestApproval: async () => true,
@@ -1164,7 +1182,7 @@ describe('ChatSessionService', () => {
     });
 
     const result = await service.submitMessage({
-      conversation: createConversation('session-1'),
+      conversation: titledConversation('session-1'),
       model: 'gpt',
       content: 'create a.txt',
       requestApproval: async () => true,
@@ -1229,7 +1247,7 @@ describe('ChatSessionService', () => {
     });
 
     const first = await service.submitMessage({
-      conversation: createConversation('session-1'),
+      conversation: titledConversation('session-1'),
       model: 'gpt',
       content: 'discover',
     });
@@ -1289,7 +1307,7 @@ describe('ChatSessionService', () => {
     });
 
     const first = await service.submitMessage({
-      conversation: createConversation('session-1'),
+      conversation: titledConversation('session-1'),
       model: 'gpt',
       content: 'hello',
     });

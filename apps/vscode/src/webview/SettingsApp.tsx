@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import {
   AuthMethod,
+  SettingsSection,
   WebviewProviderKind,
   type WebviewProvider,
 } from '@ext/shared/protocol';
@@ -135,7 +136,9 @@ export function SettingsApp(): React.JSX.Element {
           });
           break;
         case SettingsHostMessageType.FocusSection:
-          if (message.section === 'mcp') setTab(Tab.Mcp);
+          if (message.section === SettingsSection.Mcp) setTab(Tab.Mcp);
+          else if (message.section === SettingsSection.Providers)
+            setTab(Tab.Providers);
           break;
       }
     });
@@ -1068,9 +1071,9 @@ function McpTab({
       <h2 className="settings-section-title">MCP Servers</h2>
       <p className="settings-hint mcp-intro">
         Define MCP servers as JSON — a local <code>command</code> or a remote{' '}
-        <code>url</code> (over HTTP). On save, {APP_NAME} connects to each server
-        and adds its tools — manage them under the tools button in chat. Changes
-        apply immediately.
+        <code>url</code> (over HTTP). On save, {APP_NAME} connects to each
+        server and adds its tools — manage them under the tools button in chat.
+        Changes apply immediately.
       </p>
 
       <textarea

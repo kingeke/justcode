@@ -393,6 +393,24 @@ export class ChatSessionService {
     let usage: TokenUsage | undefined;
     let reply = '';
 
+    // Title generation is a separate, short model call. Fire it *before* the main
+    // turn so the name request goes out first and resolves in parallel — not
+    // after the whole turn (and any tool round-trips) finishes. Only the model
+    // call runs now; persisting the result is deferred until after this turn's own
+    // save (below), so a fast title can never clobber the messages this turn is
+    // about to write. Left undefined when the session is already titled/in-flight.
+    let titlePromise: Promise<string | undefined> | undefined;
+    if (
+      !input.conversation.title &&
+      !this.titledSessions.has(input.conversation.sessionId)
+    ) {
+      this.titledSessions.add(input.conversation.sessionId);
+      titlePromise = this.generateSessionTitle({
+        model: input.model,
+        userMessage: trimmedContent,
+      });
+    }
+
     // The agent keeps taking tool-call turns until the model stops asking for
     // tools (or the request is aborted). There's no round-trip cap: the work is
     // done when the model says it's done, not after an arbitrary N steps.
@@ -576,18 +594,14 @@ export class ChatSessionService {
 
     await this.repository.save(updatedConversation);
 
-    // Title generation is a separate model call. Run it in the background so it
-    // never holds up the turn result — the user can keep typing while it
-    // resolves, and the title is delivered via onTitle once ready.
-    if (
-      !updatedConversation.title &&
-      !this.titledSessions.has(updatedConversation.sessionId)
-    ) {
-      this.titledSessions.add(updatedConversation.sessionId);
-      void this.generateSessionTitleInBackground({
+    // The title call was kicked off before the turn; now that this turn's
+    // messages are on disk, persist the title without clobbering them. Runs off
+    // the critical path so it never delays the turn result, and is delivered via
+    // onTitle once ready.
+    if (titlePromise) {
+      void this.persistSessionTitle({
         sessionId: updatedConversation.sessionId,
-        model: input.model,
-        userMessage: trimmedContent,
+        titlePromise,
         ...(input.onTitle ? { onTitle: input.onTitle } : {}),
       });
     }
@@ -732,20 +746,18 @@ export class ChatSessionService {
   }
 
   /**
-   * Generates a title off the critical path, then persists it without
-   * clobbering any newer messages: it re-loads the latest conversation and
-   * only sets the title if one still hasn't been assigned.
+   * Awaits a title model call that was fired at the start of the turn, then
+   * persists the result off the critical path without clobbering any newer
+   * messages: it re-loads the latest conversation and only sets the title if one
+   * still hasn't been assigned. Called after the turn's own save, so the reload
+   * always sees this turn's messages.
    */
-  private async generateSessionTitleInBackground(input: {
+  private async persistSessionTitle(input: {
     sessionId: string;
-    model: string;
-    userMessage: string;
+    titlePromise: Promise<string | undefined>;
     onTitle?: (sessionId: string, title: string) => void;
   }): Promise<void> {
-    const title = await this.generateSessionTitle({
-      model: input.model,
-      userMessage: input.userMessage,
-    });
+    const title = await input.titlePromise;
     if (!title) {
       // Let a later turn retry, matching the original retry-on-failure behavior.
       this.titledSessions.delete(input.sessionId);

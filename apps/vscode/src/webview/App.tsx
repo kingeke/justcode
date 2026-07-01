@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import {
   HostMessageType,
+  SettingsSection,
   WebviewMessageType,
   WebviewRole,
   type WebviewImage,
@@ -405,8 +406,11 @@ export function App(): React.JSX.Element {
 
   const connectProvider = (): void => {
     // Connecting (including OAuth sign-in) happens inline in the Settings tab;
-    // reveal it rather than shelling out to the CLI in a terminal.
-    postToHost({ type: WebviewMessageType.OpenSettings });
+    // reveal it focused on Providers rather than shelling out to the CLI.
+    postToHost({
+      type: WebviewMessageType.OpenSettings,
+      section: SettingsSection.Providers,
+    });
   };
 
   const openSettings = (): void => {
