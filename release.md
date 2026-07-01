@@ -93,6 +93,7 @@ Per-channel notes:
 
   A proper Marketplace listing also wants a 128×128 PNG `icon` field in
   `apps/vscode/package.json` (only an SVG activity-bar icon exists today).
+
 - If the GitHub repo differs from `kingeke/justcode`, update
   `repository`/`homepage`/`bugs` (download URLs derive from `repository.url`).
 
@@ -106,7 +107,7 @@ detected from the binary's path). See
 `packages/core/src/application/update-check.ts`.
 
 - The check is fully non-blocking: the banner on a given run comes from the
-  *previous* run's cached result (`~/.cache/justcode/update-check.json`), while
+  _previous_ run's cached result (`~/.cache/justcode/update-check.json`), while
   the current run refreshes that cache in the background at most once a day.
 - It sends nothing about the user — only an anonymous read of the releases API.
 - `JUSTCODE_NO_UPDATE_CHECK=1` disables it; it is also skipped in local dev
