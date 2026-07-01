@@ -14,9 +14,10 @@ const rootPkg = JSON.parse(
 );
 
 export default defineConfig({
-  // GitHub Pages serves a project site under /<repo>/, so assets must be
-  // requested from that base. Change if the repo is renamed or served at root.
-  base: '/justcode/',
+  // Served at the root of the custom domain (justcodeapp.dev), so assets are
+  // requested from '/'. The CNAME in public/ keeps the domain across deploys.
+  // Revert to '/<repo>/' if the site ever moves back to a GitHub project path.
+  base: '/',
   plugins: [react()],
   resolve: {
     // Reuse the brand constant instead of hard-coding the name a second time.
