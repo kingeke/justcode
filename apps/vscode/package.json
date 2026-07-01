@@ -2,7 +2,7 @@
   "name": "justcode-vscode",
   "displayName": "JustCode",
   "description": "A lean, transparent coding assistant — bring your own provider, control every token.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "kingeke",
   "license": "MIT",
   "private": true,
