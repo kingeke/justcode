@@ -1,6 +1,6 @@
 {
   "name": "justcode-cli",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": false,
   "description": "JustCode - an interactive terminal coding assistant CLI",
   "license": "MIT",
