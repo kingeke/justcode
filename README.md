@@ -8,8 +8,13 @@
 
 <p align="center">
   <a href="https://kingeke.github.io/justcode/">Website</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="release.md">Releasing</a> ·
   <a href="https://github.com/kingeke/justcode/issues">Issues</a>
+</p>
+
+<p align="center">
+  <strong>Free and open source (MIT) — and open to contributions.</strong>
 </p>
 
 ---
@@ -115,23 +120,20 @@ npm run web        # run the landing page (apps/web) locally
 
 ## Contributing
 
-Contributions are welcome — bug reports, fixes, and features alike.
+JustCode is **open source and open to contributions** — bug reports, docs,
+fixes, and features are all welcome.
 
 1. Fork the repo and branch off `main`.
 2. Install dependencies with `npm install` (builds require [Bun](https://bun.sh)).
 3. Make your change, matching the surrounding style and the
    [repository layout](#repository-layout) above.
-4. Before opening a pull request, make sure the checks pass:
+4. Run the checks (`npm run typecheck`, `npm test`, `npm run format`), then open
+   a PR describing the change.
 
-   ```bash
-   npm run typecheck
-   npm test
-   npm run format
-   ```
-
-5. Open a PR describing the change. For anything large, please
-   [open an issue](https://github.com/kingeke/justcode/issues) first to discuss
-   the approach.
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full setup, conventions, and
+pull-request guidelines. For anything large, please
+[open an issue](https://github.com/kingeke/justcode/issues) first to discuss the
+approach.
 
 Found a bug or have an idea? [Open an issue](https://github.com/kingeke/justcode/issues).
 
