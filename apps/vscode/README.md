@@ -1,6 +1,6 @@
 # JustCode for VS Code
 
-**A lean, transparent coding assistant in your sidebar — where *you* control
+**A lean, transparent coding assistant in your sidebar — where _you_ control
 every token.**
 
 Most AI coding tools quietly inflate every request with huge hidden prompts you
