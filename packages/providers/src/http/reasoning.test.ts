@@ -9,12 +9,20 @@ import {
 describe('normalizeEffortLevels', () => {
   it('keeps known levels (including xhigh) in low→high order and drops unknowns', () => {
     expect(
-      normalizeEffortLevels(['xhigh', 'high', 'medium', 'low', 'minimal'])
+      normalizeEffortLevels([
+        'max',
+        'xhigh',
+        'high',
+        'medium',
+        'low',
+        'minimal',
+      ])
     ).toEqual([
       ReasoningEffort.Low,
       ReasoningEffort.Medium,
       ReasoningEffort.High,
       ReasoningEffort.XHigh,
+      ReasoningEffort.Max,
     ]);
   });
 });
@@ -27,6 +35,7 @@ describe('reasoningCapabilityFromEfforts', () => {
       'medium',
       'high',
       'xhigh',
+      'max',
     ]);
 
     expect(capability).toEqual({
@@ -35,6 +44,7 @@ describe('reasoningCapabilityFromEfforts', () => {
         ReasoningEffort.Medium,
         ReasoningEffort.High,
         ReasoningEffort.XHigh,
+        ReasoningEffort.Max,
       ],
       mandatory: false,
       defaultEffort: ReasoningEffort.Medium,

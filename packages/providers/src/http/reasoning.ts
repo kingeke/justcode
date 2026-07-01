@@ -57,6 +57,7 @@ const EFFORT_ORDER: ReasoningEffort[] = [
   ReasoningEffort.Medium,
   ReasoningEffort.High,
   ReasoningEffort.XHigh,
+  ReasoningEffort.Max,
 ];
 
 /** Parses a provider effort string into the enum, or undefined when unknown. */
@@ -114,5 +115,7 @@ export function thinkingBudgetTokens(effort: ReasoningEffort): number {
       return 16384;
     case ReasoningEffort.XHigh:
       return 24576;
+    case ReasoningEffort.Max:
+      return 32768;
   }
 }

@@ -52,8 +52,9 @@ export enum ReasoningEffort {
   Low = 'low',
   Medium = 'medium',
   High = 'high',
-  /** Some providers (e.g. GitHub Copilot's GPT-5 family) offer a level above high. */
+  /** Some providers (e.g. GitHub Copilot's GPT-5 family) offer levels above high. */
   XHigh = 'xhigh',
+  Max = 'max',
 }
 
 /**
