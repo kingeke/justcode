@@ -9,9 +9,8 @@ request**, and most of that is a **system prompt you can read and edit** to be
 exactly what you want. No hidden bloat, no wasted spend — your context, your
 rules.
 
-It supports OpenAI, Ollama, and LM Studio, loads provider configuration from
-environment variables, keeps file-backed conversation history, and includes
-automated tests.
+It supports OpenAI, Ollama, and LM Studio, load custom providers from any OpenAI compatible
+endpoint configuration, keeps file-backed conversation history, MCP servers and much more.
 
 ### Local install (from this repo)
 
