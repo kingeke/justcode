@@ -55,6 +55,10 @@ jobs:
         with:
           files: artifacts/justcode-*
           fail_on_unmatched_files: true
+          # Auto-build the "What's Changed" + "New Contributors" notes from the
+          # merged PRs since the previous tag (same as GitHub's "Generate release
+          # notes" button). Requires PRs to populate; direct pushes won't appear.
+          generate_release_notes: true
 
   # Publishes the npm launcher package (users get the binary via the postinstall
   # download). Requires the NPM_TOKEN secret; the package (justcode-cli) is
