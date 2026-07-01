@@ -117,7 +117,7 @@ export interface WebviewSessionSummary {
 }
 
 /** Reasoning/thinking intensity, mirrors `@core` ReasoningEffort enum values. */
-export type WebviewReasoningEffort = 'low' | 'medium' | 'high';
+export type WebviewReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 
 /** A reasoning choice the user can pick: an effort level, or explicit "off". */
 export type WebviewReasoningChoice = WebviewReasoningEffort | 'off';

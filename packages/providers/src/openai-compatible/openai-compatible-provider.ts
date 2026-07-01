@@ -22,7 +22,10 @@ import {
   type RawOpenAiToolCall,
 } from '@providers/openai-compatible/openai-wire';
 import { sendResponsesRequest } from '@providers/openai/openai-responses-client';
-import { openAiReasoningCapability } from '@providers/http/reasoning';
+import {
+  openAiReasoningCapability,
+  reasoningCapabilityFromEfforts,
+} from '@providers/http/reasoning';
 
 interface OpenAiCompatibleProviderOptions {
   providerId: ProviderId;
@@ -48,6 +51,12 @@ interface OpenAiModelsResponse {
      * OpenAI/legacy models, which do work via /chat/completions.
      */
     supported_endpoints?: string[];
+    /**
+     * Copilot-only: per-model capabilities. `supports.reasoning_effort` lists the
+     * effort levels the model accepts (e.g. ["none","low","medium","high","xhigh"]),
+     * which we translate into the model's reasoning picker.
+     */
+    capabilities?: { supports?: { reasoning_effort?: string[] } };
   }>;
 }
 
@@ -273,10 +282,13 @@ export class OpenAiCompatibleProvider implements ProviderClient {
 
     return (response.data ?? [])
       .map((model) => {
-        // Advertise reasoning for models that accept `reasoning_effort` (o-series,
-        // GPT-5, gpt-oss) so the picker appears without the user hand-editing the
-        // models cache. Other models get no reasoning capability.
-        const reasoning = openAiReasoningCapability(model.id);
+        // Prefer the effort levels the provider explicitly advertises (Copilot
+        // reports `capabilities.supports.reasoning_effort`); otherwise fall back to
+        // the id heuristic (o-series, GPT-5, gpt-oss). Other models get none.
+        const reasoning =
+          reasoningCapabilityFromEfforts(
+            model.capabilities?.supports?.reasoning_effort ?? []
+          ) ?? openAiReasoningCapability(model.id);
         return {
           id: model.id,
           displayName: model.id,

@@ -56,6 +56,7 @@ const EFFORT_ORDER: ReasoningEffort[] = [
   ReasoningEffort.Low,
   ReasoningEffort.Medium,
   ReasoningEffort.High,
+  ReasoningEffort.XHigh,
 ];
 
 /** Parses a provider effort string into the enum, or undefined when unknown. */
@@ -63,6 +64,29 @@ export function toReasoningEffort(
   value: string | undefined
 ): ReasoningEffort | undefined {
   return EFFORT_ORDER.find((effort) => effort === value);
+}
+
+/**
+ * Builds a reasoning capability from a provider's explicitly advertised effort
+ * list (e.g. GitHub Copilot's `capabilities.supports.reasoning_effort`). A list
+ * containing "none" means reasoning can be turned off (not mandatory); otherwise
+ * the model always reasons. Unknown levels are dropped; returns undefined when no
+ * known levels remain so callers can fall back to id-based heuristics.
+ */
+export function reasoningCapabilityFromEfforts(
+  supported: readonly string[]
+): ModelReasoning | undefined {
+  const effortLevels = normalizeEffortLevels([...supported]);
+  if (effortLevels.length === 0) return undefined;
+  const mandatory = !supported.includes('none');
+  const defaultEffort = effortLevels.includes(ReasoningEffort.Medium)
+    ? ReasoningEffort.Medium
+    : effortLevels[0];
+  return {
+    effortLevels,
+    mandatory,
+    ...(defaultEffort ? { defaultEffort } : {}),
+  };
 }
 
 /**
@@ -88,5 +112,7 @@ export function thinkingBudgetTokens(effort: ReasoningEffort): number {
       return 8192;
     case ReasoningEffort.High:
       return 16384;
+    case ReasoningEffort.XHigh:
+      return 24576;
   }
 }
