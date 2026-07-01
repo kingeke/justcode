@@ -298,12 +298,6 @@ function ProvidersTab({
     (p) => !p.connected && matchesSearch(p, search)
   );
 
-  const hasOAuthOnly = available.some(
-    (p) =>
-      p.kind === WebviewProviderKind.OAuth &&
-      !p.authMethods.includes(AuthMethod.ApiKey)
-  );
-
   return (
     <div className="settings-section">
       <h2 className="settings-section-title">Providers</h2>
@@ -372,13 +366,6 @@ function ProvidersTab({
       {search && connected.length === 0 && available.length === 0 ? (
         <p className="settings-hint">
           No providers match &ldquo;{search}&rdquo;.
-        </p>
-      ) : null}
-
-      {hasOAuthOnly ? (
-        <p className="settings-hint">
-          Sign-in providers (e.g. GitHub Copilot) open your browser to complete
-          the OAuth flow, then connect automatically.
         </p>
       ) : null}
 

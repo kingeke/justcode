@@ -575,7 +575,7 @@ export function App(): React.JSX.Element {
             <button
               type="button"
               className="no-provider-btn"
-              onClick={openSettings}
+              onClick={connectProvider}
             >
               Connect Providers
             </button>
