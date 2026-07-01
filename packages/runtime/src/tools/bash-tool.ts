@@ -104,10 +104,30 @@ export class BashTool implements Tool {
     context: ToolExecutionContext
   ): Promise<ToolResult> {
     return new Promise<ToolResult>((resolve) => {
+      // `detached` puts the shell in its own process group so we can signal the
+      // whole tree (see `kill` below). Without this, killing only the shell
+      // leaves forked children (e.g. `sleep`) alive holding the stdout/stderr
+      // pipes open, so `close` never fires and the command appears to hang.
       const child = spawn(command, {
         shell: true,
         cwd: context.workspaceRoot,
+        detached: true,
       });
+
+      // Signal the whole process group (negative pid) so children die with the
+      // shell. Falls back to signaling just the child if the group is already
+      // gone (ESRCH) or the platform lacks group semantics.
+      const kill = (signal: NodeJS.Signals): void => {
+        try {
+          if (child.pid !== undefined) {
+            process.kill(-child.pid, signal);
+          } else {
+            child.kill(signal);
+          }
+        } catch {
+          child.kill(signal);
+        }
+      };
 
       let output = '';
       let truncated = false;
@@ -128,12 +148,12 @@ export class BashTool implements Tool {
       let killReason: 'timeout' | 'aborted' | undefined;
       const timer = setTimeout(() => {
         killReason = 'timeout';
-        child.kill('SIGTERM');
+        kill('SIGTERM');
       }, timeoutMs);
 
       const onAbort = (): void => {
         killReason = 'aborted';
-        child.kill('SIGTERM');
+        kill('SIGTERM');
       };
       context.signal?.addEventListener('abort', onAbort, { once: true });
       if (context.signal?.aborted) {
