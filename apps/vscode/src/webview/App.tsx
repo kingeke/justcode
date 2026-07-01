@@ -671,6 +671,12 @@ export function App(): React.JSX.Element {
         </button>
       </div>
 
+      {state.workspaceRoot ? (
+        <div className="workspace-dir" title={state.workspaceRoot}>
+          {state.workspaceRoot}
+        </div>
+      ) : null}
+
       <div className="transcript-wrap">
         <div
           className="transcript"

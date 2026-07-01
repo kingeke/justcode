@@ -39,6 +39,7 @@ describe('deletion persistence through a turn', () => {
       mcpLoading: false,
       modes: [],
       activeModeId: 'build',
+      workspaceRoot: '/tmp/workspace',
     });
 
     state = reducer(state, {

@@ -2804,6 +2804,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           />
         ) : null}
         <text fg={MUTED} flexShrink={0}>
+          Dir: {process.cwd()}
+        </text>
+        <text fg={MUTED} flexShrink={0}>
           Provider: {activeProviderId} | Session: {currentSessionLabel}
         </text>
         <text fg={MUTED} flexShrink={0}>

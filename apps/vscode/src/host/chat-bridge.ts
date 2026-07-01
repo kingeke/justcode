@@ -476,6 +476,7 @@ export class ChatBridge {
         modes: this.modes,
         activeModeId: this.activeModeId,
         reasoningEffortByModel: this.reasoningEffortByModel,
+        workspaceRoot: this.workspaceRoot,
         resolvedFiles: {},
       });
       return;
@@ -534,6 +535,7 @@ export class ChatBridge {
         modes: this.modes,
         activeModeId: this.activeModeId,
         reasoningEffortByModel: this.reasoningEffortByModel,
+        workspaceRoot: this.workspaceRoot,
         resolvedFiles: {},
       });
       return;
@@ -594,6 +596,7 @@ export class ChatBridge {
         modes: this.modes,
         activeModeId: this.activeModeId,
         reasoningEffortByModel: this.reasoningEffortByModel,
+        workspaceRoot: this.workspaceRoot,
         resolvedFiles,
         ...(session.conversation.title !== undefined
           ? { sessionTitle: session.conversation.title }
@@ -654,6 +657,7 @@ export class ChatBridge {
         modes: this.modes,
         activeModeId: this.activeModeId,
         reasoningEffortByModel: this.reasoningEffortByModel,
+        workspaceRoot: this.workspaceRoot,
         resolvedFiles,
         ...(conversation.title !== undefined
           ? { sessionTitle: conversation.title }
@@ -1283,6 +1287,7 @@ export class ChatBridge {
           modes: this.modes,
           activeModeId: this.activeModeId,
           reasoningEffortByModel: this.reasoningEffortByModel,
+          workspaceRoot: this.workspaceRoot,
           resolvedFiles,
           ...(conversation.title !== undefined
             ? { sessionTitle: conversation.title }
@@ -1829,6 +1834,7 @@ export class ChatBridge {
         modes: this.modes,
         activeModeId: this.activeModeId,
         reasoningEffortByModel: this.reasoningEffortByModel,
+        workspaceRoot: this.workspaceRoot,
         resolvedFiles: {},
       });
       return;

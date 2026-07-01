@@ -350,6 +350,8 @@ export interface ReadyMessage {
    */
   resolvedFiles: Record<string, WebviewResolvedFile>;
   sessionTitle?: string | undefined;
+  /** Absolute path of the workspace folder backing this session. */
+  workspaceRoot: string;
 }
 
 /** The sessions-list screen; sent on init or when the user navigates back. */

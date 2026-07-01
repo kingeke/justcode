@@ -27,7 +27,7 @@ export interface UpdateNotice {
   currentVersion: string;
   latestVersion: string;
   channel: UpdateChannel;
-  /** Human-readable instruction, e.g. "brew upgrade justcode". */
+  /** Human-readable instruction, e.g. "brew update && brew upgrade justcode". */
   upgradeCommand: string;
 }
 
@@ -114,7 +114,10 @@ export function upgradeCommandFor(channel: UpdateChannel): string {
     case 'npm':
       return `npm update -g ${pkg.name}`;
     case 'brew':
-      return `brew upgrade ${APP_NAME_LOWERED}`;
+      // `brew update` first so the tap's formula bump is fetched; without it a
+      // stale local tap makes `brew upgrade` a confusing no-op ("already
+      // installed") even when a newer release exists.
+      return `brew update && brew upgrade ${APP_NAME_LOWERED}`;
     case 'curl':
       return slug
         ? `curl -fsSL https://raw.githubusercontent.com/${slug}/main/scripts/install.sh | sh`

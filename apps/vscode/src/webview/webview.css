@@ -88,6 +88,16 @@ body {
   min-width: 0;
 }
 
+.workspace-dir {
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  border-bottom: 1px solid var(--vscode-panel-border, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .notice {
   padding: 8px;
   margin-bottom: 8px;

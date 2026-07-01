@@ -49,7 +49,9 @@ describe('detectChannel', () => {
 describe('upgradeCommandFor', () => {
   it('gives the package-manager command per channel', () => {
     expect(upgradeCommandFor('npm')).toContain('npm update -g');
-    expect(upgradeCommandFor('brew')).toContain('brew upgrade');
+    // `brew update` must come first so a stale local tap is refreshed before
+    // the upgrade (otherwise `brew upgrade` is a no-op on an old formula).
+    expect(upgradeCommandFor('brew')).toContain('brew update && brew upgrade');
     expect(upgradeCommandFor('curl')).toContain('install.sh');
     expect(upgradeCommandFor('unknown')).toMatch(/releases/i);
   });

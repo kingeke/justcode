@@ -86,6 +86,7 @@ describe('queued messages', () => {
       mcpLoading: false,
       modes: [],
       activeModeId: 'build',
+      workspaceRoot: '/tmp/workspace',
     });
 
     expect(state.queuedMessages).toHaveLength(0);

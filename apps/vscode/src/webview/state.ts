@@ -165,6 +165,8 @@ export interface ChatState {
    * the host the first time an `@` mention opens and filtered locally after.
    */
   workspaceFiles: string[];
+  /** Absolute path of the workspace folder backing this session. */
+  workspaceRoot: string;
   /** A file's symbols for `@path::method` completions, cached by path. */
   fileSymbols: Record<string, string[]>;
 }
@@ -202,6 +204,7 @@ export const initialState: ChatState = {
   resolvedFiles: {},
   queuedMessages: [],
   workspaceFiles: [],
+  workspaceRoot: '',
   fileSymbols: {},
 };
 
@@ -317,6 +320,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         activeModeId: action.activeModeId,
         reasoningEffortByModel: action.reasoningEffortByModel,
         sessionTitle: action.sessionTitle,
+        workspaceRoot: action.workspaceRoot,
         // Restore the resolutions saved for this session so a resumed chat keeps
         // already-kept/undone files dismissed instead of resurfacing them.
         resolvedFiles: action.resolvedFiles,
