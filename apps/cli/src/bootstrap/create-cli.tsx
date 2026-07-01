@@ -59,7 +59,7 @@ export function createCli(): Command {
 
   program
     .name(APP_NAME)
-    .description('Just Code CLI')
+    .description('JustCode CLI')
     .option(
       '-p, --provider <provider>',
       'Provider to use: openai, openrouter, alibaba, ollama, lmstudio'

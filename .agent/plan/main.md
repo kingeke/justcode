@@ -1,8 +1,8 @@
-# Just Code v1 Plan
+# JustCode v1 Plan
 
 ## High-Level Architecture
 
-Just Code should be a monorepo with a strict boundary between UI, application logic, domain, and infrastructure.
+JustCode should be a monorepo with a strict boundary between UI, application logic, domain, and infrastructure.
 
 The key architectural choice for v1: the CLI is the source of truth and the brain. The VS Code extension is a thin client that delegates work to the CLI through a transport layer. That keeps the model, provider, and tool logic in one place and avoids duplicating behavior across surfaces.
 

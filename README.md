@@ -1,4 +1,4 @@
-# Just Code
+# JustCode
 
 **A lean, transparent terminal coding assistant where _you_ control every token.**
 

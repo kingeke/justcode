@@ -42,6 +42,6 @@ class Justcode < Formula
   end
 
   test do
-    assert_match "Just Code CLI", shell_output("#{bin}/justcode --help")
+    assert_match "JustCode CLI", shell_output("#{bin}/justcode --help")
   end
 end
