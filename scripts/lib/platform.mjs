@@ -1,7 +1,7 @@
 // Shared platform <-> asset-name mapping used by the binary build, the npm
 // launcher/postinstall, and (mirrored in shell) the curl installer + brew
-// formula. Keep the naming convention here in sync with scripts/install.sh,
-// Formula/justcode.rb, and .github/workflows/release.yml.
+// formula. Keep the naming convention here in sync with scripts/install.sh and
+// the Homebrew formula generated in .github/workflows/release.yml.
 
 const OS_MAP = { darwin: 'darwin', linux: 'linux', win32: 'windows' };
 const ARCH_MAP = { arm64: 'arm64', x64: 'x64' };

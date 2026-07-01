@@ -119,11 +119,33 @@ jobs:
           end
           EOF
 
+          cat > tap/README.md <<'README'
+          # JustCode Homebrew Tap
+
+          Homebrew tap for [JustCode](https://github.com/kingeke/justcode) — a lean, transparent terminal coding assistant where *you* control every token.
+
+          ## Install
+
+          ```sh
+          brew tap kingeke/justcode
+          brew install justcode
+          ```
+
+          Then run `justcode`.
+
+          ## Links
+
+          - Website: https://justcodeapp.dev
+          - Source & issues: https://github.com/kingeke/justcode
+
+          _This tap is updated automatically by the JustCode release workflow; manual edits may be overwritten._
+          README
+
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/justcode.rb
-          git commit -m "justcode ${VERSION}" || { echo "formula unchanged"; exit 0; }
+          git add -A
+          git commit -m "justcode ${VERSION}" || { echo "nothing to update"; exit 0; }
           git push
 
   # Publishes the npm launcher package (users get the binary via the postinstall
