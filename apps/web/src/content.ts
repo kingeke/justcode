@@ -221,7 +221,7 @@ export const installCommands: { label: string; command: string }[] = [
     command:
       'curl -fsSL https://raw.githubusercontent.com/kingeke/justcode/main/scripts/install.sh | sh',
   },
-  { label: 'npm', command: 'npm install -g justcode' },
+  { label: 'npm', command: 'npm install -g justcode-cli' },
   {
     label: 'brew',
     command: 'brew tap kingeke/justcode && brew install justcode',

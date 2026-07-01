@@ -49,7 +49,7 @@ self-contained binary — no runtime prerequisites):
 curl -fsSL https://raw.githubusercontent.com/kingeke/justcode/main/scripts/install.sh | sh
 
 # npm / bun / pnpm
-npm install -g justcode
+npm install -g justcode-cli
 
 # Homebrew
 brew tap kingeke/justcode && brew install justcode
