@@ -14,7 +14,11 @@ import type {
   OAuthCredentials,
 } from '@core/ports/provider-catalog';
 import type { GlobalConfig } from '@runtime/persistence/global-config';
-import { DEFAULT_SYSTEM_PROMPT } from '@core/application/system-prompt';
+import {
+  ASK_SYSTEM_PROMPT,
+  DEFAULT_SYSTEM_PROMPT,
+  PLAN_SYSTEM_PROMPT,
+} from '@core/application/system-prompt';
 
 export interface AppConfig {
   /** Provider to use on launch, or undefined when nothing is configured yet. */
@@ -24,6 +28,10 @@ export interface AppConfig {
   configDirectory: string;
   sessionsDirectory: string;
   systemPrompt: string;
+  /** Ask mode system prompt (defaults applied). */
+  askSystemPrompt: string;
+  /** Plan mode system prompt (defaults applied). */
+  planSystemPrompt: string;
   /** Whether local providers refetch their model list on every load (default true). */
   localModelAutoRefresh: boolean;
   /**
@@ -75,15 +83,21 @@ export async function loadAppConfig(
   const targetConfigDir = configDirectory ?? cacheDirectory();
 
   const globalConfig = await readGlobalConfig(targetConfigDir);
-  const configWithDefaults =
-    globalConfig.systemPrompt === undefined
-      ? {
-          ...globalConfig,
-          systemPrompt: DEFAULT_SYSTEM_PROMPT,
-        }
-      : globalConfig;
+  // Persist any missing mode prompt so all three (Build/Ask/Plan) are visible in
+  // config.json for the user to edit, while an explicitly-set value (even empty)
+  // is preserved untouched.
+  const needsPromptDefaults =
+    globalConfig.systemPrompt === undefined ||
+    globalConfig.askSystemPrompt === undefined ||
+    globalConfig.planSystemPrompt === undefined;
+  const configWithDefaults = {
+    ...globalConfig,
+    systemPrompt: globalConfig.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+    askSystemPrompt: globalConfig.askSystemPrompt ?? ASK_SYSTEM_PROMPT,
+    planSystemPrompt: globalConfig.planSystemPrompt ?? PLAN_SYSTEM_PROMPT,
+  };
 
-  if (globalConfig.systemPrompt === undefined) {
+  if (needsPromptDefaults) {
     await writeGlobalConfig(targetConfigDir, configWithDefaults);
   }
 
@@ -115,6 +129,8 @@ export async function loadAppConfig(
     configDirectory: targetConfigDir,
     sessionsDirectory: join(targetConfigDir, 'sessions'),
     systemPrompt: configWithDefaults.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+    askSystemPrompt: configWithDefaults.askSystemPrompt ?? ASK_SYSTEM_PROMPT,
+    planSystemPrompt: configWithDefaults.planSystemPrompt ?? PLAN_SYSTEM_PROMPT,
     localModelAutoRefresh: configWithDefaults.localModelAutoRefresh ?? true,
     lazyToolLoading: configWithDefaults.lazyToolLoading ?? true,
     disabledTools: configWithDefaults.disabledTools ?? [],

@@ -3,7 +3,11 @@ import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 
 import { loadAppConfig, parseProviderId } from '@runtime/config/app-config';
 import { join } from 'node:path';
-import { DEFAULT_SYSTEM_PROMPT } from '@core/application/system-prompt';
+import {
+  ASK_SYSTEM_PROMPT,
+  DEFAULT_SYSTEM_PROMPT,
+  PLAN_SYSTEM_PROMPT,
+} from '@core/application/system-prompt';
 
 vi.mock('node:fs/promises', () => ({
   mkdir: vi.fn(),
@@ -136,13 +140,40 @@ describe('loadAppConfig', () => {
     );
   });
 
-  it('preserves an explicitly empty system prompt', async () => {
-    vi.mocked(readFile).mockResolvedValue(JSON.stringify({ systemPrompt: '' }));
+  it('preserves explicitly empty mode prompts without rewriting', async () => {
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({
+        systemPrompt: '',
+        askSystemPrompt: '',
+        planSystemPrompt: '',
+      })
+    );
 
     const config = await loadAppConfig(mockConfigDir);
 
     expect(config.systemPrompt).toBe('');
+    expect(config.askSystemPrompt).toBe('');
+    expect(config.planSystemPrompt).toBe('');
     expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it('defaults and persists the Ask and Plan prompts when missing', async () => {
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({ systemPrompt: 'my custom build prompt' })
+    );
+
+    const config = await loadAppConfig(mockConfigDir);
+
+    // The explicit Build prompt is kept; Ask/Plan are filled from the defaults.
+    expect(config.systemPrompt).toBe('my custom build prompt');
+    expect(config.askSystemPrompt).toBe(ASK_SYSTEM_PROMPT);
+    expect(config.planSystemPrompt).toBe(PLAN_SYSTEM_PROMPT);
+    // Missing prompts are written back so they show up in config.json.
+    expect(writeFile).toHaveBeenCalledWith(
+      join(mockConfigDir, 'config.json'),
+      expect.stringContaining('askSystemPrompt'),
+      expect.objectContaining({ encoding: 'utf8' })
+    );
   });
 });
 

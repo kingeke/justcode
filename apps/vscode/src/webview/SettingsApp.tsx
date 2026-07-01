@@ -18,6 +18,7 @@ import {
 } from '@ext/webview/vscode-api';
 import { PlusIcon } from '@ext/webview/components/Icons';
 import { APP_NAME } from '@core/branding';
+import { CRYPTO_WALLETS, KOFI_URL } from '@core/support';
 
 const KIND_LABELS: Record<WebviewProviderKind, string> = {
   [WebviewProviderKind.ApiKey]: 'API Key',
@@ -1198,6 +1199,62 @@ function AboutTab({
               Report an Issue
             </a>
           ) : null}
+          {appInfo?.repository ? (
+            <a
+              className="about-link"
+              href={`${appInfo.repository}#contributing`}
+            >
+              Contribute
+            </a>
+          ) : null}
+          {appInfo?.repository ? (
+            <a
+              className="about-link"
+              href={`${appInfo.repository}/blob/main/TERMS.md`}
+            >
+              Terms of Use
+            </a>
+          ) : null}
+          {appInfo?.repository ? (
+            <a
+              className="about-link"
+              href={`${appInfo.repository}/blob/main/PRIVACY.md`}
+            >
+              Privacy Policy
+            </a>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="about-card">
+        <h3 className="about-card-title">Support the Developer</h3>
+        <p className="about-card-text">
+          {name} is free and open source. If it saves you time, a small tip is
+          hugely appreciated — no pressure, no paywall.
+        </p>
+        <div className="about-links">
+          <a className="about-link" href={KOFI_URL}>
+            Buy me a coffee (Ko-fi)
+          </a>
+        </div>
+        <div className="about-crypto">
+          {CRYPTO_WALLETS.map((wallet) => (
+            <div key={wallet.ticker} className="about-row about-crypto-row">
+              <span className="about-row-label">
+                {wallet.ticker}
+                <span className="about-crypto-net"> · {wallet.network}</span>
+              </span>
+              <code
+                className="about-crypto-addr"
+                title="Click to copy"
+                onClick={() =>
+                  void navigator.clipboard?.writeText(wallet.address)
+                }
+              >
+                {wallet.address}
+              </code>
+            </div>
+          ))}
         </div>
       </section>
 

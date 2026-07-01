@@ -11,6 +11,8 @@ function baseConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     configDirectory: '/tmp/justcode',
     sessionsDirectory: '/tmp/justcode/sessions',
     systemPrompt: '',
+    askSystemPrompt: '',
+    planSystemPrompt: '',
     localModelAutoRefresh: true,
     lazyToolLoading: true,
     disabledTools: [],

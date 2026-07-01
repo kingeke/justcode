@@ -5,17 +5,23 @@ import { APP_NAME } from '@core/branding';
 import emblemUrl from './assets/emblem.svg';
 import {
   commands,
+  extensionInstall,
   highlights,
   installCommands,
+  marketplaceUrl,
   modes,
+  privacyUrl,
   providers,
   repoUrl,
+  surfaces,
+  termsUrl,
   tools,
 } from './content';
-import { isPlaceholder, kofiUrl, wallets } from './support';
+import { kofiUrl, wallets } from './support';
 
 const NAV = [
   { href: '#why', label: 'Why' },
+  { href: '#surfaces', label: 'VS Code' },
   { href: '#tools', label: 'Tools' },
   { href: '#commands', label: 'Commands' },
   { href: '#providers', label: 'Providers' },
@@ -35,6 +41,16 @@ function CopyButton({ value, label }: { value: string; label?: string }) {
     <button className="copy" onClick={copy} aria-label={label ?? 'Copy'}>
       {copied ? 'Copied' : (label ?? 'Copy')}
     </button>
+  );
+}
+
+/** The VS Code "Extensions" glyph, used on the Marketplace button. */
+function MarketplaceIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M2 2h4.2v4.2H2V2Zm7.8 0H14v4.2H9.8V2ZM2 9.8h4.2V14H2V9.8Z" />
+      <path d="M12.6 9.8v1.6H14.2v1.2h-1.6V14.2h-1.2v-1.6H9.8v-1.2h1.6V9.8h1.2Z" />
+    </svg>
   );
 }
 
@@ -64,7 +80,7 @@ function Section({
 }
 
 export function App() {
-  const visibleWallets = wallets.filter((w) => !isPlaceholder(w.address));
+  const visibleWallets = wallets;
 
   return (
     <>
@@ -123,6 +139,21 @@ export function App() {
                 <CopyButton value={c.command} />
               </div>
             ))}
+            <div className="cmd">
+              <span className="cmd-label">code</span>
+              <code>{extensionInstall}</code>
+              <CopyButton value={extensionInstall} />
+              <a
+                className="icon-btn"
+                href={marketplaceUrl}
+                target="_blank"
+                rel="noreferrer"
+                title="Open in VS Code Marketplace"
+                aria-label="Open in VS Code Marketplace"
+              >
+                <MarketplaceIcon />
+              </a>
+            </div>
           </div>
 
           <div className="cta">
@@ -149,6 +180,48 @@ export function App() {
                 <p>{h.description}</p>
               </article>
             ))}
+          </div>
+        </Section>
+
+        {/* Surfaces */}
+        <Section
+          id="surfaces"
+          eyebrow="Terminal & VS Code"
+          title="Use it where you work"
+          lead="One lean engine, two front ends — the terminal TUI and a VS Code extension, both driving the same providers, tools, and modes."
+        >
+          <div className="grid surfaces">
+            {surfaces.map((s) => (
+              <article key={s.name} className="surface">
+                <h3>{s.name}</h3>
+                <p>{s.blurb}</p>
+                <ul>
+                  {s.points.map((p) => (
+                    <li key={p}>{p}</li>
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
+
+          <div className="ext-install">
+            <span className="ext-install-label">Install the VS Code extension</span>
+            <div className="cmd">
+              <span className="cmd-label">code</span>
+              <code>{extensionInstall}</code>
+              <CopyButton value={extensionInstall} />
+            </div>
+            <a
+              className="ghost-btn"
+              href={marketplaceUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              View on the Marketplace ↗
+            </a>
+            <p className="support-note dim">
+              Or search “JustCode” in the VS Code Extensions panel.
+            </p>
           </div>
         </Section>
 
@@ -269,9 +342,17 @@ export function App() {
         <span>
           {APP_NAME} · MIT licensed · © {new Date().getFullYear()} Chinonso Eke
         </span>
-        <a href={repoUrl} target="_blank" rel="noreferrer">
-          github.com/kingeke/justcode
-        </a>
+        <nav className="footer-links">
+          <a href={termsUrl} target="_blank" rel="noreferrer">
+            Terms
+          </a>
+          <a href={privacyUrl} target="_blank" rel="noreferrer">
+            Privacy
+          </a>
+          <a href={repoUrl} target="_blank" rel="noreferrer">
+            GitHub ↗
+          </a>
+        </nav>
       </footer>
     </>
   );

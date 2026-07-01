@@ -113,6 +113,28 @@ npm run web        # run the landing page (apps/web) locally
 - `packages/runtime` — tools, MCP, auth, and service wiring.
 - `packages/providers` — provider integrations.
 
+## Contributing
+
+Contributions are welcome — bug reports, fixes, and features alike.
+
+1. Fork the repo and branch off `main`.
+2. Install dependencies with `npm install` (builds require [Bun](https://bun.sh)).
+3. Make your change, matching the surrounding style and the
+   [repository layout](#repository-layout) above.
+4. Before opening a pull request, make sure the checks pass:
+
+   ```bash
+   npm run typecheck
+   npm test
+   npm run format
+   ```
+
+5. Open a PR describing the change. For anything large, please
+   [open an issue](https://github.com/kingeke/justcode/issues) first to discuss
+   the approach.
+
+Found a bug or have an idea? [Open an issue](https://github.com/kingeke/justcode/issues).
+
 ## Website
 
 The landing page lives in `apps/web` and deploys to GitHub Pages at
@@ -129,6 +151,19 @@ appreciated — no pressure, no paywall. 🙏
   no account needed.
 - **Bitcoin (BTC):** `1B8skEF6uo8PNGjcd624gkJf3TJt73DF8X`
 - **Tether (USDT · TRC20):** `TD9UEFBPtsLLbQYxRXFCgtBWDdogkiXMqq`
+
+## Disclaimer & legal
+
+JustCode is provided **free and "as is", with no warranty of any kind**. It can
+run commands, execute code, and modify or delete files at your direction — **you
+are responsible for reviewing and approving everything it does**, for backing up
+your data, for the costs you incur with any AI provider, and for how you use it.
+AI-generated output may be wrong or insecure; always review it. To the maximum
+extent permitted by law, the developer is not liable for any damages arising from
+your use of the Software.
+
+By using JustCode you agree to the [Terms of Use](TERMS.md) and
+[Privacy Policy](PRIVACY.md).
 
 ## License
 

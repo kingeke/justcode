@@ -2950,6 +2950,34 @@ textarea:focus {
   border-radius: 4px;
 }
 
+.about-crypto {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.about-crypto-row {
+  gap: 12px;
+  align-items: center;
+}
+
+.about-crypto-net {
+  opacity: 0.6;
+}
+
+.about-crypto-addr {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  word-break: break-all;
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.about-crypto-addr:hover {
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+
 /* --- No-provider splash --------------------------------------------------- */
 
 .no-provider-screen {

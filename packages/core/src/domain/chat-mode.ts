@@ -131,21 +131,24 @@ export function addCustomMode(
 }
 
 /**
- * Resolves the system prompt for the active mode. Built-in Ask/Plan use their
- * fixed prompts; Build uses `agentPrompt` (the user-editable base from config,
- * falling back to the default). A custom mode uses its own prompt, or the agent
- * prompt when it didn't set one. An unknown id falls back to the agent prompt.
+ * Resolves the system prompt for the active mode. Build/Ask/Plan each use the
+ * user-editable prompt from config (`agentPrompt`/`askPrompt`/`planPrompt`),
+ * every one falling back to its built-in default when unset. A custom mode uses
+ * its own prompt, or the agent prompt when it didn't set one. An unknown id
+ * falls back to the agent prompt.
  */
 export function resolveModeSystemPrompt(
   modeId: string,
   options: {
     agentPrompt?: string | undefined;
+    askPrompt?: string | undefined;
+    planPrompt?: string | undefined;
     customModes?: Record<string, CustomModeConfig> | undefined;
   } = {}
 ): string {
   const agentPrompt = options.agentPrompt ?? DEFAULT_SYSTEM_PROMPT;
-  if (modeId === ASK_MODE_ID) return ASK_SYSTEM_PROMPT;
-  if (modeId === PLAN_MODE_ID) return PLAN_SYSTEM_PROMPT;
+  if (modeId === ASK_MODE_ID) return options.askPrompt ?? ASK_SYSTEM_PROMPT;
+  if (modeId === PLAN_MODE_ID) return options.planPrompt ?? PLAN_SYSTEM_PROMPT;
   if (modeId === BUILD_MODE_ID) return agentPrompt;
 
   const custom = options.customModes?.[modeId];

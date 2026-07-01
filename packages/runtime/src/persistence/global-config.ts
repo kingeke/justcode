@@ -11,7 +11,12 @@ export interface GlobalConfig {
   lastModel?: string;
   lastProvider?: string;
   providers?: Partial<Record<ProviderId, ProviderConfig>>;
+  /** Build (agent) mode system prompt; falls back to the built-in when unset. */
   systemPrompt?: string;
+  /** Ask mode system prompt; falls back to the built-in when unset. */
+  askSystemPrompt?: string;
+  /** Plan mode system prompt; falls back to the built-in when unset. */
+  planSystemPrompt?: string;
   thinkingCollapsed?: boolean;
   /**
    * Reasoning intensity per model, nested by provider id so entries are

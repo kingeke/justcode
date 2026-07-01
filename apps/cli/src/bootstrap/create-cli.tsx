@@ -252,6 +252,8 @@ async function runChat(options: SharedOptions): Promise<void> {
     runtime.setSystemPrompt(
       resolveModeSystemPrompt(modeId, {
         agentPrompt: savedConfig.systemPrompt,
+        askPrompt: savedConfig.askSystemPrompt,
+        planPrompt: savedConfig.planSystemPrompt,
         customModes,
       })
     );

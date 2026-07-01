@@ -163,6 +163,8 @@ export class ChatBridge {
   // synchronously — before the next queued message (e.g. the Submit that follows
   // "Start implementation") is handled — rather than after an async config read.
   private agentPrompt: string | undefined;
+  private askPrompt: string | undefined;
+  private planPrompt: string | undefined;
   private customModesConfig: Record<string, CustomModeConfig> = {};
   // Workspace-relative path of the file open in the editor, which `@currentfile`
   // resolves to. Kept in sync by the view provider as the active editor changes;
@@ -422,6 +424,8 @@ export class ChatBridge {
     // Resolve chat modes (built-in + custom) and the active one.
     const customModes = globalConfig.customModes ?? {};
     this.agentPrompt = globalConfig.systemPrompt;
+    this.askPrompt = globalConfig.askSystemPrompt;
+    this.planPrompt = globalConfig.planSystemPrompt;
     this.customModesConfig = customModes;
     this.modes = listModes(customModes);
     this.activeModeId = isKnownMode(globalConfig.mode ?? '', customModes)
@@ -487,6 +491,8 @@ export class ChatBridge {
     services.setSystemPrompt(
       resolveModeSystemPrompt(this.activeModeId, {
         agentPrompt: globalConfig.systemPrompt,
+        askPrompt: globalConfig.askSystemPrompt,
+        planPrompt: globalConfig.planSystemPrompt,
         customModes,
       })
     );
@@ -1709,6 +1715,8 @@ export class ChatBridge {
     this.services?.setSystemPrompt(
       resolveModeSystemPrompt(modeId, {
         agentPrompt: this.agentPrompt,
+        askPrompt: this.askPrompt,
+        planPrompt: this.planPrompt,
         customModes: this.customModesConfig,
       })
     );

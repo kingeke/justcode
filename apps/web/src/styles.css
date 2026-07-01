@@ -91,6 +91,7 @@ code {
 .nav nav a {
   color: var(--muted);
   font-size: 14px;
+  white-space: nowrap;
 }
 .nav nav a:hover {
   color: var(--text);
@@ -219,6 +220,26 @@ main {
   max-width: 720px;
   margin: 0 auto 36px;
 }
+/* Compact square action (e.g. open in Marketplace) sitting beside Copy. */
+.icon-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.icon-btn:hover {
+  color: var(--brand-blue);
+  border-color: var(--accent-dim);
+}
+.icon-btn svg {
+  display: block;
+}
 .cmd {
   display: flex;
   align-items: center;
@@ -308,6 +329,68 @@ main {
 }
 .tools {
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+.surfaces {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+/* ---------- Surfaces (terminal + VS Code) ---------- */
+.surface {
+  padding: 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+.surface h3 {
+  margin: 0 0 8px;
+  font-size: 19px;
+}
+.surface > p {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 15px;
+}
+.surface ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.surface li {
+  position: relative;
+  padding-left: 22px;
+  color: var(--text);
+  font-size: 14.5px;
+}
+.surface li::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--brand-gradient);
+}
+.ext-install {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 22px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-elev);
+}
+.ext-install-label {
+  font-weight: 600;
+}
+.ext-install .cmd {
+  width: 100%;
+  max-width: 560px;
 }
 .commands {
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -449,14 +532,22 @@ main {
   color: var(--muted);
   font-size: 14px;
 }
+.footer-links {
+  display: flex;
+  gap: 18px;
+}
 .footer a:hover {
   color: var(--accent);
 }
 
-@media (max-width: 640px) {
+/* Tablet and below: drop the in-page nav links (brand + GitHub stay) so the
+   bar never wraps to two lines. */
+@media (max-width: 860px) {
   .nav nav {
     display: none;
   }
+}
+@media (max-width: 640px) {
   .cmd code {
     font-size: 12px;
   }

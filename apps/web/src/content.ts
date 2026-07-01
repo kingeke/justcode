@@ -113,3 +113,35 @@ export const installCommands: { label: string; command: string }[] = [
 ];
 
 export const repoUrl = 'https://github.com/kingeke/justcode';
+export const termsUrl = `${repoUrl}/blob/main/TERMS.md`;
+export const privacyUrl = `${repoUrl}/blob/main/PRIVACY.md`;
+
+/** The VS Code extension. */
+export const extensionId = 'kingeke.justcode-vscode';
+export const marketplaceUrl = `https://marketplace.visualstudio.com/items?itemName=${extensionId}`;
+export const extensionInstall = `code --install-extension ${extensionId}`;
+
+/** The two surfaces the same engine drives, shown side by side. */
+export const surfaces: { name: string; blurb: string; points: string[] }[] = [
+  {
+    name: 'Terminal',
+    blurb:
+      'A fast, keyboard-driven TUI that runs anywhere — a single self-contained binary with no runtime to install.',
+    points: [
+      'Install via curl, npm, or Homebrew',
+      'Slash commands, modes, and session history',
+      'Works over SSH and in any shell',
+    ],
+  },
+  {
+    name: 'VS Code extension',
+    blurb:
+      'The exact same lean engine, in a sidebar chat panel — bring the assistant right next to the code you are editing.',
+    points: [
+      'Chat in the sidebar with inline diffs for every edit',
+      'Settings UI for providers and MCP servers',
+      'Attach images, browse and resume sessions',
+    ],
+  },
+];
+
