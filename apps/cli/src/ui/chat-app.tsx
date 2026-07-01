@@ -2016,12 +2016,15 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           setError(`Unknown command '/${commandName}'.`);
         }
       } else {
-        // No argument: prefer an exact name (e.g. after tab-completing and
-        // submitting), otherwise honour the highlighted suggestion.
+        // No argument: honour the highlighted suggestion (the `›` cursor the
+        // user navigated to), falling back to an exact typed name only when the
+        // palette has no matches. Preferring the exact name would run the typed
+        // command (e.g. "/mode") even after the user arrowed down to another
+        // entry (e.g. "/models").
         const exact = isCommandName(commandName)
           ? COMMANDS.find((c) => c.name === commandName)
           : undefined;
-        const selected = exact ?? filteredCommands[selectedCommandIndex];
+        const selected = filteredCommands[selectedCommandIndex] ?? exact;
         if (selected) executeCommand(selected.name);
       }
       setInput('');

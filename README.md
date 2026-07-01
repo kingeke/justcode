@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://kingeke.github.io/justcode/">Website</a> ·
+  <a href="https://justcodeapp.dev/">Website</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="release.md">Releasing</a> ·
   <a href="https://github.com/kingeke/justcode/issues">Issues</a>
@@ -79,7 +79,7 @@ prompt with ~23 slash commands (`/connect`, `/models`, `/mode`, `/sessions`,
 - **Custom** — define your own mode and system prompt via `/mode`.
 
 The full, always-current list of tools and commands is on the
-**[website](https://kingeke.github.io/justcode/)**.
+**[website](https://justcodeapp.dev/)**.
 
 ## Develop locally
 
@@ -140,9 +140,10 @@ Found a bug or have an idea? [Open an issue](https://github.com/kingeke/justcode
 ## Website
 
 The landing page lives in `apps/web` and deploys to GitHub Pages at
-**https://kingeke.github.io/justcode/** via `.github/workflows/pages.yml`. Enable
-it once under **Settings → Pages → Source: GitHub Actions**; after that every
-push that touches the site republishes it.
+**https://justcodeapp.dev/** via `.github/workflows/pages.yml`. Enable it once
+under **Settings → Pages → Source: GitHub Actions**, and set the custom domain to
+`justcodeapp.dev` (the `apps/web/public/CNAME` file keeps it across deploys);
+after that every push that touches the site republishes it.
 
 ## Support the developer
 
