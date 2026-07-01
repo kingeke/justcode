@@ -188,6 +188,14 @@ export class SettingsPanel {
         await resetAppState(cacheDirectory());
         this.onProvidersChanged();
         await this.sendProviders();
+        // Reset wiped mcp.json — push the fresh (empty) config so the editor
+        // stops showing the old servers, and reconnect so their live tools drop.
+        await this.sendMcpConfig();
+        try {
+          await this.onMcpChanged();
+        } catch {
+          // Reconnect failure shouldn't block the reset; the file is cleared.
+        }
         return;
       }
       case SettingsWebviewMessageType.AddCustomProvider: {
