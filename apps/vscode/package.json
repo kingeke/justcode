@@ -3,7 +3,7 @@
   "displayName": "JustCode — Lean Coding Assistant",
   "description": "A lean, transparent coding assistant — bring your own provider, control every token.",
   "icon": "media/icon.png",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "kingeke",
   "license": "MIT",
   "private": true,
