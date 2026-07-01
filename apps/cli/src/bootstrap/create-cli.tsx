@@ -132,7 +132,7 @@ export function createCli(): Command {
   program
     .command('reset')
     .description(
-      'Reset app defaults and clear connected providers, pulled models, and sessions'
+      'Reset app defaults and clear connected providers, pulled models, MCP servers, and sessions'
     )
     .action(async () => {
       const confirmed = await confirmReset();
@@ -173,7 +173,7 @@ export function normalizeArgv(argv: readonly string[]): string[] {
 
 async function confirmReset(): Promise<boolean> {
   process.stdout.write(
-    `This will permanently reset ${APP_NAME} to defaults and clear connected providers, pulled models, and sessions. This is irreversible.\n`
+    `This will permanently reset ${APP_NAME} to defaults and clear connected providers, pulled models, MCP servers, and sessions. This is irreversible.\n`
   );
 
   const readline = createInterface({
@@ -315,6 +315,9 @@ async function runChat(options: SharedOptions): Promise<void> {
         currentConfig = nextConfig;
         void writeGlobalConfig(appConfig.configDirectory, currentConfig);
       },
+      // After a reset wipes mcp.json, reconnect from the (now empty) config so
+      // the running servers are torn down and their tools leave the live registry.
+      onReloadMcp: () => runtime.reloadMcp(),
       initialThinkingCollapsed: savedConfig.thinkingCollapsed ?? false,
       initialAutoApprove: savedConfig.autoApprove ?? false,
       initialLocalModelAutoRefresh: savedConfig.localModelAutoRefresh ?? true,

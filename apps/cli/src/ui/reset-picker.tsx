@@ -64,6 +64,7 @@ export function ResetPicker(props: ResetPickerProps): React.ReactNode {
       <text>• restore config to defaults</text>
       <text>• remove all connected providers</text>
       <text>• remove all pulled models</text>
+      <text>• disconnect all MCP servers</text>
       <text>• remove all saved sessions</text>
       <text marginTop={1} fg={MUTED}>
         You will be returned to the connect screen and start from scratch.

@@ -9,7 +9,6 @@ import React, {
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
   createTextAttributes,
@@ -100,7 +99,7 @@ import { ClearSessionsPicker } from '@cli/ui/clear-sessions-picker.js';
 import { SessionPicker } from '@cli/ui/session-picker.js';
 import { ProviderId } from '@core/ports/provider-catalog.js';
 import type { ConversationSummary } from '@core/ports/conversation-repository';
-import { APP_NAME, APP_NAME_LOWERED } from '@core/branding';
+import { APP_NAME } from '@core/branding';
 import type { UpdateNotice } from '@core/application/update-check';
 
 const MAX_COMMAND_ITEMS = 8;
@@ -158,6 +157,12 @@ interface ChatAppProps {
    * providers) stay gone instead of being resurrected from stale in-memory state.
    */
   onConfigReset: (config: GlobalConfig) => void;
+  /**
+   * Reconnects MCP servers from the current `mcp.json`. Called after a reset
+   * (which deletes the file) so the live session drops every running MCP server
+   * and its tools, matching the now-empty on-disk config without a restart.
+   */
+  onReloadMcp?: () => Promise<unknown>;
   onModelChange?: (modelId: string, providerId: string) => void;
   initialThinkingCollapsed?: boolean;
   onThinkingCollapsedChange?: (collapsed: boolean) => void;
@@ -2637,9 +2642,15 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     return (
       <ResetPicker
         onConfirm={() => {
-          const configDirectory = join(homedir(), '.cache', APP_NAME_LOWERED);
+          // Reset the same directory the runtime reads from (honors
+          // JUSTCODE_CACHE_DIR) so the subsequent onReloadMcp sees the wiped
+          // mcp.json instead of a stale copy in the default cache path.
+          const configDirectory = props.configDirectory;
           void resetAppState(configDirectory)
             .then(() => {
+              // `mcp.json` is gone now, so reloading disconnects every running
+              // server and drops its tools from the live registry — no restart.
+              void props.onReloadMcp?.();
               const resetConfig = {
                 systemPrompt: DEFAULT_SYSTEM_PROMPT,
               };

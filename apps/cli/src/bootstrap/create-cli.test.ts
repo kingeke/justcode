@@ -160,7 +160,7 @@ describe('createCli', () => {
     });
 
     expect(writeSpy).toHaveBeenCalledWith(
-      'This will permanently reset JustCode to defaults and clear connected providers, pulled models, and sessions. This is irreversible.\n'
+      'This will permanently reset JustCode to defaults and clear connected providers, pulled models, MCP servers, and sessions. This is irreversible.\n'
     );
     expect(questionSpy).toHaveBeenCalledWith('Continue? (y/N) ');
     expect(questionSpy).toHaveBeenCalledWith(
