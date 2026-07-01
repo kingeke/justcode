@@ -17,4 +17,5 @@ export enum ToolName {
   WebFetch = 'webfetch',
   WebSearch = 'websearch',
   Question = 'question',
+  PresentPlan = 'present_plan',
 }

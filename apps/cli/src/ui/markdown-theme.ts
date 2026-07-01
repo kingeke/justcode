@@ -67,3 +67,18 @@ export const MARKDOWN_SYNTAX_STYLES: Record<string, ThemeStyle> = {
   tag: { fg: TAG },
   attribute: { fg: FUNCTION },
 };
+
+/**
+ * A dimmed variant of {@link MARKDOWN_SYNTAX_STYLES} for reasoning/thinking:
+ * every token renders in the same muted gray so the block stays visually
+ * distinct from the model's answer, while bold/italic/underline attributes are
+ * kept so structure (bold labels, headings) is still legible. Markers are still
+ * concealed by the tree-sitter highlighter, so no raw `**`/`#` leaks through.
+ */
+export const MARKDOWN_MUTED_SYNTAX_STYLES: Record<string, ThemeStyle> =
+  Object.fromEntries(
+    Object.entries(MARKDOWN_SYNTAX_STYLES).map(([name, style]) => [
+      name,
+      { ...style, fg: MUTED },
+    ])
+  );

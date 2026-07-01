@@ -23,6 +23,10 @@ export enum HostMessageType {
   ModelsUpdate = 'modelsUpdate',
   /** MCP servers finished connecting in the background; refresh tools + spinner. */
   McpStatus = 'mcpStatus',
+  /** The mode list or active mode changed (select/create), without a full reload. */
+  ModeUpdate = 'modeUpdate',
+  /** A transient status line shown above the transcript (no full reload). */
+  Notice = 'notice',
   FileReverted = 'fileReverted',
   SteeringConsumed = 'steeringConsumed',
   WorkspaceFiles = 'workspaceFiles',
@@ -50,6 +54,10 @@ export enum WebviewMessageType {
   ToggleLocalModelAutoRefresh = 'toggleLocalModelAutoRefresh',
   ToggleLazyToolLoading = 'toggleLazyToolLoading',
   SetDisabledTools = 'setDisabledTools',
+  SelectMode = 'selectMode',
+  CreateMode = 'createMode',
+  /** Write the plan to a new markdown file, open it, and switch to Build mode. */
+  EditPlan = 'editPlan',
   ListSessions = 'listSessions',
   OpenSession = 'openSession',
   DeleteSession = 'deleteSession',
@@ -267,6 +275,16 @@ export interface WebviewTool {
   summary: string;
 }
 
+/** A chat mode for the mode picker. The active one is `activeModeId`. */
+export interface WebviewMode {
+  id: string;
+  name: string;
+  /** Semantic icon key; the webview maps it to an SVG (mirrors @core ModeIcon). */
+  icon: 'build' | 'ask' | 'plan' | 'custom';
+  /** Whether the user created this mode (vs. a built-in Build/Ask/Plan). */
+  custom: boolean;
+}
+
 // --- Host -> Webview -------------------------------------------------------
 
 /** Full snapshot of session state; sent on init and after a session reset. */
@@ -307,6 +325,10 @@ export interface ReadyMessage {
    * delivers the MCP tools once they're ready.
    */
   mcpLoading: boolean;
+  /** The available chat modes (built-in + custom), for the mode picker. */
+  modes: WebviewMode[];
+  /** Id of the active chat mode. */
+  activeModeId: string;
   /**
    * The user's chosen reasoning effort per model, nested by provider id, e.g.
    * `{ openrouter: { "openai/gpt-5": "high" } }`. A model absent from the map
@@ -435,6 +457,23 @@ export interface McpStatusMessage {
 }
 
 /**
+ * Sent after the user selects or creates a chat mode, so the picker and the
+ * composer pill update without a full {@link ReadyMessage} (which would reset
+ * the transcript and stats).
+ */
+export interface ModeUpdateMessage {
+  type: HostMessageType.ModeUpdate;
+  modes: WebviewMode[];
+  activeModeId: string;
+}
+
+/** A transient status line shown above the transcript (e.g. after "Edit plan"). */
+export interface NoticeMessage {
+  type: HostMessageType.Notice;
+  notice: string;
+}
+
+/**
  * Result of a webview-requested file revert. `ok` is false when the file
  * couldn't be restored (e.g. it moved or permissions changed); the panel then
  * keeps the row and surfaces `message`.
@@ -488,6 +527,8 @@ export type HostToWebview =
   | ReadyMessage
   | ModelsUpdateMessage
   | McpStatusMessage
+  | ModeUpdateMessage
+  | NoticeMessage
   | SessionsListMessage
   | TitleUpdateMessage
   | TokenMessage
@@ -651,6 +692,30 @@ export interface SetDisabledToolsMessage {
   names: string[];
 }
 
+/** The user picked a chat mode from the mode popup. */
+export interface SelectModeMessage {
+  type: WebviewMessageType.SelectMode;
+  modeId: string;
+}
+
+/** The user created a custom chat mode. The host assigns it an id and selects it. */
+export interface CreateModeMessage {
+  type: WebviewMessageType.CreateMode;
+  name: string;
+  /** Optional system prompt; when blank the mode uses the Build (agent) prompt. */
+  systemPrompt?: string;
+}
+
+/**
+ * Write the plan to a fresh markdown file (a non-colliding name in the workspace
+ * root), open it for editing, and switch to Build mode so the user can refine
+ * the plan and then send it back to start implementation.
+ */
+export interface EditPlanMessage {
+  type: WebviewMessageType.EditPlan;
+  content: string;
+}
+
 /**
  * The user asked to undo a file's session changes from the changes panel. The
  * host restores `oldText` (the pre-session baseline), or deletes the file when
@@ -742,6 +807,9 @@ export type WebviewToHost =
   | ToggleLocalModelAutoRefreshMessage
   | ToggleLazyToolLoadingMessage
   | SetDisabledToolsMessage
+  | SelectModeMessage
+  | CreateModeMessage
+  | EditPlanMessage
   | RevertFileMessage
   | SaveResolvedFilesMessage
   | SyncSteeringQueueMessage

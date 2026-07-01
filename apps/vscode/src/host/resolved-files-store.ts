@@ -67,3 +67,36 @@ export async function deleteResolvedFiles(
 ): Promise<void> {
   await writeResolvedFiles(cacheDir, sessionId, {});
 }
+
+/**
+ * Garbage-collects resolutions for sessions that no longer exist. Entries are
+ * otherwise only dropped on explicit session deletion, so sessions that vanish
+ * any other way leave their (baseline-heavy) entries behind forever and the
+ * store grows unbounded. Called with the live session ids whenever the sessions
+ * list is rebuilt. Best-effort; only writes when something was actually pruned.
+ */
+export async function pruneResolvedFiles(
+  cacheDir: string,
+  liveSessionIds: Iterable<string>
+): Promise<void> {
+  try {
+    const store = await readStore(cacheDir);
+    const live = new Set(liveSessionIds);
+    let changed = false;
+    for (const sessionId of Object.keys(store)) {
+      if (!live.has(sessionId)) {
+        delete store[sessionId];
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    await mkdir(cacheDir, { recursive: true });
+    await writeFile(
+      storePath(cacheDir),
+      `${JSON.stringify(store, null, 2)}\n`,
+      'utf8'
+    );
+  } catch {
+    // Best-effort: a failed prune must never break the chat.
+  }
+}

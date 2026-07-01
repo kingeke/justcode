@@ -21,6 +21,7 @@ import { WebFetchTool } from '@runtime/tools/web-fetch-tool';
 import { WebSearchTool } from '@runtime/tools/web-search-tool';
 import { QuestionTool } from '@runtime/tools/question-tool';
 import { ViewHistoryTool } from '@runtime/tools/view-history-tool';
+import { PresentPlanTool } from '@runtime/tools/present-plan-tool';
 import {
   ReadFileTool,
   DEFAULT_MAX_READ_LINES,
@@ -90,6 +91,19 @@ export interface RuntimeServices {
    * completion/attachment request, so updates take effect immediately.
    */
   setCurrentFile: (path: string | undefined) => void;
+  /**
+   * Replace the system prompt sent to the model, used when the user switches
+   * chat mode. Read per turn, so it takes effect on the next message without a
+   * reload. The host resolves the active mode's prompt (see `resolveModeSystemPrompt`).
+   */
+  setSystemPrompt: (prompt: string) => void;
+  /**
+   * Replace the tool names advertised up front even under lazy loading. The host
+   * sets this per chat mode (e.g. `['present_plan']` in Plan mode, `[]` in
+   * others) so a mode-specific tool is callable from the first turn. Read per
+   * turn, so it takes effect on the next message.
+   */
+  setEagerlyAdvertisedTools: (names: string[]) => void;
   /**
    * Tears down every MCP server process spawned at startup. Hosts should call
    * this on shutdown so spawned servers don't linger. No-op when no MCP servers
@@ -182,6 +196,15 @@ export async function createRuntimeServices(
   // Mutable so a runtime toggle reaches the chat session, which reads the set
   // per turn through `getDisabledToolNames` below.
   const disabledToolsSettings = { names: config.disabledTools };
+  // Mutable so switching chat mode (which swaps the prompt) reaches the chat
+  // session: it reads `systemPromptSetting.value` per turn. The host resolves
+  // the active mode's prompt and calls `setSystemPrompt`; until then it's the
+  // configured base (the Build/agent prompt).
+  const systemPromptSetting = { value: config.systemPrompt };
+  // Tool names to advertise up front even under lazy loading (the host sets this
+  // per mode — e.g. `present_plan` in Plan mode — so a mode-specific tool is
+  // reachable from the first turn without loading the whole toolset).
+  const eagerToolsSetting = { names: [] as string[] };
   const builtInTools = [
     new WriteFileTool(workspaceFiles),
     new EditFileTool(workspaceFiles),
@@ -195,6 +218,7 @@ export async function createRuntimeServices(
     new WebSearchTool(),
     new QuestionTool(),
     new ViewHistoryTool(),
+    new PresentPlanTool(),
   ];
   const lazyLoadableTools: LazyLoadableToolDefinition[] = builtInTools.map(
     (tool) => ({
@@ -308,10 +332,11 @@ export async function createRuntimeServices(
       toolRegistry,
       workspaceRoot,
       workspaceFiles,
-      systemPrompt: config.systemPrompt,
+      getSystemPrompt: () => systemPromptSetting.value,
       getMaxHistoryMessages: () => historySettings.maxHistoryMessages,
       getLazyToolLoadingEnabled: () => lazyToolLoadingSettings.enabled,
       getDisabledToolNames: () => disabledToolsSettings.names,
+      getEagerlyAdvertisedToolNames: () => eagerToolsSetting.names,
     }),
     listModelsService: new ListModelsService(provider),
     promptAttachmentService: new PromptAttachmentService(
@@ -342,6 +367,12 @@ export async function createRuntimeServices(
     },
     setCurrentFile: (path: string | undefined) => {
       currentFile.path = path;
+    },
+    setSystemPrompt: (prompt: string) => {
+      systemPromptSetting.value = prompt;
+    },
+    setEagerlyAdvertisedTools: (names: string[]) => {
+      eagerToolsSetting.names = names;
     },
     disposeMcp: () => disposeMcpClients(),
     get mcpLoading() {

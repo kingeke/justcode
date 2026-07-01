@@ -13,6 +13,7 @@ export enum CommandName {
   LazyToolLoading = 'toggle-lazy-tool-loading',
   ExpandTools = 'expand-tools',
   ManageTools = 'manage-tools',
+  Mode = 'mode',
   CollapseResponses = 'collapse-responses',
   ConfigureMcpServers = 'configure-mcp-servers',
   ReadLimit = 'read-limit',
@@ -82,6 +83,10 @@ export const COMMANDS: Command[] = [
   {
     name: CommandName.ManageTools,
     description: 'Turn individual tools on or off',
+  },
+  {
+    name: CommandName.Mode,
+    description: 'Switch the chat mode or create a custom one',
   },
   {
     name: CommandName.CollapseResponses,

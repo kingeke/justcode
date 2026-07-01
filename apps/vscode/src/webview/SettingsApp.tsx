@@ -126,8 +126,10 @@ export function SettingsApp(): React.JSX.Element {
           setMcpSaving(false);
           setMcpSaveState({
             success: message.success,
-            error: message.error,
-            servers: message.servers,
+            ...(message.error !== undefined ? { error: message.error } : {}),
+            ...(message.servers !== undefined
+              ? { servers: message.servers }
+              : {}),
           });
           break;
         case SettingsHostMessageType.FocusSection:

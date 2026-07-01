@@ -36,6 +36,9 @@ describe('deletion persistence through a turn', () => {
       disabledTools: [],
       reasoningEffortByModel: {},
       resolvedFiles: {},
+      mcpLoading: false,
+      modes: [],
+      activeModeId: 'build',
     });
 
     state = reducer(state, {

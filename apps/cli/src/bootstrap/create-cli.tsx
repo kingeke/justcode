@@ -19,6 +19,14 @@ import {
   writeGlobalConfig,
 } from '@runtime/persistence/global-config';
 import { resetAppState } from '@runtime/persistence/reset-app-state';
+import {
+  addCustomMode,
+  BUILD_MODE_ID,
+  eagerToolsForMode,
+  isKnownMode,
+  listModes,
+  resolveModeSystemPrompt,
+} from '@core/domain/chat-mode';
 import { APP_NAME, APP_NAME_LOWERED } from '@core/branding';
 
 interface SharedOptions {
@@ -202,6 +210,24 @@ async function runChat(options: SharedOptions): Promise<void> {
     void writeGlobalConfig(appConfig.configDirectory, currentConfig);
   };
 
+  // Resolve chat modes (built-in + custom) and apply the active one's system
+  // prompt to the runtime up front, so the first turn uses the right posture.
+  let customModes = savedConfig.customModes ?? {};
+  const modes = listModes(customModes);
+  const initialMode = isKnownMode(savedConfig.mode ?? '', customModes)
+    ? (savedConfig.mode as string)
+    : BUILD_MODE_ID;
+  const applyMode = (modeId: string): void => {
+    runtime.setSystemPrompt(
+      resolveModeSystemPrompt(modeId, {
+        agentPrompt: savedConfig.systemPrompt,
+        customModes,
+      })
+    );
+    runtime.setEagerlyAdvertisedTools(eagerToolsForMode(modeId));
+  };
+  applyMode(initialMode);
+
   // Point OpenTUI at our embedded, self-contained tree-sitter worker before it
   // ever spawns one, so markdown highlights in the compiled binary (see
   // configure-tree-sitter.ts). Must run before the first <markdown> renders.
@@ -257,6 +283,20 @@ async function runChat(options: SharedOptions): Promise<void> {
       initialLazyToolLoading: savedConfig.lazyToolLoading ?? true,
       manageableTools: runtime.manageableTools,
       initialDisabledTools: savedConfig.disabledTools ?? [],
+      modes,
+      initialMode,
+      onModeChange: (modeId: string) => {
+        applyMode(modeId);
+        persistConfig({ mode: modeId });
+      },
+      onCreateMode: (name: string, systemPrompt?: string) => {
+        const created = addCustomMode(name, systemPrompt, customModes);
+        if (!created) return null;
+        customModes = created.customModes;
+        applyMode(created.id);
+        persistConfig({ customModes, mode: created.id });
+        return { modes: listModes(customModes), modeId: created.id };
+      },
       initialExpandTools: savedConfig.expandTools ?? true,
       initialMaxReadLines:
         savedConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES,

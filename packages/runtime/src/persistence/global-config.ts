@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { ReasoningEffort } from '@core/ports/chat-model';
+import type { CustomModeConfig } from '@core/domain/chat-mode';
 import { ProviderId } from '@core/ports/provider-catalog';
 import type { ProviderConfig } from '@core/ports/provider-catalog';
 
@@ -44,6 +45,13 @@ export interface GlobalConfig {
    * enabled one) keeps newly added tools on by default.
    */
   disabledTools?: string[];
+  /** Id of the active chat mode (e.g. "build", "ask", "plan", or a custom id). */
+  mode?: string;
+  /**
+   * User-created chat modes, keyed by id. Each swaps the system prompt; an entry
+   * without a `systemPrompt` falls back to the Build (agent) prompt.
+   */
+  customModes?: Record<string, CustomModeConfig>;
   /** Tunables for how much context the agent reads and sends. */
   cache?: {
     /** Max lines returned by a single file read before it is paged. */

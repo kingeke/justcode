@@ -143,6 +143,12 @@ export interface ChatSessionOptions {
   workspaceFiles?: WorkspaceFilePort;
   systemPrompt?: string;
   /**
+   * Returns the system prompt to use for the next turn. Read per request so a
+   * mode switch (which swaps the prompt) takes effect immediately without
+   * rebuilding the session. Falls back to the static `systemPrompt` when unset.
+   */
+  getSystemPrompt?: () => string;
+  /**
    * Whether to also list the available tools (with their descriptions) in the
    * prose system prompt. Tools are always advertised to the provider via
    * proper function-calling regardless of this flag — this only controls the
@@ -169,6 +175,14 @@ export interface ChatSessionOptions {
    * none disabled when unset.
    */
   getDisabledToolNames?: () => string[];
+  /**
+   * Returns names of tools to advertise up front even under lazy loading — i.e.
+   * alongside the `lazy_load_tools` gateway before the model has loaded the full
+   * set. Lets a host make a specific tool reachable from the first turn without
+   * disabling lazy loading (e.g. `present_plan` in Plan mode). Falls back to none
+   * when unset; ignored when lazy loading is off (everything is advertised then).
+   */
+  getEagerlyAdvertisedToolNames?: () => string[];
 }
 
 export class ChatSessionService {
@@ -180,11 +194,12 @@ export class ChatSessionService {
   >();
   private readonly workspaceRoot: string;
   private readonly workspaceFiles: WorkspaceFilePort | undefined;
-  private readonly systemPrompt: string;
+  private readonly getSystemPrompt: () => string;
   private readonly describeToolsInSystemPrompt: boolean;
   private readonly getMaxHistoryMessages: () => number;
   private readonly getLazyToolLoadingEnabled: () => boolean;
   private readonly getDisabledToolNames: () => string[];
+  private readonly getEagerlyAdvertisedToolNames: () => string[];
   /** Models that rejected tools once; we send their requests chat-only after. */
   private readonly toolUnsupportedModels = new Set<string>();
   /**
@@ -203,7 +218,9 @@ export class ChatSessionService {
     this.toolRegistry = options.toolRegistry;
     this.workspaceRoot = options.workspaceRoot ?? process.cwd();
     this.workspaceFiles = options.workspaceFiles;
-    this.systemPrompt = options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+    const staticSystemPrompt = options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+    this.getSystemPrompt =
+      options.getSystemPrompt ?? (() => staticSystemPrompt);
     this.describeToolsInSystemPrompt =
       options.describeToolsInSystemPrompt ?? false;
     this.getMaxHistoryMessages =
@@ -211,6 +228,8 @@ export class ChatSessionService {
     this.getLazyToolLoadingEnabled =
       options.getLazyToolLoadingEnabled ?? (() => true);
     this.getDisabledToolNames = options.getDisabledToolNames ?? (() => []);
+    this.getEagerlyAdvertisedToolNames =
+      options.getEagerlyAdvertisedToolNames ?? (() => []);
     for (const tool of this.toolRegistry?.definitions() ?? []) {
       this.advertisedToolsByName.set(tool.name, tool);
     }
@@ -285,7 +304,7 @@ export class ChatSessionService {
       input.images?.length ? { images: input.images } : undefined
     );
 
-    const initialToolDefinitions = this.toolRegistry?.definitions() ?? [];
+    const gatewayToolDefinitions = this.toolRegistry?.definitions() ?? [];
     // Every tool, gateway included. Advertised once the toolset is loaded in lazy
     // mode. The `lazy_load_tools` gateway is intentionally kept in the set even
     // after it's been called: re-advertising it lets the model call it again to
@@ -299,6 +318,27 @@ export class ChatSessionService {
     const eagerToolDefinitions = fullToolDefinitions.filter(
       (definition) => definition.name !== ToolName.LazyLoadTools
     );
+    // The gateway-only view, plus any tools the host asked to advertise up front
+    // even under lazy loading (e.g. `present_plan` in Plan mode). Those are
+    // pulled from the full set so the model can call them on the first turn
+    // without loading everything; anything not in the full set is ignored.
+    const eagerlyAdvertisedNames = new Set(
+      this.getEagerlyAdvertisedToolNames()
+    );
+    const alreadyGatewayed = new Set(
+      gatewayToolDefinitions.map((definition) => definition.name)
+    );
+    const initialToolDefinitions =
+      eagerlyAdvertisedNames.size === 0
+        ? gatewayToolDefinitions
+        : [
+            ...gatewayToolDefinitions,
+            ...fullToolDefinitions.filter(
+              (definition) =>
+                eagerlyAdvertisedNames.has(definition.name) &&
+                !alreadyGatewayed.has(definition.name)
+            ),
+          ];
     const projectInstructions = await this.loadProjectInstructions();
     // `lazy_load_tools` is a one-way gate per session: once the model has called
     // it, the real tool set stays loaded for every later turn instead of
@@ -369,7 +409,7 @@ export class ChatSessionService {
       const omittedCount = working.length - history.length;
 
       const systemPrompt = buildSystemPrompt(
-        this.systemPrompt,
+        this.getSystemPrompt(),
         this.workspaceRoot,
         toolsEnabled && this.describeToolsInSystemPrompt ? toolDefinitions : [],
         projectInstructions
@@ -424,13 +464,24 @@ export class ChatSessionService {
 
       throwIfAborted(input.signal);
 
-      const thinking = thinkingContent.trim()
+      const capturedThinking = thinkingContent.trim()
         ? {
             content: thinkingContent,
             durationMs:
               thinkingStartedAt > 0 ? Date.now() - thinkingStartedAt : 0,
           }
         : undefined;
+      // Some reasoning models (e.g. gpt-oss) stream their whole turn on the
+      // reasoning channel and finish with empty content; the provider then falls
+      // back to using that reasoning as the answer. In that case the content and
+      // the thinking are the same text — keep only the response so it isn't
+      // rendered twice (once as a "Thought" block, once as the reply).
+      const thinking =
+        capturedThinking &&
+        response.content.trim().length > 0 &&
+        response.content.trim() === capturedThinking.content.trim()
+          ? undefined
+          : capturedThinking;
 
       if (response.usage) {
         usage = usage ? sumUsage(usage, response.usage) : response.usage;
@@ -478,6 +529,14 @@ export class ChatSessionService {
             toolDefinitions.length > 0 &&
             !this.toolUnsupportedModels.has(input.model);
         }
+      }
+
+      // present_plan is terminal: the model has delivered the plan and is meant
+      // to stop and wait for the user. Re-invoking it would make it produce an
+      // empty follow-up (nothing left to say), which the provider rejects as an
+      // "empty response" — so end the turn here instead of looping again.
+      if (toolCalls.some((call) => call.name === ToolName.PresentPlan)) {
+        break;
       }
     }
 

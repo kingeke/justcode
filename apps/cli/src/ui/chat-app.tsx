@@ -49,6 +49,11 @@ import type {
 import type { UserQuestionRequest } from '@core/ports/tool';
 import type { Conversation } from '@core/domain/conversation';
 import type { ManageableToolInfo } from '@core/domain/tool-metadata';
+import {
+  BUILD_MODE_ID,
+  modePlaceholder,
+  type ChatMode,
+} from '@core/domain/chat-mode';
 import { createMessage, type MessageImage } from '@core/domain/message';
 import { DEFAULT_SYSTEM_PROMPT } from '@core/application/system-prompt';
 import type {
@@ -76,7 +81,10 @@ import {
 import { openFileInEditor } from '@cli/ui/open-file.js';
 import { KeyName } from '@cli/ui/key-name.js';
 import { prepareMarkdown } from '@cli/ui/markdown.js';
-import { MARKDOWN_SYNTAX_STYLES } from '@cli/ui/markdown-theme.js';
+import {
+  MARKDOWN_MUTED_SYNTAX_STYLES,
+  MARKDOWN_SYNTAX_STYLES,
+} from '@cli/ui/markdown-theme.js';
 import {
   ConnectPicker,
   type ConnectedProviderResult,
@@ -84,6 +92,7 @@ import {
 import { ModelPicker } from '@cli/ui/model-picker.js';
 import { ReasoningPicker } from '@cli/ui/reasoning-picker.js';
 import { ToolsPicker } from '@cli/ui/tools-picker.js';
+import { ModePicker, modeGlyph } from '@cli/ui/mode-picker.js';
 import { ResetPicker } from '@cli/ui/reset-picker.js';
 import { ClearSessionsPicker } from '@cli/ui/clear-sessions-picker.js';
 import { SessionPicker } from '@cli/ui/session-picker.js';
@@ -161,6 +170,24 @@ interface ChatAppProps {
   onDisabledToolsChange?: (names: string[]) => void;
   initialExpandTools?: boolean;
   onExpandToolsChange?: (expand: boolean) => void;
+  /** The available chat modes (built-in + custom), in display order. */
+  modes?: ChatMode[];
+  /** Id of the mode active at startup. */
+  initialMode?: string;
+  /**
+   * Switch the active mode: the host swaps the runtime's system prompt and
+   * persists the choice. Called with the new mode id (e.g. on shift+tab).
+   */
+  onModeChange?: (modeId: string) => void;
+  /**
+   * Create a custom mode (name + optional system prompt). The host persists it
+   * and makes it active, returning the updated mode list and the new mode's id
+   * so the picker reflects it immediately.
+   */
+  onCreateMode?: (
+    name: string,
+    systemPrompt?: string
+  ) => { modes: ChatMode[]; modeId: string } | null;
   initialMaxReadLines?: number;
   onMaxReadLinesChange?: (lines: number) => void;
   initialMaxHistoryMessages?: number;
@@ -205,6 +232,16 @@ function getSyntaxStyle(): SyntaxStyle {
   return sharedSyntaxStyle;
 }
 
+// A dimmed SyntaxStyle for reasoning/thinking, so it renders formatted but in a
+// uniform muted gray that reads as distinct from the model's answer.
+let mutedSyntaxStyle: SyntaxStyle | null = null;
+function getMutedSyntaxStyle(): SyntaxStyle {
+  if (!mutedSyntaxStyle) {
+    mutedSyntaxStyle = SyntaxStyle.fromStyles(MARKDOWN_MUTED_SYNTAX_STYLES);
+  }
+  return mutedSyntaxStyle;
+}
+
 // Renders raw markdown with OpenTUI's native <markdown> renderable, which lays out
 // tables, headings, lists and code blocks correctly inside the TUI (the previous
 // marked-terminal → ANSI pipeline mangled tables). Mirrors opencode's approach.
@@ -216,10 +253,13 @@ function getSyntaxStyle(): SyntaxStyle {
 const MarkdownView = React.memo(function MarkdownView({
   content,
   live = false,
+  muted = false,
 }: {
   content: string;
   /** True for the in-flight streaming block, false for a committed message. */
   live?: boolean;
+  /** Render dimmed (for reasoning/thinking) so it reads distinct from answers. */
+  muted?: boolean;
 }): React.ReactNode {
   // Committed messages render with `streaming` off so OpenTUI uses the
   // tree-sitter highlighter, which both styles the markdown and conceals its
@@ -236,10 +276,10 @@ const MarkdownView = React.memo(function MarkdownView({
   return (
     <markdown
       content={prepared}
-      syntaxStyle={getSyntaxStyle()}
+      syntaxStyle={muted ? getMutedSyntaxStyle() : getSyntaxStyle()}
       streaming={live}
       tableOptions={{ style: 'grid' }}
-      fg={MARKDOWN_FG}
+      fg={muted ? MUTED : MARKDOWN_FG}
       flexShrink={0}
     />
   );
@@ -476,6 +516,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     startMs: number;
     firstTokenMs: number | null;
   }>({ startMs: 0, firstTokenMs: null });
+  // Cumulative characters streamed this turn (thinking + answer, across every
+  // step). Counted here rather than measured from the visible buffers because
+  // those get flushed/cleared mid-turn (thinking commits when the answer starts,
+  // prose commits when a tool runs), which would otherwise collapse the live
+  // tok/s reading. Reset at each turn start.
+  const turnOutputCharsRef = useRef(0);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState('');
   // Images pasted into the prompt, awaiting the next send. Each carries a stable
@@ -590,6 +636,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
     thinkingSegmentsRef.current = [];
     responseTimingRef.current = { startMs: 0, firstTokenMs: null };
+    turnOutputCharsRef.current = 0;
     tokensPerSecondSamplesRef.current = [];
   };
   const [status, setStatus] = useState<string>('Loading session...');
@@ -707,6 +754,16 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   // View-only: hide model responses so the transcript shows just the user's
   // messages, for scanning back through what was asked. Not persisted.
   const [collapseResponses, setCollapseResponses] = useState(false);
+  // The active chat mode (swaps the system prompt). Cycled with shift+tab, or
+  // switched/created via the `/mode` picker.
+  const [modes, setModes] = useState<ChatMode[]>(props.modes ?? []);
+  const [showModePicker, setShowModePicker] = useState(false);
+  const [activeMode, setActiveMode] = useState(
+    props.initialMode ?? BUILD_MODE_ID
+  );
+  const activeModeInfo = modes.find((mode) => mode.id === activeMode);
+  const activeModeName = activeModeInfo?.name ?? 'Build';
+  const activeModeIcon = activeModeInfo ? modeGlyph(activeModeInfo.icon) : '';
   const maxReadLinesRef = useRef(
     props.initialMaxReadLines ?? DEFAULT_MAX_READ_LINES
   );
@@ -881,7 +938,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const displayStats = isSending
     ? getLiveStats(
         responseTimingRef.current,
-        streamingThinking + streamingContent,
+        turnOutputCharsRef.current,
         activityTick,
         tokensPerSecondSamplesRef.current
       )
@@ -1101,7 +1158,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       showConnectPicker ||
       showSessionPicker ||
       showReasoningPicker ||
-      showToolsPicker
+      showToolsPicker ||
+      showModePicker
     )
       return;
 
@@ -1144,6 +1202,19 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     // via the textarea's own paste handling.)
     if (key.ctrl && key.name === 'v') {
       if (attachClipboardImage()) return;
+    }
+
+    // Shift+Tab cycles the chat mode (Build → Ask → Plan → custom → …), swapping
+    // the system prompt for the next turn.
+    if (key.name === KeyName.Tab && key.shift && modes.length > 1) {
+      const index = modes.findIndex((mode) => mode.id === activeMode);
+      const next = modes[(index + 1) % modes.length];
+      if (next) {
+        setActiveMode(next.id);
+        props.onModeChange?.(next.id);
+        setStatus(`Mode: ${next.name}`);
+      }
+      return;
     }
 
     // Editing the queued messages: arrows move the selection, Enter pulls the
@@ -1727,6 +1798,15 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         return;
       }
 
+      case CommandName.Mode: {
+        if (modes.length === 0) {
+          setStatus('No modes available');
+          return;
+        }
+        setShowModePicker(true);
+        return;
+      }
+
       case CommandName.CollapseResponses: {
         const next = !collapseResponses;
         setCollapseResponses(next);
@@ -1920,6 +2000,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
     thinkingSegmentsRef.current = [];
     responseTimingRef.current = { startMs: Date.now(), firstTokenMs: null };
+    turnOutputCharsRef.current = 0;
     setLastStats(null);
     setInput('');
     setStatus('Waiting for response...');
@@ -2126,6 +2207,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             flushStreamedThinking();
           }
           streamingBufferRef.current += token;
+          turnOutputCharsRef.current += token.length;
         },
         onThinkingToken: (token) => {
           if (responseTimingRef.current.firstTokenMs === null) {
@@ -2135,6 +2217,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             thinkingRef.current.startMs = Date.now();
           }
           thinkingRef.current.buffer += token;
+          turnOutputCharsRef.current += token.length;
         },
       });
 
@@ -2243,6 +2326,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             const target =
               assistantMessages[Math.min(index, assistantMessages.length - 1)];
             if (!target) return;
+            // Some reasoning models (e.g. gpt-oss) emit their whole turn on the
+            // reasoning channel with empty content; the provider then promotes
+            // that reasoning to the answer. The segment then equals the message
+            // content, so anchoring it would render the same text twice (as a
+            // thought and as the reply) — skip it and keep just the reply.
+            if (target.content.trim() === segment.content.trim()) return;
             const existing = anchored[target.id];
             anchored[target.id] = existing
               ? {
@@ -2429,6 +2518,35 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     );
   }
 
+  if (showModePicker) {
+    return (
+      <ModePicker
+        modes={modes}
+        activeModeId={activeMode}
+        onSelect={(modeId) => {
+          setShowModePicker(false);
+          const mode = modes.find((m) => m.id === modeId);
+          setActiveMode(modeId);
+          props.onModeChange?.(modeId);
+          setStatus(`Mode: ${mode?.name ?? modeId}`);
+        }}
+        onCreate={(name, systemPrompt) => {
+          const result = props.onCreateMode?.(name, systemPrompt);
+          setShowModePicker(false);
+          if (!result) {
+            setStatus('Could not create mode');
+            return;
+          }
+          setModes(result.modes);
+          setActiveMode(result.modeId);
+          const created = result.modes.find((m) => m.id === result.modeId);
+          setStatus(`Mode: ${created?.name ?? name}`);
+        }}
+        onCancel={() => setShowModePicker(false)}
+      />
+    );
+  }
+
   if (showSessionPicker) {
     return (
       <SessionPicker
@@ -2604,7 +2722,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                       {formatDuration(thinking.durationMs)}
                     </text>
                     {thinkingCollapsed ? null : (
-                      <text fg={MUTED}>{thinking.content}</text>
+                      <MarkdownView content={thinking.content} muted />
                     )}
                   </box>
                 ) : null}
@@ -2628,12 +2746,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     !(thinking && message.toolCalls?.length) ? (
                       <MarkdownView content={message.content} />
                     ) : null}
-                    {/* bash and todowrite render their own boxes below, so skip
-                        them here to avoid a redundant ⚙ line. */}
+                    {/* bash, todowrite, and present_plan render their own boxes
+                        below, so skip them here to avoid a redundant ⚙ line. */}
                     {message.toolCalls
                       ?.filter(
                         (call) =>
-                          call.name !== 'bash' && call.name !== 'todowrite'
+                          call.name !== 'bash' &&
+                          call.name !== 'todowrite' &&
+                          call.name !== 'present_plan'
                       )
                       .map((call) => (
                         <text key={call.id} fg="magenta">
@@ -2658,6 +2778,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     />
                   ) : message.name === 'todowrite' ? (
                     <TodoBlock content={message.content} />
+                  ) : message.name === 'present_plan' ? (
+                    <PlanBlock content={message.content} />
                   ) : (
                     <ToolResultInline
                       content={message.content}
@@ -2706,7 +2828,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     : 'thinking...'}
                 </text>
                 {thinkingCollapsed ? null : (
-                  <text fg={MUTED}>{streamingThinking}</text>
+                  <MarkdownView content={streamingThinking} live muted />
                 )}
               </box>
             ) : null}
@@ -2940,7 +3062,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             minHeight={3}
             maxHeight={6}
             wrapMode="word"
-            placeholder="Ask anything..."
+            placeholder={modePlaceholder(activeMode)}
             backgroundColor={INPUT_BG}
             textColor="#111111"
             focusedTextColor="#111111"
@@ -3063,6 +3185,16 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             {reasoningAvailable ? (
               <text fg="yellow" attributes={BOLD} wrapMode="none">
                 {` ${activeReasoningEffort ?? 'off'}`}
+              </text>
+            ) : null}
+            <text fg="magenta" attributes={BOLD} wrapMode="none">
+              {activeModeIcon
+                ? ` ${activeModeIcon} ${activeModeName}`
+                : ` ${activeModeName}`}
+            </text>
+            {modes.length > 1 ? (
+              <text fg={MUTED} wrapMode="none">
+                {' (shift+tab)'}
               </text>
             ) : null}
             {showInterruptHint ? (
@@ -3287,7 +3419,7 @@ function isAbortError(error: unknown): boolean {
 
 function getLiveStats(
   timing: { startMs: number; firstTokenMs: number | null },
-  outputText: string,
+  outputChars: number,
   tick: number,
   tokensPerSecondSamples: number[]
 ): {
@@ -3303,7 +3435,10 @@ function getLiveStats(
   const firstTokenMs = timing.firstTokenMs ?? now;
   const ttftMs = Math.max(firstTokenMs - timing.startMs, 0);
   const genElapsedMs = Math.max(now - firstTokenMs, 1);
-  const estimatedTokens = estimateTokenCount(outputText);
+  // Same chars→tokens heuristic as estimateTokenCount, but from the cumulative
+  // turn char count (which doesn't collapse when buffers flush mid-turn).
+  const estimatedTokens =
+    outputChars > 0 ? Math.max(1, Math.round(outputChars / 4)) : 0;
   const currentTokensPerSecond = estimatedTokens / (genElapsedMs / 1000);
   // Average only the finalized turns — the in-progress rate is too jittery, so
   // it isn't folded in until this turn lands its final tok/s.
@@ -3403,6 +3538,36 @@ const TodoBlock = React.memo(function TodoBlock({
           {line}
         </text>
       ))}
+    </box>
+  );
+});
+
+/**
+ * Renders a presented plan (a present_plan tool result) as a titled card with
+ * the plan markdown and a hint to switch to Build mode to carry it out. The CLI
+ * has no buttons, so the hand-off is the mode switch (shift+tab or /mode).
+ */
+const PlanBlock = React.memo(function PlanBlock({
+  content,
+}: {
+  content: string;
+}): React.ReactNode {
+  return (
+    <box
+      flexDirection="column"
+      marginY={1}
+      border={['left']}
+      borderStyle="rounded"
+      borderColor="cyan"
+      paddingLeft={1}
+    >
+      <text fg="cyan" attributes={BOLD}>
+        Plan
+      </text>
+      <MarkdownView content={content} />
+      <text fg={MUTED}>
+        Switch to Build mode (shift+tab or /mode) to implement this plan.
+      </text>
     </box>
   );
 });

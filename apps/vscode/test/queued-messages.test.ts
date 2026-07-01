@@ -83,6 +83,9 @@ describe('queued messages', () => {
       disabledTools: [],
       reasoningEffortByModel: {},
       resolvedFiles: {},
+      mcpLoading: false,
+      modes: [],
+      activeModeId: 'build',
     });
 
     expect(state.queuedMessages).toHaveLength(0);

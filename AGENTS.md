@@ -14,6 +14,7 @@ Always:
 - All new changes and new files must have a test case along with it to confirm it works properly
 - Prioritize reusing enums instead of raw strings
 - Always use ENUMS instead of strings
+- When changing one app confirm if it affects other apps as well
 
 Treat full repository reads as a last resort.
 

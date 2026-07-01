@@ -180,3 +180,60 @@ export function RefreshIcon({ size = 16 }: IconProps): React.JSX.Element {
     </svg>
   );
 }
+
+/** Hammer — the Build mode (do the work). */
+export function HammerIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M14 6l4 4M17.5 6.5l-3-3-4 4 3 3 4-4zM12.5 7.5L4 16v4h4l8.5-8.5" />
+    </svg>
+  );
+}
+
+/** Speech bubble — the Ask mode (question and answer). */
+export function ChatIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M4 5h16v11H9l-4 4V5z" />
+    </svg>
+  );
+}
+
+/** Clipboard with a checklist — the Plan mode (lay out the steps). */
+export function ClipboardIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <rect x="6" y="4" width="12" height="17" rx="2" />
+      <path d="M9 3h6v3H9zM9 11h6M9 15h4" />
+    </svg>
+  );
+}
+
+/** Sparkle — a user-created custom mode. */
+export function SparkleIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M12 4l1.8 4.7L18.5 10l-4.7 1.8L12 16l-1.8-4.2L5.5 10l4.7-1.3L12 4z" />
+    </svg>
+  );
+}
+
+/** Renders the SVG icon for a mode's semantic icon key. */
+export function ModeIcon({
+  icon,
+  size = 14,
+}: {
+  icon: 'build' | 'ask' | 'plan' | 'custom';
+  size?: number;
+}): React.JSX.Element {
+  switch (icon) {
+    case 'build':
+      return <HammerIcon size={size} />;
+    case 'ask':
+      return <ChatIcon size={size} />;
+    case 'plan':
+      return <ClipboardIcon size={size} />;
+    case 'custom':
+      return <SparkleIcon size={size} />;
+  }
+}

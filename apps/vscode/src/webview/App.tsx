@@ -1,11 +1,13 @@
 import * as React from 'react';
 
 import {
+  HostMessageType,
   WebviewMessageType,
   WebviewRole,
   type WebviewImage,
   type WebviewModel,
   type WebviewReasoningChoice,
+  type WebviewStats,
 } from '@ext/shared/protocol';
 import { onHostMessage, postToHost } from '@ext/webview/vscode-api';
 import {
@@ -16,6 +18,7 @@ import {
   reducer,
 } from '@ext/webview/state';
 import { MessageView } from '@ext/webview/components/MessageView';
+import { renderMarkdown } from '@ext/webview/markdown';
 import { ToolActivityView } from '@ext/webview/components/ToolActivityView';
 import { ApprovalPrompt, InputPrompt } from '@ext/webview/components/Prompts';
 import { Composer } from '@ext/webview/components/Composer';
@@ -29,6 +32,10 @@ import {
 } from '@ext/webview/components/Icons';
 import { ChangesPanel } from '@ext/webview/components/ChangesPanel';
 import { deriveChangedFiles, type ChangedFile } from '@ext/webview/changes';
+import { BUILD_MODE_ID } from '@core/domain/chat-mode';
+import { ToolName } from '@core/domain/tool-name';
+
+const PRESENT_PLAN_TOOL = ToolName.PresentPlan;
 
 export function App(): React.JSX.Element {
   const [state, dispatch] = React.useReducer(reducer, initialState);
@@ -51,6 +58,73 @@ export function App(): React.JSX.Element {
     },
     []
   );
+  // Live tok/s while a turn streams, mirroring the CLI: the host only sends the
+  // real stats at turn-end, so estimate throughput here from the streamed text
+  // length and the time since the first token, refreshed on a timer.
+  const turnStartRef = React.useRef<number | null>(null);
+  const firstTokenRef = React.useRef<number | null>(null);
+  const [statsTick, setStatsTick] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!state.busy) {
+      turnStartRef.current = null;
+      firstTokenRef.current = null;
+      return undefined;
+    }
+    if (turnStartRef.current === null) turnStartRef.current = Date.now();
+    const id = setInterval(() => setStatsTick((t) => t + 1), 150);
+    return () => clearInterval(id);
+  }, [state.busy]);
+
+  // Stamp the first-token time as soon as any output (thinking or answer) lands.
+  if (
+    state.busy &&
+    firstTokenRef.current === null &&
+    (state.streaming || state.thinking)
+  ) {
+    firstTokenRef.current = Date.now();
+  }
+
+  const liveStats = React.useMemo<WebviewStats | undefined>(() => {
+    if (!state.busy || turnStartRef.current === null) return undefined;
+    const now = Date.now();
+    const firstToken = firstTokenRef.current ?? now;
+    const ttftMs = Math.max(firstToken - turnStartRef.current, 0);
+    const genElapsedMs = Math.max(now - firstToken, 1);
+    // Count the whole turn's output, not just the visible buffers: once the
+    // first answer token lands, thinking is flushed out of `state.thinking` into
+    // `liveTurnItems`, so summing only thinking+streaming would collapse the
+    // count mid-turn (rate drops to ~0, then climbs). Include committed
+    // thinking/message items so the total only grows.
+    const committed = state.liveTurnItems.reduce(
+      (sum, item) =>
+        item.kind === LiveTurnItemKind.Thinking ||
+        item.kind === LiveTurnItemKind.Message
+          ? sum + item.content.length
+          : sum,
+      0
+    );
+    const totalChars =
+      committed + state.thinking.length + state.streaming.length;
+    const estimatedTokens =
+      totalChars > 0 ? Math.max(1, Math.round(totalChars / 4)) : 0;
+    return {
+      ttftMs,
+      tokensPerSecond: estimatedTokens / (genElapsedMs / 1000),
+      // The running average only folds in completed turns; reuse the last known.
+      avgTokensPerSecond: state.stats?.avgTokensPerSecond ?? 0,
+    };
+    // statsTick drives the periodic refresh; the ref reads are intentional.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    state.busy,
+    state.streaming,
+    state.thinking,
+    state.liveTurnItems,
+    state.stats,
+    statsTick,
+  ]);
+
   const transcriptRef = React.useRef<HTMLDivElement>(null);
   // Whether new content should auto-scroll. True while the user is parked at the
   // bottom; flips to false the moment they scroll up to read earlier output, so
@@ -449,6 +523,39 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.OpenMcpConfig });
   };
 
+  const selectMode = (modeId: string): void => {
+    // Optimistically reflect the choice; the host echoes a ModeUpdate too.
+    dispatch({
+      type: HostMessageType.ModeUpdate,
+      modes: state.modes,
+      activeModeId: modeId,
+    });
+    postToHost({ type: WebviewMessageType.SelectMode, modeId });
+  };
+
+  const createMode = (name: string, systemPrompt?: string): void => {
+    postToHost({
+      type: WebviewMessageType.CreateMode,
+      name,
+      ...(systemPrompt ? { systemPrompt } : {}),
+    });
+  };
+
+  // Plan mode hands off to Build: switch the mode (the SelectMode message is
+  // posted before the Submit below, so the host swaps the system prompt first)
+  // then kick off the work. The plan itself is already in the transcript.
+  const startImplementation = (): void => {
+    selectMode(BUILD_MODE_ID);
+    sendNow('Go ahead and implement the plan above.', []);
+  };
+
+  // Hand the plan off to a file the user can refine: the host writes it to a
+  // fresh markdown file, opens it, and switches to Build mode. The user edits,
+  // then sends the plan back to implement.
+  const editPlan = (plan: string): void => {
+    postToHost({ type: WebviewMessageType.EditPlan, content: plan });
+  };
+
   const chatDisabled = !state.activeModel;
 
   if (state.view === 'sessions' || state.status === ChatStatus.Loading) {
@@ -501,6 +608,18 @@ export function App(): React.JSX.Element {
     );
   }
 
+  // The most recent presented plan (a present_plan tool result). Its card carries
+  // the Start/Edit actions — so they attach to a real plan, not to any Plan-mode
+  // reply, and stay correct after resuming a session.
+  let lastPlanIndex = -1;
+  for (let i = state.messages.length - 1; i >= 0; i -= 1) {
+    const m = state.messages[i];
+    if (m.role === WebviewRole.Tool && m.toolName === PRESENT_PLAN_TOOL) {
+      lastPlanIndex = i;
+      break;
+    }
+  }
+
   return (
     <div className="app">
       <div className="chat-header">
@@ -549,6 +668,22 @@ export function App(): React.JSX.Element {
             // back through what they asked without the long replies in between.
             if (state.collapseResponses && message.role !== WebviewRole.User) {
               return null;
+            }
+            // A presented plan renders as its own card (markdown + actions)
+            // rather than a generic tool row.
+            if (
+              message.role === WebviewRole.Tool &&
+              message.toolName === PRESENT_PLAN_TOOL
+            ) {
+              return (
+                <PlanCard
+                  key={message.id}
+                  plan={message.content}
+                  showActions={index === lastPlanIndex && !state.busy}
+                  onStart={startImplementation}
+                  onEdit={() => editPlan(message.content)}
+                />
+              );
             }
             const isLastMsg = index === state.messages.length - 1;
             const isLastAssistant =
@@ -780,7 +915,7 @@ export function App(): React.JSX.Element {
         activeModel={state.activeModel}
         activeProviderId={state.providerId}
         usage={state.usage}
-        stats={state.stats}
+        stats={state.busy && liveStats ? liveStats : state.stats}
         autoApprove={state.autoApprove}
         expandTools={state.expandTools}
         maxReadLines={state.maxReadLines}
@@ -807,6 +942,10 @@ export function App(): React.JSX.Element {
         onSetDisabledTools={setDisabledTools}
         onOpenMcpConfig={openMcpConfig}
         mcpLoading={state.mcpLoading}
+        modes={state.modes}
+        activeModeId={state.activeModeId}
+        onSelectMode={selectMode}
+        onCreateMode={createMode}
         onToggleAutoApprove={toggleAutoApprove}
         onToggleExpandTools={toggleExpandTools}
         onToggleThinkingCollapsed={toggleThinkingCollapsed}
@@ -842,6 +981,52 @@ export function App(): React.JSX.Element {
   );
 }
 
+/**
+ * Renders a presented plan (a present_plan tool result) as its own card: the
+ * plan markdown plus, on the most recent plan when idle, the Start/Edit actions.
+ */
+function PlanCard({
+  plan,
+  showActions,
+  onStart,
+  onEdit,
+}: {
+  plan: string;
+  showActions: boolean;
+  onStart: () => void;
+  onEdit: () => void;
+}): React.JSX.Element {
+  return (
+    <div className="plan-card">
+      <div className="plan-card-label">Plan</div>
+      <div
+        className="plan-card-body markdown-body"
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(plan) }}
+      />
+      {showActions ? (
+        <div className="plan-actions">
+          <button
+            type="button"
+            className="plan-start-btn"
+            onClick={onStart}
+            title="Switch to Build mode and implement this plan"
+          >
+            Start implementation →
+          </button>
+          <button
+            type="button"
+            className="plan-edit-btn"
+            onClick={onEdit}
+            title="Save the plan to a markdown file to edit before implementing"
+          >
+            Edit plan
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function ThinkingBlock({
   thinking,
   durationMs,
@@ -863,7 +1048,10 @@ function ThinkingBlock({
     return (
       <div className="thinking">
         <div className="thinking-label">{label}</div>
-        <pre className="thinking-content">{thinking}</pre>
+        <div
+          className="thinking-content markdown-body"
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(thinking) }}
+        />
       </div>
     );
   }
@@ -871,7 +1059,10 @@ function ThinkingBlock({
   return (
     <details className="thinking thinking-done" open={!collapsed}>
       <summary className="thinking-label">{label}</summary>
-      <pre className="thinking-content">{thinking}</pre>
+      <div
+        className="thinking-content markdown-body"
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(thinking) }}
+      />
     </details>
   );
 }

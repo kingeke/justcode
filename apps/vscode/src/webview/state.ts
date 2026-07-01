@@ -15,6 +15,7 @@ import {
   type WebviewToolView,
   type WebviewUsage,
   type WebviewStats,
+  type WebviewMode,
 } from '@ext/shared/protocol';
 import type { ResolvedFile } from '@ext/webview/changes';
 
@@ -135,6 +136,10 @@ export interface ChatState {
   disabledTools: string[];
   /** Whether MCP servers are still connecting (shows a spinner in the tools UI). */
   mcpLoading: boolean;
+  /** Available chat modes (built-in + custom), for the mode picker. */
+  modes: WebviewMode[];
+  /** Id of the active chat mode. */
+  activeModeId: string;
   /**
    * The user's chosen reasoning effort per model, nested by provider id. A model
    * absent from the map uses its default effort; `'off'` disables reasoning.
@@ -191,6 +196,8 @@ export const initialState: ChatState = {
   manageableTools: [],
   disabledTools: [],
   mcpLoading: false,
+  modes: [],
+  activeModeId: 'build',
   reasoningEffortByModel: {},
   resolvedFiles: {},
   queuedMessages: [],
@@ -306,6 +313,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
         manageableTools: action.manageableTools,
         disabledTools: action.disabledTools,
         mcpLoading: action.mcpLoading,
+        modes: action.modes,
+        activeModeId: action.activeModeId,
         reasoningEffortByModel: action.reasoningEffortByModel,
         sessionTitle: action.sessionTitle,
         // Restore the resolutions saved for this session so a resumed chat keeps
@@ -323,6 +332,16 @@ export function reducer(state: ChatState, action: Action): ChatState {
         manageableTools: action.manageableTools,
         disabledTools: action.disabledTools,
       };
+
+    case HostMessageType.ModeUpdate:
+      return {
+        ...state,
+        modes: action.modes,
+        activeModeId: action.activeModeId,
+      };
+
+    case HostMessageType.Notice:
+      return { ...state, notice: action.notice };
 
     case HostMessageType.ModelsUpdate:
       return {

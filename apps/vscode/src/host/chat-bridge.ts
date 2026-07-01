@@ -53,11 +53,13 @@ import {
   readResolvedFiles,
   writeResolvedFiles,
   deleteResolvedFiles,
+  pruneResolvedFiles,
 } from '@ext/host/resolved-files-store';
 import {
   readToolViews,
   writeToolViews,
   deleteToolViews,
+  pruneToolViews,
 } from '@ext/host/tool-views-store';
 
 import {
@@ -77,7 +79,17 @@ import {
   type WebviewTool,
   type WebviewToolView,
   type WebviewUsage,
+  type WebviewMode,
 } from '@ext/shared/protocol';
+import {
+  addCustomMode,
+  BUILD_MODE_ID,
+  eagerToolsForMode,
+  isKnownMode,
+  listModes,
+  resolveModeSystemPrompt,
+  type CustomModeConfig,
+} from '@core/domain/chat-mode';
 
 /** Longest tool-result snippet we forward to the webview as a preview. */
 const RESULT_PREVIEW_LIMIT = 2000;
@@ -142,6 +154,16 @@ export class ChatBridge {
   // Whether MCP servers are still connecting in the background. Drives the
   // webview's "loading MCP servers" spinner; cleared when the load callback fires.
   private mcpLoading = false;
+  // Chat modes (built-in + custom) and the active one. The active mode's system
+  // prompt is applied to the runtime; custom modes live in global config.
+  private modes: WebviewMode[] = [];
+  private activeModeId: string = BUILD_MODE_ID;
+  // The user-editable base (Build/agent) prompt and custom-mode definitions,
+  // cached from config so a mode switch can resolve + apply the new system prompt
+  // synchronously — before the next queued message (e.g. the Submit that follows
+  // "Start implementation") is handled — rather than after an async config read.
+  private agentPrompt: string | undefined;
+  private customModesConfig: Record<string, CustomModeConfig> = {};
   // Workspace-relative path of the file open in the editor, which `@currentfile`
   // resolves to. Kept in sync by the view provider as the active editor changes;
   // re-applied to the runtime whenever services are (re)created.
@@ -286,6 +308,15 @@ export class ChatBridge {
       case WebviewMessageType.SetDisabledTools:
         await this.setDisabledTools(message.names);
         return;
+      case WebviewMessageType.SelectMode:
+        await this.selectMode(message.modeId);
+        return;
+      case WebviewMessageType.CreateMode:
+        await this.createMode(message.name, message.systemPrompt);
+        return;
+      case WebviewMessageType.EditPlan:
+        await this.editPlan(message.content);
+        return;
       case WebviewMessageType.RevertFile:
         await this.revertFile(message.path, message.oldText, message.created);
         return;
@@ -388,6 +419,14 @@ export class ChatBridge {
     this.localModelAutoRefresh = globalConfig.localModelAutoRefresh ?? true;
     this.lazyToolLoading = globalConfig.lazyToolLoading ?? true;
     this.disabledTools = globalConfig.disabledTools ?? [];
+    // Resolve chat modes (built-in + custom) and the active one.
+    const customModes = globalConfig.customModes ?? {};
+    this.agentPrompt = globalConfig.systemPrompt;
+    this.customModesConfig = customModes;
+    this.modes = listModes(customModes);
+    this.activeModeId = isKnownMode(globalConfig.mode ?? '', customModes)
+      ? (globalConfig.mode as string)
+      : BUILD_MODE_ID;
     // The config stores the same string values under @core's ReasoningEffort
     // enum type; the webview protocol re-declares them as string literals.
     this.reasoningEffortByModel = (globalConfig.reasoningEffortByModel ??
@@ -429,6 +468,8 @@ export class ChatBridge {
         manageableTools: this.manageableTools,
         disabledTools: this.disabledTools,
         mcpLoading: this.mcpLoading,
+        modes: this.modes,
+        activeModeId: this.activeModeId,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles: {},
       });
@@ -442,6 +483,14 @@ export class ChatBridge {
     services.setLazyToolLoading(this.lazyToolLoading);
     services.setDisabledTools(this.disabledTools);
     services.setCurrentFile(this.currentFile);
+    // Apply the active mode's system prompt to the runtime for this session.
+    services.setSystemPrompt(
+      resolveModeSystemPrompt(this.activeModeId, {
+        agentPrompt: globalConfig.systemPrompt,
+        customModes,
+      })
+    );
+    services.setEagerlyAdvertisedTools(eagerToolsForMode(this.activeModeId));
     // Snapshot the catalog (name/label/category/description) for the popup; live
     // on/off state is tracked separately in `disabledTools`.
     this.manageableTools = services.manageableTools.map((tool) => ({
@@ -475,6 +524,8 @@ export class ChatBridge {
         manageableTools: this.manageableTools,
         disabledTools: this.disabledTools,
         mcpLoading: this.mcpLoading,
+        modes: this.modes,
+        activeModeId: this.activeModeId,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles: {},
       });
@@ -533,6 +584,8 @@ export class ChatBridge {
         manageableTools: this.manageableTools,
         disabledTools: this.disabledTools,
         mcpLoading: this.mcpLoading,
+        modes: this.modes,
+        activeModeId: this.activeModeId,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles,
         ...(session.conversation.title !== undefined
@@ -591,6 +644,8 @@ export class ChatBridge {
         manageableTools: this.manageableTools,
         disabledTools: this.disabledTools,
         mcpLoading: this.mcpLoading,
+        modes: this.modes,
+        activeModeId: this.activeModeId,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles,
         ...(conversation.title !== undefined
@@ -1135,6 +1190,16 @@ export class ChatBridge {
     try {
       const services = await this.ensureServices();
       const summaries = await services.chatSessionService.listSessions();
+
+      // Rebuilding the sessions list is the one moment we hold the authoritative
+      // set of live sessions, so use it to garbage-collect sidecar entries for
+      // sessions that no longer exist. Without this the resolved-files/tool-views
+      // stores only shrink on explicit deletion and otherwise grow unbounded.
+      const liveSessionIds = summaries.map((s) => s.sessionId);
+      const cacheDir = cacheDirectory();
+      void pruneResolvedFiles(cacheDir, liveSessionIds);
+      void pruneToolViews(cacheDir, liveSessionIds);
+
       this.post({
         type: HostMessageType.SessionsList,
         sessions: summaries.map((s) => ({
@@ -1158,6 +1223,66 @@ export class ChatBridge {
     this.sessionId = sessionId;
     this.conversation = undefined;
     this.resetMetrics();
+
+    // Fast path: switching sessions doesn't change the provider or its model
+    // list, so skip the `startSession` model fetch that `sendReady` runs — a
+    // live network call for local providers (Ollama/LM Studio), a disk
+    // read+parse otherwise — which is the lag the user sees when clicking a
+    // session. Reuse the cached model state and just load the picked
+    // conversation from disk.
+    if (
+      this.services?.providerId &&
+      this.activeModel &&
+      this.models.length > 0
+    ) {
+      try {
+        const configDir = cacheDirectory();
+        const persistedViews = await readToolViews(configDir, sessionId);
+        for (const [callId, view] of persistedViews) {
+          if (!this.toolViewsByCallId.has(callId)) {
+            this.toolViewsByCallId.set(callId, view);
+          }
+        }
+        const conversation =
+          await this.services.chatSessionService.loadConversation(sessionId);
+        this.conversation = conversation;
+        const resolvedFiles = await readResolvedFiles(configDir, sessionId);
+        this.post({
+          type: HostMessageType.Ready,
+          providerId: this.services.providerId,
+          activeModel: this.activeModel,
+          models: this.models.map(toWebviewModel),
+          messages: await toWebviewMessages(
+            conversation,
+            this.services,
+            this.toolViewsByCallId
+          ),
+          autoApprove: this.autoApprove,
+          expandTools: this.expandTools,
+          maxReadLines: this.maxReadLines,
+          maxHistoryMessages: this.maxHistoryMessages,
+          thinkingCollapsed: this.thinkingCollapsed,
+          localModelAutoRefresh: this.localModelAutoRefresh,
+          lazyToolLoading: this.lazyToolLoading,
+          manageableTools: this.manageableTools,
+          disabledTools: this.disabledTools,
+          mcpLoading: this.mcpLoading,
+          modes: this.modes,
+          activeModeId: this.activeModeId,
+          reasoningEffortByModel: this.reasoningEffortByModel,
+          resolvedFiles,
+          ...(conversation.title !== undefined
+            ? { sessionTitle: conversation.title }
+            : {}),
+        });
+        return;
+      } catch {
+        // Any failure (e.g. the conversation couldn't be read) falls through to
+        // the full path so the session still opens.
+        this.conversation = undefined;
+      }
+    }
+
     await this.sendReady();
   }
 
@@ -1551,6 +1676,101 @@ export class ChatBridge {
     return summary;
   }
 
+  /**
+   * Switches the active chat mode: applies its system prompt to the live runtime
+   * (so the next turn uses it), persists the choice, and pushes a ModeUpdate so
+   * the picker reflects it — without resetting the transcript or stats.
+   */
+  private async selectMode(modeId: string): Promise<void> {
+    if (!isKnownMode(modeId, this.customModesConfig)) return;
+
+    // Apply the prompt synchronously from cached config so it's in force before
+    // any message queued right after this one is handled — e.g. the Submit that
+    // follows "Start implementation" must run under the Build prompt, not Plan.
+    this.applyMode(modeId);
+
+    // Persist the choice out of band; it doesn't gate the switch above.
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    await writeGlobalConfig(configDir, { ...config, mode: modeId });
+  }
+
+  /**
+   * Applies a mode to the live runtime — system prompt, eager tools, active id —
+   * and pushes a ModeUpdate. Synchronous on purpose (no awaits) so an immediately
+   * following turn sees the new prompt; persistence is handled by the caller.
+   */
+  private applyMode(modeId: string): void {
+    this.activeModeId = modeId;
+    this.services?.setSystemPrompt(
+      resolveModeSystemPrompt(modeId, {
+        agentPrompt: this.agentPrompt,
+        customModes: this.customModesConfig,
+      })
+    );
+    this.services?.setEagerlyAdvertisedTools(eagerToolsForMode(modeId));
+    this.post({
+      type: HostMessageType.ModeUpdate,
+      modes: this.modes,
+      activeModeId: this.activeModeId,
+    });
+  }
+
+  /**
+   * Creates a custom mode (name + optional system prompt), persists it, and
+   * makes it active. The id is derived from the name (deduped), so the picker
+   * and config stay readable.
+   */
+  private async createMode(name: string, systemPrompt?: string): Promise<void> {
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    const created = addCustomMode(name, systemPrompt, config.customModes ?? {});
+    if (!created) return;
+    const { id, customModes } = created;
+
+    this.customModesConfig = customModes;
+    this.modes = listModes(customModes);
+    this.applyMode(id);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      customModes,
+      mode: id,
+    });
+  }
+
+  /**
+   * Writes the plan to a fresh markdown file in the workspace root (a name that
+   * won't clobber an existing plan), opens it for editing, and switches to Build
+   * mode — so the user can refine the plan and then send it back to implement.
+   */
+  private async editPlan(content: string): Promise<void> {
+    const fileName = this.uniquePlanFileName();
+    const target = resolve(this.workspaceRoot, fileName);
+    try {
+      await writeFile(target, content, 'utf8');
+    } catch (error) {
+      this.post({
+        type: HostMessageType.Error,
+        message: `Couldn't create the plan file: ${errorMessage(error)}`,
+      });
+      return;
+    }
+    this.onOpenFile?.(target);
+    await this.selectMode(BUILD_MODE_ID);
+    this.post({
+      type: HostMessageType.Notice,
+      notice: `Saved the plan to ${fileName} and switched to Build mode. Edit it, then send the plan here to start implementation.`,
+    });
+  }
+
+  /** A `plan.md` name in the workspace root that doesn't overwrite an existing file. */
+  private uniquePlanFileName(): string {
+    if (!existsSync(resolve(this.workspaceRoot, 'plan.md'))) return 'plan.md';
+    let n = 2;
+    while (existsSync(resolve(this.workspaceRoot, `plan-${n}.md`))) n += 1;
+    return `plan-${n}.md`;
+  }
+
   private async resetSession(): Promise<void> {
     // Start a new session without touching the existing one — it's already
     // persisted and should remain visible in the sessions list.
@@ -1585,6 +1805,8 @@ export class ChatBridge {
         manageableTools: this.manageableTools,
         disabledTools: this.disabledTools,
         mcpLoading: this.mcpLoading,
+        modes: this.modes,
+        activeModeId: this.activeModeId,
         reasoningEffortByModel: this.reasoningEffortByModel,
         resolvedFiles: {},
       });
@@ -1630,6 +1852,7 @@ function toProviderError(
   };
 }
 
+/** Derives a stable, readable, unique id for a custom mode from its name. */
 function toWebviewModel(model: ModelInfo): WebviewModel {
   const entry = PROVIDER_BY_ID[model.providerId];
   const result: WebviewModel = {

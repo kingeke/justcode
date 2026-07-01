@@ -95,6 +95,12 @@ export const TOOL_DISPLAY: ToolDisplay[] = [
     category: BUILT_IN_TOOL_CATEGORY,
     summary: 'Read earlier conversation history',
   },
+  {
+    name: ToolName.PresentPlan,
+    label: 'present_plan',
+    category: BUILT_IN_TOOL_CATEGORY,
+    summary: 'Present a plan for review',
+  },
 ];
 
 const TOOL_DISPLAY_BY_NAME = new Map(

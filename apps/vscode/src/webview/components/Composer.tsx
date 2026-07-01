@@ -1,6 +1,5 @@
 import * as React from 'react';
 
-import { APP_NAME } from '@core/branding';
 import {
   applyMentionSuggestion,
   applySymbolSuggestion,
@@ -9,8 +8,14 @@ import {
   getActiveMentionQuery,
   getActiveSymbolMention,
 } from '@core/application/prompt-attachment-service';
+import {
+  BUILT_IN_MODE_CATEGORY,
+  CUSTOM_MODE_CATEGORY,
+  modePlaceholder,
+} from '@core/domain/chat-mode';
 import type {
   WebviewImage,
+  WebviewMode,
   WebviewModel,
   WebviewReasoningChoice,
   WebviewStats,
@@ -18,6 +23,7 @@ import type {
   WebviewUsage,
 } from '@ext/shared/protocol';
 import {
+  ModeIcon,
   PlusIcon,
   SendIcon,
   SlidersIcon,
@@ -117,6 +123,14 @@ export interface ComposerProps {
   onOpenMcpConfig: () => void;
   /** Whether MCP servers are still connecting (shows a spinner on the tools button). */
   mcpLoading: boolean;
+  /** Available chat modes (built-in + custom) for the mode picker. */
+  modes: WebviewMode[];
+  /** The currently active mode id. */
+  activeModeId: string;
+  /** Switch the active mode. */
+  onSelectMode: (modeId: string) => void;
+  /** Create a custom mode with a name and optional system prompt. */
+  onCreateMode: (name: string, systemPrompt?: string) => void;
 }
 
 /**
@@ -148,8 +162,14 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   const [collapsedCategories, setCollapsedCategories] = React.useState<
     Set<string>
   >(new Set());
+  const [showModes, setShowModes] = React.useState(false);
+  // When set, the mode popup shows the "create custom mode" form instead.
+  const [creatingMode, setCreatingMode] = React.useState(false);
+  const [modeNameDraft, setModeNameDraft] = React.useState('');
+  const [modePromptDraft, setModePromptDraft] = React.useState('');
   const reasoningRef = React.useRef<HTMLDivElement>(null);
   const toolsRef = React.useRef<HTMLDivElement>(null);
+  const modesRef = React.useRef<HTMLDivElement>(null);
   const [readLimitDraft, setReadLimitDraft] = React.useState('');
   const [editingReadLimit, setEditingReadLimit] = React.useState(false);
   const [historyLimitDraft, setHistoryLimitDraft] = React.useState('');
@@ -198,6 +218,19 @@ export function Composer(props: ComposerProps): React.JSX.Element {
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [showTools]);
 
+  // Close the mode popup when clicking outside it.
+  React.useEffect(() => {
+    if (!showModes) return;
+    const onPointerDown = (e: PointerEvent): void => {
+      if (modesRef.current && !modesRef.current.contains(e.target as Node)) {
+        setShowModes(false);
+        setCreatingMode(false);
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [showModes]);
+
   // Group the tools by category, preserving first-seen order, for the popup.
   const toolCategories = React.useMemo<
     { category: string; tools: WebviewTool[] }[]
@@ -239,6 +272,28 @@ export function Composer(props: ComposerProps): React.JSX.Element {
     () => new Set(props.disabledTools),
     [props.disabledTools]
   );
+
+  const builtInModes = React.useMemo(
+    () => props.modes.filter((m) => !m.custom),
+    [props.modes]
+  );
+  const customModes = React.useMemo(
+    () => props.modes.filter((m) => m.custom),
+    [props.modes]
+  );
+  const activeMode = props.modes.find((m) => m.id === props.activeModeId);
+  const activeModeName = activeMode?.name ?? 'Build';
+
+  const submitCreateMode = (): void => {
+    const name = modeNameDraft.trim();
+    if (!name) return;
+    const prompt = modePromptDraft.trim();
+    props.onCreateMode(name, prompt.length > 0 ? prompt : undefined);
+    setModeNameDraft('');
+    setModePromptDraft('');
+    setCreatingMode(false);
+    setShowModes(false);
+  };
 
   // Apply a change to the disabled set and push the full new list to the host.
   const applyDisabled = (next: Set<string>): void => {
@@ -429,6 +484,16 @@ export function Composer(props: ComposerProps): React.JSX.Element {
       }
     }
 
+    // Shift+Tab cycles the chat mode (Build → Ask → Plan → custom → …), matching
+    // the CLI. Handled here so it works while typing in the composer.
+    if (event.key === 'Tab' && event.shiftKey && props.modes.length > 1) {
+      event.preventDefault();
+      const index = props.modes.findIndex((m) => m.id === props.activeModeId);
+      const next = props.modes[(index + 1) % props.modes.length];
+      if (next) props.onSelectMode(next.id);
+      return;
+    }
+
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       submit();
@@ -602,7 +667,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
               ? 'Configure a provider to start chatting…'
               : busy
                 ? 'Queue a follow-up — sends when this turn finishes…'
-                : `Ask ${APP_NAME} to build, fix, or explain…`
+                : modePlaceholder(props.activeModeId)
           }
           onChange={(event) => changeValue(event.target.value)}
           onKeyDown={onKeyDown}
@@ -621,6 +686,161 @@ export function Composer(props: ComposerProps): React.JSX.Element {
             </button>
 
             <span className="toolbar-divider" />
+
+            <div className="settings-popup-anchor" ref={modesRef}>
+              {showModes ? (
+                <div className="settings-popup modes-popup">
+                  {creatingMode ? (
+                    <div className="settings-popup-section modes-form">
+                      <div className="settings-popup-heading">
+                        <span>New mode</span>
+                      </div>
+                      <input
+                        type="text"
+                        className="modes-input"
+                        placeholder="Mode name"
+                        value={modeNameDraft}
+                        autoFocus
+                        onChange={(e) => setModeNameDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            submitCreateMode();
+                          }
+                        }}
+                      />
+                      <textarea
+                        className="modes-textarea"
+                        placeholder="System prompt (optional)"
+                        rows={4}
+                        value={modePromptDraft}
+                        onChange={(e) => setModePromptDraft(e.target.value)}
+                      />
+                      <div className="modes-form-hint">
+                        AGENTS.md and the workspace path are always included.
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="settings-popup-section modes-scroll">
+                      <div className="modes-group">
+                        <div className="modes-category-label">
+                          {BUILT_IN_MODE_CATEGORY}
+                        </div>
+                        {builtInModes.map((mode) => {
+                          const isCurrent = mode.id === props.activeModeId;
+                          return (
+                            <button
+                              key={mode.id}
+                              type="button"
+                              className="modes-item"
+                              onClick={() => {
+                                props.onSelectMode(mode.id);
+                                setShowModes(false);
+                              }}
+                            >
+                              <span
+                                className={`tools-check ${isCurrent ? 'tools-check-on' : ''}`}
+                              >
+                                {isCurrent ? '✓' : ''}
+                              </span>
+                              <span className="modes-item-icon">
+                                <ModeIcon icon={mode.icon} />
+                              </span>
+                              <span className="modes-item-label">
+                                {mode.name}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {customModes.length > 0 ? (
+                        <div className="modes-group">
+                          <div className="modes-category-label">
+                            {CUSTOM_MODE_CATEGORY}
+                          </div>
+                          {customModes.map((mode) => {
+                            const isCurrent = mode.id === props.activeModeId;
+                            return (
+                              <button
+                                key={mode.id}
+                                type="button"
+                                className="modes-item"
+                                onClick={() => {
+                                  props.onSelectMode(mode.id);
+                                  setShowModes(false);
+                                }}
+                              >
+                                <span
+                                  className={`tools-check ${isCurrent ? 'tools-check-on' : ''}`}
+                                >
+                                  {isCurrent ? '✓' : ''}
+                                </span>
+                                <span className="modes-item-icon">
+                                  <ModeIcon icon={mode.icon} />
+                                </span>
+                                <span className="modes-item-label">
+                                  {mode.name}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                  <div className="settings-popup-section tools-mcp-footer">
+                    {creatingMode ? (
+                      <div className="modes-form-actions">
+                        <button
+                          type="button"
+                          className="tools-mcp-link"
+                          onClick={() => {
+                            setCreatingMode(false);
+                            setModeNameDraft('');
+                            setModePromptDraft('');
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="tools-mcp-link modes-create-confirm"
+                          disabled={modeNameDraft.trim().length === 0}
+                          onClick={submitCreateMode}
+                        >
+                          Create
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="tools-mcp-link"
+                        onClick={() => setCreatingMode(true)}
+                        title="Create a custom mode"
+                      >
+                        + Create mode
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className={`mode-btn ${showModes ? 'mode-btn-active' : ''}`}
+                title="Change mode"
+                onClick={() => {
+                  setShowModes((s) => !s);
+                  setCreatingMode(false);
+                }}
+              >
+                {activeMode ? (
+                  <span className="mode-btn-icon">
+                    <ModeIcon icon={activeMode.icon} />
+                  </span>
+                ) : null}
+                {activeModeName}
+              </button>
+            </div>
 
             <button
               type="button"
