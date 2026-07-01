@@ -1,55 +1,47 @@
 # JustCode for VS Code
 
-The JustCode coding assistant as a VS Code sidebar — the same lean, transparent
-agent as the CLI, reusing `@core` / `@runtime` / `@providers` directly. Bring
-your own provider, keep your editable system prompt, control every token.
+**A lean, transparent coding assistant in your sidebar — where *you* control
+every token.**
 
-## Architecture
+Most AI coding tools quietly inflate every request with huge hidden prompts you
+can't see or change — some spend tens of thousands of tokens on a single "hey."
+JustCode sends roughly **550 tokens per request**, and most of that is a
+**system prompt you can read and edit**. No hidden bloat, no wasted spend — your
+context, your rules.
 
-```
-src/
-  extension.ts            activate(): registers the webview view + commands
-  host/
-    chat-view-provider.ts WebviewViewProvider — owns the webview + CSP shell
-    chat-bridge.ts        wires ChatSessionService <-> webview messages
-  shared/
-    protocol.ts           typed host <-> webview message protocol (enums)
-  webview/
-    index.tsx             React entry
-    App.tsx               chat state machine (useReducer)
-    state.ts              reducer over host messages + local UI actions
-    components/           transcript, tool activity, approvals, composer, header
-    webview.css           themed entirely via VS Code CSS variables
-```
+This extension brings the same lean engine as the [JustCode
+CLI](https://justcodeapp.dev/) into a VS Code chat sidebar.
 
-The extension host runs in VS Code's Node-based extension host, so it imports
-the reusable packages straight from source (no Bun, no OpenTUI — that
-dependency lives only in `apps/cli`). The webview is a separate browser bundle.
+## Why JustCode
 
-Both bundles are produced by `esbuild.mjs`, reusing the repo's path aliases
-(`@core`, `@runtime`, `@providers`) plus `@ext` for the extension's own modules.
+- **~550 tokens per request** — no hidden bloat inflating every call.
+- **A system prompt you can read and edit** — no black box.
+- **Bring your own provider & key** — OpenAI, Anthropic, OpenRouter, Qwen
+  (Alibaba Cloud), Ollama, LM Studio, or any OpenAI-compatible endpoint.
+- **See everything it does** — live tool activity and inline approvals before
+  any file is written or command is run.
+- **MCP servers** and **chat modes** (Build / Ask / Plan + custom), sharing the
+  same engine as the CLI.
 
-## Develop
+## Getting started
 
-From the repo root, install once (`npm install`). Then, from this folder:
+1. Install the extension and open the **JustCode** view from the activity bar.
+2. Connect a provider — either configure one with the
+   [JustCode CLI](https://justcodeapp.dev/) or set your provider environment
+   variables. The panel shows a notice with instructions until one is connected.
+3. Pick a model and start chatting.
 
-```bash
-npm run build      # bundle host -> dist/, webview -> media/
-npm run watch      # rebuild on change
-npm run typecheck  # tsc --noEmit
-```
+## Features
 
-To run it: open `apps/vscode` in VS Code and press **F5** ("Run JustCode
-Extension"). A second VS Code window launches with the extension loaded — open
-the JustCode view from the activity bar.
+- Streaming chat with live tool activity.
+- Inline tool approvals — nothing touches your workspace without your OK.
+- In-tool questions, provider/model selection, and one-click new sessions.
+- Themed entirely with your VS Code color theme.
 
-A provider must be configured first (via the JustCode CLI or provider env vars);
-the panel shows a notice with instructions until one is connected.
+## Learn more
 
-## Milestone status
+Full documentation, the always-current list of tools and commands, and the CLI
+live at **[justcodeapp.dev](https://justcodeapp.dev/)**.
 
-Milestone 1 (this build): streaming chat, live tool activity, inline tool
-approvals, in-tool questions, provider/model selection, and session reset.
-
-Later: rich markdown rendering in the transcript, image paste, session history
-browsing, and reasoning-effort selection.
+JustCode is free and open source (MIT). Issues and contributions welcome at
+**[github.com/kingeke/justcode](https://github.com/kingeke/justcode)**.

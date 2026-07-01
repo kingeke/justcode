@@ -228,6 +228,13 @@ const EXIT_HINT = 'Press Ctrl+C again to exit';
 const EXIT_WINDOW_MS = 2000;
 const MARKDOWN_FG = '#d4d4d4';
 const INPUT_BG = '#008B8B';
+// Chat input placeholder: a muted gray that reads as hint text on the teal
+// input background without competing with the typed text.
+const INPUT_PLACEHOLDER = '#111111';
+// App background: keeps the light-on-dark UI readable on light/white terminals.
+// The renderer also sets this as the global clear color; the root box repaints
+// it so the main view is covered even if the native clear is unavailable.
+const APP_BG = '#24272D';
 
 // One shared SyntaxStyle for all markdown rendering. Created lazily on first use
 // (after the native renderer is initialised) so it isn't constructed at import
@@ -546,6 +553,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   // otherwise keeps its own cursor offset.
   const [inputKey, setInputKey] = useState(0);
   const promptAreaRef = useRef<TextareaRenderable | null>(null);
+  // Set when the latest `input` change came from the textarea's own typing
+  // (onContentChange) rather than a programmatic set. The sync effect consumes
+  // it to skip writing that value back into the live buffer — under fast typing
+  // React state lags the buffer, so writing it back would corrupt/reorder text.
+  const inputFromAreaRef = useRef(false);
 
   const setInputWithCursorAtEnd = useCallback((next: string): void => {
     setInput(next);
@@ -1038,6 +1050,15 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   useEffect(() => {
     const area = promptAreaRef.current;
     if (!area || area.isDestroyed) return;
+
+    // A change that came from the textarea itself (typing) is already in the
+    // buffer — and `input` may lag it under fast input — so skip the write-back
+    // to avoid resetting the buffer to a stale value mid-type. Consume-once so a
+    // subsequent programmatic change (clear/tab-complete/command) still syncs.
+    if (inputFromAreaRef.current) {
+      inputFromAreaRef.current = false;
+      return;
+    }
 
     if (area.plainText !== input) {
       area.setText(input);
@@ -2753,6 +2774,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       flexDirection="column"
       height={dimensions.height}
       width={dimensions.width}
+      // Fill the whole view with the app background so the light-on-dark UI
+      // stays readable on light/white terminals (OpenTUI only paints cells a
+      // component draws, so a full-size root box is what actually covers it).
+      backgroundColor={APP_BG}
       padding={1}
     >
       <box flexDirection="column" flexShrink={0}>
@@ -2782,8 +2807,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           Provider: {activeProviderId} | Session: {currentSessionLabel}
         </text>
         <text fg={MUTED} flexShrink={0}>
-          Enter to send · Tab to complete @file (or @file::method) or /command ·
-          Esc to cancel or interrupt · Ctrl+C to exit
+          Enter to send · \ + Enter (or Ctrl/Shift+Enter) for newline · Tab to
+          complete @file (or @file::method) or /command · Esc to cancel or
+          interrupt · Ctrl+C to exit
         </text>
       </box>
 
@@ -3159,8 +3185,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             wrapMode="word"
             placeholder={modePlaceholder(activeMode)}
             backgroundColor={INPUT_BG}
-            textColor="#111111"
-            focusedTextColor="#111111"
+            textColor={INPUT_PLACEHOLDER}
+            focusedTextColor={INPUT_PLACEHOLDER}
+            placeholderColor={INPUT_PLACEHOLDER}
             cursorColor="white"
             // A terminal forwards a paste over stdin, but pasted image data is
             // not part of it — so when a paste carries no text, check the OS
@@ -3176,10 +3203,16 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             }}
             // The prompt stays focusable while a turn is sending (so the user
             // can type ahead and queue the next message) and while a question is
-            // pending (it doubles as the answer box). Only the keyboard browse/
-            // edit modes steer focus away to drive their arrow navigation.
+            // pending (it doubles as the answer box). The keyboard browse/edit
+            // modes steer focus away to drive their arrow navigation, and a
+            // pending tool approval takes focus too: it's answered with single
+            // keys (y/a/n) via the global handler, so leaving the textarea
+            // focused would echo those keystrokes into the input.
             focused={
-              terminalFocused && browseIndex === null && queueEditIndex === null
+              terminalFocused &&
+              browseIndex === null &&
+              queueEditIndex === null &&
+              pendingApproval === null
             }
             onSubmit={() => {
               const text = promptAreaRef.current?.plainText ?? input;
@@ -3216,6 +3249,21 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                   return;
                 }
 
+                // Universal newline fallback for terminals that can't report a
+                // modified Enter (e.g. macOS Terminal.app sends a bare CR for
+                // Ctrl+Enter, indistinguishable from plain Enter): a backslash
+                // immediately before the cursor turns Enter into a newline
+                // instead of a submit. Works regardless of key reporting.
+                const text = promptArea.plainText;
+                const cursor = promptArea.cursorOffset;
+                if (cursor > 0 && text[cursor - 1] === '\\') {
+                  promptArea.setText(
+                    `${text.slice(0, cursor - 1)}\n${text.slice(cursor)}`
+                  );
+                  promptArea.cursorOffset = cursor;
+                  return;
+                }
+
                 if (pendingQuestion) {
                   resolveQuestion(promptArea.plainText);
                   return;
@@ -3227,6 +3275,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             onContentChange={() => {
               const promptArea = promptAreaRef.current;
               if (!promptArea || promptArea.isDestroyed) return;
+              // Mark this change as originating from the buffer so the sync
+              // effect doesn't write the (possibly stale) React value back.
+              inputFromAreaRef.current = true;
               setInput(promptArea.plainText);
               reconcilePendingImages(promptArea.plainText);
             }}

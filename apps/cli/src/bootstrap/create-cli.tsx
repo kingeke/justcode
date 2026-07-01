@@ -284,6 +284,12 @@ async function runChat(options: SharedOptions): Promise<void> {
     exitOnCtrlC: false,
     useMouse: true,
   });
+  // Paint a fixed dark background (the framebuffer clear color) so the UI —
+  // which uses light-on-dark colors — stays readable on light/white terminal
+  // themes instead of inheriting the terminal's background. Set explicitly
+  // (not just via the config) so it reaches the native renderer, and it covers
+  // every view including the full-screen pickers.
+  renderer.setBackgroundColor('#24272D');
   const exit = (): void => {
     runtime.disposeMcp();
     renderer.destroy();
