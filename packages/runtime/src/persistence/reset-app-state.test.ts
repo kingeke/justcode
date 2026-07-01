@@ -58,7 +58,10 @@ describe('resetAppState', () => {
         force: true,
       }
     );
-    expect(rm).toHaveBeenNthCalledWith(3, join(configDirectory, 'sessions'), {
+    expect(rm).toHaveBeenNthCalledWith(3, join(configDirectory, 'mcp.json'), {
+      force: true,
+    });
+    expect(rm).toHaveBeenNthCalledWith(4, join(configDirectory, 'sessions'), {
       recursive: true,
       force: true,
     });
