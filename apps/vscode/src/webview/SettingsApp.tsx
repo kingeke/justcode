@@ -17,6 +17,7 @@ import {
   postSettingsToHost,
 } from '@ext/webview/vscode-api';
 import { PlusIcon } from '@ext/webview/components/Icons';
+import { APP_NAME } from '@core/branding';
 
 const KIND_LABELS: Record<WebviewProviderKind, string> = {
   [WebviewProviderKind.ApiKey]: 'API Key',
@@ -54,7 +55,7 @@ enum Tab {
 const TABS: { id: Tab; label: string }[] = [
   { id: Tab.Providers, label: 'Providers' },
   { id: Tab.Mcp, label: 'MCP Servers' },
-  { id: Tab.About, label: 'About JustCode' },
+  { id: Tab.About, label: `About ${APP_NAME}` },
 ];
 
 /** Result of the most recent MCP save, shown beneath the editor. */
@@ -1066,7 +1067,7 @@ function McpTab({
       <h2 className="settings-section-title">MCP Servers</h2>
       <p className="settings-hint mcp-intro">
         Define MCP servers as JSON — a local <code>command</code> or a remote{' '}
-        <code>url</code> (over HTTP). On save, JustCode connects to each server
+        <code>url</code> (over HTTP). On save, {APP_NAME} connects to each server
         and adds its tools — manage them under the tools button in chat. Changes
         apply immediately.
       </p>
@@ -1153,7 +1154,7 @@ function AboutTab({
 }: {
   appInfo: SettingsAppInfo | undefined;
 }): React.JSX.Element {
-  const name = appInfo?.name ?? 'JustCode';
+  const name = appInfo?.name ?? APP_NAME;
   const [confirming, setConfirming] = React.useState(false);
 
   const handleReset = (): void => {

@@ -142,7 +142,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 /** Opens a terminal running the CLI's interactive provider-connect flow. */
 function openConnectTerminal(): void {
-  const terminal = vscode.window.createTerminal('JustCode Connect');
+  const terminal = vscode.window.createTerminal(`${APP_NAME} Connect`);
   terminal.show();
   terminal.sendText('justcode connect');
 }

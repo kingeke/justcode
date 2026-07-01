@@ -1,5 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import { AddressInfo } from 'node:net';
+import { APP_NAME } from '@core/branding';
 
 export interface LoopbackServer {
   /** The `http://127.0.0.1:<port><path>` redirect URI to hand the provider. */
@@ -12,7 +13,7 @@ export interface LoopbackServer {
 
 const SUCCESS_HTML =
   '<!doctype html><html><body style="font-family:sans-serif;text-align:center;padding-top:4rem">' +
-  '<h2>Signed in to JustCode</h2><p>You can close this tab and return to your terminal.</p>' +
+  `<h2>Signed in to ${APP_NAME}</h2><p>You can close this tab and return to your terminal.</p>` +
   '</body></html>';
 
 /**
