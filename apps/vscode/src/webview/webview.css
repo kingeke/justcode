@@ -553,6 +553,82 @@ body {
   );
 }
 
+/* Syntax highlighting for diff code (highlight.js token spans). A GitHub-dark
+   palette that reads well on the dark webview and matches the CLI's markdown
+   theme; the +/- line backgrounds still show through. */
+.diff-code {
+  color: var(--vscode-editor-foreground, #d4d4d4);
+}
+
+.diff-body .hljs-comment,
+.diff-body .hljs-quote {
+  color: #8b949e;
+  font-style: italic;
+}
+
+.diff-body .hljs-keyword,
+.diff-body .hljs-selector-tag,
+.diff-body .hljs-literal,
+.diff-body .hljs-section,
+.diff-body .hljs-doctag,
+.diff-body .hljs-name,
+.diff-body .hljs-operator {
+  color: #ff7b72;
+}
+
+.diff-body .hljs-number,
+.diff-body .hljs-symbol,
+.diff-body .hljs-bullet,
+.diff-body .hljs-attr,
+.diff-body .hljs-attribute,
+.diff-body .hljs-meta,
+.diff-body .hljs-regexp,
+.diff-body .hljs-link {
+  color: #79c0ff;
+}
+
+.diff-body .hljs-string,
+.diff-body .hljs-addition,
+.diff-body .hljs-selector-attr,
+.diff-body .hljs-selector-pseudo {
+  color: #a5d6ff;
+}
+
+.diff-body .hljs-title,
+.diff-body .hljs-title.function_,
+.diff-body .hljs-built_in,
+.diff-body .hljs-function .hljs-title {
+  color: #d2a8ff;
+}
+
+.diff-body .hljs-type,
+.diff-body .hljs-class .hljs-title,
+.diff-body .hljs-title.class_,
+.diff-body .hljs-tag,
+.diff-body .hljs-selector-class,
+.diff-body .hljs-selector-id {
+  color: #ffa657;
+}
+
+.diff-body .hljs-variable,
+.diff-body .hljs-template-variable,
+.diff-body .hljs-property,
+.diff-body .hljs-params {
+  color: var(--vscode-editor-foreground, #d4d4d4);
+}
+
+.diff-body .hljs-deletion {
+  color: #ff7b72;
+}
+
+.diff-body .hljs-emphasis {
+  font-style: italic;
+}
+
+.diff-body .hljs-strong {
+  font-weight: 600;
+}
+
 /* --- Changes panel (session-wide edited/created files) ------------------- */
 
 .changes {

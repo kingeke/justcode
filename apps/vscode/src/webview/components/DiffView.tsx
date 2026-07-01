@@ -2,6 +2,7 @@ import * as React from 'react';
 import { diffLines } from 'diff';
 
 import type { WebviewDiff } from '@ext/shared/protocol';
+import { highlightLine, languageForPath } from '@ext/webview/highlight';
 
 const CONTEXT_LINES = 3;
 const MAX_DIFF_LINES = 40;
@@ -21,13 +22,16 @@ interface RenderedDiffLine {
  */
 export function DiffView({ diff }: { diff: WebviewDiff }): React.JSX.Element {
   const lines = toRenderedLines(diff);
+  const language = languageForPath(diff.path);
 
   return (
     <div className="diff">
       <div className="diff-path">{diff.path}</div>
-      <pre className="diff-body">
+      <pre className="diff-body hljs">
         {lines.map((line, index) => {
-          if (line.kind === 'context') {
+          // Collapsed "N unchanged lines" markers are meta text, not code — show
+          // them verbatim rather than syntax-highlighting them.
+          if (line.kind === 'context' && line.text.startsWith(ELLIPSIS)) {
             return (
               <div key={`c-${index}`} className="diff-line diff-context">
                 <span className="diff-gutter"> </span>
@@ -36,19 +40,23 @@ export function DiffView({ diff }: { diff: WebviewDiff }): React.JSX.Element {
             );
           }
 
-          if (line.kind === 'del') {
-            return (
-              <div key={`d-${index}`} className="diff-line diff-removed">
-                <span className="diff-gutter">-</span>
-                {line.text}
-              </div>
-            );
-          }
-
+          const gutter =
+            line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' ';
+          const className =
+            line.kind === 'add'
+              ? 'diff-line diff-added'
+              : line.kind === 'del'
+                ? 'diff-line diff-removed'
+                : 'diff-line diff-context';
           return (
-            <div key={`a-${index}`} className="diff-line diff-added">
-              <span className="diff-gutter">+</span>
-              {line.text}
+            <div key={`${line.kind}-${index}`} className={className}>
+              <span className="diff-gutter">{gutter}</span>
+              <span
+                className="diff-code"
+                dangerouslySetInnerHTML={{
+                  __html: highlightLine(line.text, language),
+                }}
+              />
             </div>
           );
         })}
