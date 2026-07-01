@@ -14,6 +14,8 @@ export enum CommandName {
   ExpandTools = 'expand-tools',
   ManageTools = 'manage-tools',
   Mode = 'mode',
+  Implement = 'implement',
+  EditPlan = 'edit-plan',
   CollapseResponses = 'collapse-responses',
   ConfigureMcpServers = 'configure-mcp-servers',
   ReadLimit = 'read-limit',
@@ -87,6 +89,14 @@ export const COMMANDS: Command[] = [
   {
     name: CommandName.Mode,
     description: 'Switch the chat mode or create a custom one',
+  },
+  {
+    name: CommandName.Implement,
+    description: 'Switch to Build mode and implement the latest plan',
+  },
+  {
+    name: CommandName.EditPlan,
+    description: 'Save the latest plan to a file to edit before implementing',
   },
   {
     name: CommandName.CollapseResponses,

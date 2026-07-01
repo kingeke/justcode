@@ -7,8 +7,10 @@ import React, {
   useState,
 } from 'react';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
   createTextAttributes,
   parseColor,
@@ -1639,6 +1641,24 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setStatus('Working...');
   };
 
+  // The markdown of the most recently presented plan (the last `present_plan`
+  // tool result), or null if the model hasn't proposed one yet. Backs the
+  // /implement and /edit-plan hand-offs, which have no plan to act on otherwise.
+  const findLatestPlanContent = (): string | null => {
+    const messages = conversation?.messages ?? [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (
+        message?.role === 'tool' &&
+        message.name === 'present_plan' &&
+        message.content.trim()
+      ) {
+        return message.content;
+      }
+    }
+    return null;
+  };
+
   const executeCommand = (name: CommandName, arg?: string): void => {
     setInput('');
     setError(null);
@@ -1804,6 +1824,51 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           return;
         }
         setShowModePicker(true);
+        return;
+      }
+
+      // The CLI has no clickable "Start" button after a plan, so /implement is
+      // the hand-off: switch to Build (so the model can edit files) and steer it
+      // to carry out the plan already sitting in the conversation.
+      case CommandName.Implement: {
+        if (!findLatestPlanContent()) {
+          // setError (not setStatus): executeCommand clears error to null on
+          // every call, so this re-fires each time — a repeated setStatus with
+          // the same string is a React bail-out that wouldn't show again.
+          setError('No plan yet — ask for a plan first (try Plan mode)');
+          return;
+        }
+        setActiveMode(BUILD_MODE_ID);
+        // onModeChange swaps the runtime's system prompt synchronously, so the
+        // turn kicked off just below already runs under Build.
+        props.onModeChange?.(BUILD_MODE_ID);
+        void submit('Implement the plan above.');
+        return;
+      }
+
+      // The CLI has no "Edit" button either: write the latest plan to a file in
+      // the working directory and open it, so the user can revise it before
+      // running /implement.
+      case CommandName.EditPlan: {
+        const plan = findLatestPlanContent();
+        if (!plan) {
+          setError('No plan yet — ask for a plan first');
+          return;
+        }
+        let target = join(process.cwd(), 'plan.md');
+        for (let n = 1; existsSync(target); n++) {
+          target = join(process.cwd(), `plan-${n}.md`);
+        }
+        void writeFile(target, plan, 'utf8')
+          .then(() => openFileInEditor(target))
+          .then(() => {
+            setStatus(
+              `Saved plan to ${basename(target)} — edit, then /implement`
+            );
+          })
+          .catch((caughtError: unknown) => {
+            setError(getErrorMessage(caughtError));
+          });
         return;
       }
 
@@ -3544,8 +3609,8 @@ const TodoBlock = React.memo(function TodoBlock({
 
 /**
  * Renders a presented plan (a present_plan tool result) as a titled card with
- * the plan markdown and a hint to switch to Build mode to carry it out. The CLI
- * has no buttons, so the hand-off is the mode switch (shift+tab or /mode).
+ * the plan markdown and a hint to the hand-off commands. The CLI has no buttons,
+ * so /implement (build it) and /edit-plan (revise first) stand in for them.
  */
 const PlanBlock = React.memo(function PlanBlock({
   content,
@@ -3566,7 +3631,7 @@ const PlanBlock = React.memo(function PlanBlock({
       </text>
       <MarkdownView content={content} />
       <text fg={MUTED}>
-        Switch to Build mode (shift+tab or /mode) to implement this plan.
+        /implement to build it · /edit-plan to revise it first
       </text>
     </box>
   );
