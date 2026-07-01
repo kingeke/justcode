@@ -842,24 +842,30 @@ export function Composer(props: ComposerProps): React.JSX.Element {
               </button>
             </div>
 
-            <button
-              type="button"
-              className="model-btn"
-              title="Change model"
-              disabled={props.models.length === 0}
-              onClick={props.onOpenModelPicker}
-            >
-              {(() => {
-                const m =
-                  props.models.find(
-                    (m) =>
-                      m.id === props.activeModel &&
-                      m.providerId === props.activeProviderId
-                  ) ?? props.models.find((m) => m.id === props.activeModel);
-                if (!m) return props.activeModel ?? 'No model';
-                return `${m.providerName} · ${m.displayName}`;
-              })()}
-            </button>
+            {(() => {
+              const m =
+                props.models.find(
+                  (m) =>
+                    m.id === props.activeModel &&
+                    m.providerId === props.activeProviderId
+                ) ?? props.models.find((m) => m.id === props.activeModel);
+              const label = m
+                ? `${m.providerName} · ${m.displayName}`
+                : (props.activeModel ?? 'No model');
+              return (
+                <button
+                  type="button"
+                  className="model-btn"
+                  // The label truncates with an ellipsis, so surface the full
+                  // model name on hover.
+                  title={m ? label : 'Change model'}
+                  disabled={props.models.length === 0}
+                  onClick={props.onOpenModelPicker}
+                >
+                  {label}
+                </button>
+              );
+            })()}
 
             {reasoningSupported && activeModelObj ? (
               <div className="reasoning-popup-anchor" ref={reasoningRef}>
