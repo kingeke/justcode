@@ -2,11 +2,10 @@ name: Release
 
 # Builds a self-contained JustCode binary for each platform on its own native
 # runner (no cross-compilation: @opentui's native library is platform-gated),
-# then publishes them as GitHub Release assets. Push a tag like `v0.1.0` to run.
+# then publishes them as GitHub Release assets. Runs only when dispatched (the
+# Version workflow dispatches it on the new tag); it is intentionally not on a
+# tag push, so a tag alone never triggers a release.
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -22,8 +21,6 @@ jobs:
         include:
           - target: darwin-arm64
             os: macos-14
-          - target: darwin-x64
-            os: macos-13
           - target: linux-x64
             os: ubuntu-latest
           - target: linux-arm64
