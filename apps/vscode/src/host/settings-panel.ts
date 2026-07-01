@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-import { APP_NAME } from '@core/branding';
+import { APP_NAME, APP_ISSUES_URL, APP_REPO_URL } from '@core/branding';
 import { APP_VERSION } from '@core/version';
 import { cacheDirectory } from '@core/application/cache-dir';
 
@@ -30,8 +30,8 @@ const APP_INFO: SettingsAppInfo = {
   version: APP_VERSION,
   description:
     'A lean, transparent coding assistant — bring your own provider, control every token.',
-  repository: 'https://github.com/kingeke/justcode',
-  issues: 'https://github.com/kingeke/justcode/issues',
+  repository: APP_REPO_URL,
+  issues: APP_ISSUES_URL,
 };
 
 /**

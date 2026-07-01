@@ -52,7 +52,7 @@ curl -fsSL https://raw.githubusercontent.com/kingeke/justcode/main/scripts/insta
 npm install -g justcode-cli
 
 # Homebrew
-brew tap kingeke/justcode && brew install justcode
+brew tap kingeke/justcode && brew trust kingeke/justcode && brew install justcode
 ```
 
 See [release.md](release.md) for how binaries are built and published.

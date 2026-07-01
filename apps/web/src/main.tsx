@@ -2,16 +2,10 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from './App';
-import faviconUrl from './assets/emblem-favicon.svg';
 import './styles.css';
 
-// Set the favicon from the black-background emblem so the mark stays crisp
-// against light browser tabs; its URL carries the Pages base.
-const favicon = document.createElement('link');
-favicon.rel = 'icon';
-favicon.type = 'image/svg+xml';
-favicon.href = faviconUrl;
-document.head.appendChild(favicon);
+// The favicon is declared statically in index.html (public/favicon.svg) so it is
+// discoverable by crawlers and favicon fetchers that don't execute JS.
 
 const root = document.getElementById('root');
 if (!root) {

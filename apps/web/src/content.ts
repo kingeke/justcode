@@ -2,6 +2,8 @@
 // kept in sync by hand with the CLI (packages/runtime/src/tools,
 // apps/cli/src/ui/commands.ts, packages/core/src/domain/chat-mode.ts).
 
+import { APP_REPO_URL } from '@core/branding';
+
 export interface Item {
   name: string;
   description: string;
@@ -224,11 +226,12 @@ export const installCommands: { label: string; command: string }[] = [
   { label: 'npm', command: 'npm install -g justcode-cli' },
   {
     label: 'brew',
-    command: 'brew tap kingeke/justcode && brew install justcode',
+    command:
+      'brew tap kingeke/justcode && brew trust kingeke/justcode && brew install justcode',
   },
 ];
 
-export const repoUrl = 'https://github.com/kingeke/justcode';
+export const repoUrl = APP_REPO_URL;
 export const termsUrl = `${repoUrl}/blob/main/TERMS.md`;
 export const privacyUrl = `${repoUrl}/blob/main/PRIVACY.md`;
 

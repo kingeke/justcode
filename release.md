@@ -19,6 +19,7 @@ pnpm add -g justcode-cli
 
 # Homebrew (via tap)
 brew tap kingeke/justcode
+brew trust kingeke/justcode   # required: third-party taps are untrusted by default
 brew install justcode
 ```
 

@@ -1,3 +1,5 @@
+import { APP_NAME, APP_SITE_URL } from '@core/branding';
+
 import { logModelsResponse } from '@providers/http/log-models';
 
 import {
@@ -83,6 +85,11 @@ export class OpenRouterProvider implements ProviderClient {
     const headers = {
       authorization: `Bearer ${this.apiKey}`,
       'content-type': 'application/json',
+      // OpenRouter attributes traffic to an "app" via these optional headers;
+      // without them requests show up as "Unknown". The referer domain's favicon
+      // becomes the app icon, so point it at the site (not the code host).
+      'HTTP-Referer': APP_SITE_URL,
+      'X-Title': APP_NAME,
     };
     // OpenRouter's unified `reasoning` param is normalized server-side and
     // ignored for models that don't reason. `'off'` must be an explicit disable
