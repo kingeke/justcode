@@ -1045,6 +1045,116 @@ const MCP_PLACEHOLDER = `{
   }
 }`;
 
+// Matches the JSON tokens we colour: (1) a string literal, (2) an optional
+// trailing colon that marks the string as an object key, (3) a keyword, and
+// (4) a number. Everything else (braces, commas, whitespace) is left plain.
+const JSON_TOKEN_RE =
+  /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
+
+/** Splits JSON source into React nodes with syntax-highlighting spans. */
+function highlightJson(source: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  let last = 0;
+  let key = 0;
+  for (const match of source.matchAll(JSON_TOKEN_RE)) {
+    const index = match.index ?? 0;
+    if (index > last) nodes.push(source.slice(last, index));
+
+    if (match[1] !== undefined) {
+      const isKey = match[2] !== undefined;
+      nodes.push(
+        <span key={key++} className={isKey ? 'json-key' : 'json-string'}>
+          {match[1]}
+        </span>
+      );
+      // The colon (group 2) stays plain text so only the key string is tinted.
+      if (match[2]) nodes.push(match[2]);
+    } else if (match[3] !== undefined) {
+      nodes.push(
+        <span
+          key={key++}
+          className={match[3] === 'null' ? 'json-null' : 'json-boolean'}
+        >
+          {match[3]}
+        </span>
+      );
+    } else if (match[4] !== undefined) {
+      nodes.push(
+        <span key={key++} className="json-number">
+          {match[4]}
+        </span>
+      );
+    }
+    last = index + match[0].length;
+  }
+  if (last < source.length) nodes.push(source.slice(last));
+  return nodes;
+}
+
+/**
+ * A JSON editor with live syntax highlighting: a transparent <textarea> sits on
+ * top of a highlighted <pre> that mirrors its text, kept aligned by matching
+ * their box/font and syncing scroll. Tab inserts two spaces.
+ */
+function McpJsonEditor({
+  value,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+}): React.JSX.Element {
+  const preRef = React.useRef<HTMLPreElement>(null);
+
+  const syncScroll = (e: React.UIEvent<HTMLTextAreaElement>): void => {
+    const pre = preRef.current;
+    if (!pre) return;
+    pre.scrollTop = e.currentTarget.scrollTop;
+    pre.scrollLeft = e.currentTarget.scrollLeft;
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const target = e.currentTarget;
+    const { selectionStart, selectionEnd } = target;
+    const next = `${value.slice(0, selectionStart)}  ${value.slice(selectionEnd)}`;
+    onChange(next);
+    // Restore the caret just past the inserted spaces on the next tick.
+    requestAnimationFrame(() => {
+      target.selectionStart = target.selectionEnd = selectionStart + 2;
+    });
+  };
+
+  return (
+    <div className="mcp-editor-wrap">
+      <pre className="mcp-editor-highlight" aria-hidden="true" ref={preRef}>
+        {value ? (
+          <code>
+            {highlightJson(value)}
+            {'\n'}
+          </code>
+        ) : (
+          <code className="mcp-editor-placeholder">{placeholder}</code>
+        )}
+      </pre>
+      <textarea
+        className="mcp-editor"
+        spellCheck={false}
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onScroll={syncScroll}
+        onKeyDown={handleKeyDown}
+        aria-label="mcp.json contents"
+      />
+    </div>
+  );
+}
+
 function McpTab({
   content,
   saving,
@@ -1066,6 +1176,29 @@ function McpTab({
 
   const dirty = content !== undefined && draft !== content;
 
+  // Parse the draft so we can gate Format/Save on valid JSON and surface the
+  // reason inline. Empty (or whitespace-only) content is treated as "not yet
+  // invalid" so the hint doesn't nag before anything is typed.
+  const parseError = React.useMemo(() => {
+    if (!draft.trim()) return null;
+    try {
+      JSON.parse(draft);
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Invalid JSON';
+    }
+  }, [draft]);
+
+  const canFormat = !saving && draft.trim().length > 0 && parseError === null;
+
+  const format = (): void => {
+    try {
+      setDraft(JSON.stringify(JSON.parse(draft), null, 2));
+    } catch {
+      // Ignore — the button is disabled while the JSON is invalid.
+    }
+  };
+
   return (
     <div className="settings-section mcp-section">
       <h2 className="settings-section-title">MCP Servers</h2>
@@ -1076,24 +1209,35 @@ function McpTab({
         Changes apply immediately.
       </p>
 
-      <textarea
-        className="mcp-editor"
-        spellCheck={false}
-        autoComplete="off"
+      <McpJsonEditor
         value={draft}
         placeholder={MCP_PLACEHOLDER}
-        onChange={(e) => setDraft(e.target.value)}
-        aria-label="mcp.json contents"
+        onChange={setDraft}
       />
+
+      {parseError ? (
+        <p className="provider-connect-error mcp-parse-error">
+          Invalid JSON: {parseError}
+        </p>
+      ) : null}
 
       <div className="mcp-actions">
         <button
           type="button"
           className="provider-action provider-action-primary"
-          disabled={saving || !dirty}
+          disabled={saving || !dirty || parseError !== null}
           onClick={() => onSave(draft)}
         >
           {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          className="provider-action"
+          disabled={!canFormat}
+          onClick={format}
+          title="Reindent the JSON with 2-space indentation"
+        >
+          Format
         </button>
         {dirty ? <span className="mcp-dirty-hint">Unsaved changes</span> : null}
       </div>
@@ -1276,6 +1420,7 @@ function AboutTab({
               <li>restore config to defaults</li>
               <li>remove all connected providers</li>
               <li>remove all pulled models</li>
+              <li>remove all configured MCP servers</li>
               <li>remove all saved sessions</li>
             </ul>
             <div className="reset-confirm-actions">
