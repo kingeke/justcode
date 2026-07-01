@@ -33,6 +33,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Check out with a personal access token (an admin's) so the bump
+          # commit is pushed as that user. The default GITHUB_TOKEN can't push
+          # to a ruleset-protected `main` — only an admin actor bypasses it.
+          token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Bump version and sync the extension manifest
         id: bump
