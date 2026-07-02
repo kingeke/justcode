@@ -21,6 +21,7 @@ import type { ConversationRepository } from '@core/ports/conversation-repository
 import type { ConversationSummary } from '@core/ports/conversation-repository';
 import type {
   Tool,
+  ToolDefinition,
   ToolExecutionContext,
   ToolInvocationView,
   ToolResult,
@@ -41,6 +42,7 @@ import {
   renderHistoryWindow,
   selectRecentMessages,
 } from '@core/application/history-window';
+import { parseLazyLoadArguments } from '@core/application/lazy-tool-arguments';
 
 const SESSION_TITLE_SYSTEM_PROMPT = [
   'You generate a short title for a chat conversation.',
@@ -97,6 +99,14 @@ export interface SubmitMessageInput {
    * model that reasons by default. Omitted for non-reasoning models.
    */
   reasoningEffort?: ReasoningEffortChoice;
+  /**
+   * Whether the model's reasoning is mandatory (it always reasons and the
+   * provider rejects an explicit disable — e.g. OpenRouter's gpt-oss models
+   * 400 on `reasoning: {enabled: false}`). When set, internal side calls that
+   * would normally turn reasoning off to stay fast (title generation) omit the
+   * reasoning parameter instead of sending `'off'`.
+   */
+  reasoningMandatory?: boolean;
   content: string;
   attachments?: MessageAttachment[];
   /** Images attached to this message (e.g. pasted from the clipboard). */
@@ -175,9 +185,12 @@ export interface ChatSessionOptions {
   getMaxHistoryMessages?: () => number;
   /**
    * Whether lazy tool loading is in effect. When true (default), only the
-   * `lazy_load_tools` gateway is advertised up front and the model loads the
-   * rest by calling it. When false, the full tool set is advertised from the
-   * first turn, skipping lazy loading. Falls back to enabled when unset.
+   * `lazy_load_tools` gateway is advertised up front; the model calls it to
+   * list the available tools (name + description) and toggles the ones it
+   * needs on (and off again) with `enable`/`disable`, so each request only
+   * carries the schemas of the tools in use. When false, the full tool set is
+   * advertised from the first turn, skipping lazy loading. Falls back to
+   * enabled when unset.
    */
   getLazyToolLoadingEnabled?: () => boolean;
   /**
@@ -374,17 +387,27 @@ export class ChatSessionService {
             ),
           ];
     const projectInstructions = await this.loadProjectInstructions();
-    // `lazy_load_tools` is a one-way gate per session: once the model has called
-    // it, the real tool set stays loaded for every later turn instead of
-    // collapsing back to the gateway-only view and forcing it to re-load.
-    const toolsLoaded = hasLoadedTools(input.conversation.messages);
+    // The tools the model has switched on via the `lazy_load_tools` gateway,
+    // restored from the persisted conversation so a resumed session keeps its
+    // working set. Legacy sessions that called the old load-everything gateway
+    // (history shows the call, but nothing persisted) fall back to every tool,
+    // preserving the behavior they were saved under. Mutated in place as the
+    // gateway handles toggle calls this turn, and persisted with the turn's save.
+    const activeToolNames = new Set(
+      input.conversation.activeTools ??
+        (hasLoadedTools(input.conversation.messages)
+          ? eagerToolDefinitions.map((definition) => definition.name)
+          : [])
+    );
     // With lazy loading off, advertise every real tool from the first turn (no
-    // gateway). With it on: only the gateway is advertised until the model calls
-    // it; once it does, the full set (gateway still included) stays advertised.
+    // gateway). With it on: the gateway (plus any eagerly advertised tools) is
+    // always shown, and only the tools the model has toggled on ride along —
+    // each request carries just the schemas in use.
     const lazyToolLoadingEnabled = this.getLazyToolLoadingEnabled();
     // Drop any tool the user has turned off so the model never sees it (and, in
-    // lazy mode, can't load it). Applied both here and when the gateway swaps in
-    // the real toolset mid-turn, so a disabled tool never slips back in.
+    // lazy mode, can't load it). Applied both here and when a gateway toggle
+    // recomputes the advertised set mid-turn, so a disabled tool never slips
+    // back in.
     const disabledToolNames = new Set(this.getDisabledToolNames());
     const withoutDisabledTools = <T extends { name: string }>(
       definitions: T[]
@@ -394,15 +417,27 @@ export class ChatSessionService {
             (definition) => !disabledToolNames.has(definition.name)
           )
         : definitions;
+    // The lazy-mode view: gateway + eager tools + whatever is currently toggled
+    // on. Recomputed after every gateway call, so a toggle takes effect on the
+    // very next model request of the same turn.
+    const initialNames = new Set(
+      initialToolDefinitions.map((definition) => definition.name)
+    );
+    const lazyAdvertisedDefinitions = (): ToolDefinition[] => [
+      ...initialToolDefinitions,
+      ...fullToolDefinitions.filter(
+        (definition) =>
+          activeToolNames.has(definition.name) &&
+          !initialNames.has(definition.name)
+      ),
+    ];
     // Models known not to support tools are sent chat-only from the start; the
     // tool section is also dropped from the system prompt so we don't advertise
     // tools the model can't call.
     let toolDefinitions = withoutDisabledTools(
       !lazyToolLoadingEnabled
         ? eagerToolDefinitions
-        : toolsLoaded
-          ? fullToolDefinitions
-          : initialToolDefinitions
+        : lazyAdvertisedDefinitions()
     );
     let toolsEnabled =
       toolDefinitions.length > 0 &&
@@ -415,6 +450,11 @@ export class ChatSessionService {
     ];
     let usage: TokenUsage | undefined;
     let reply = '';
+    // Whether the gateway ran this turn. Even a catalog-only call (no toggles)
+    // must stamp `activeTools` on the save below: otherwise the next turn would
+    // find gateway calls in history with nothing persisted and take the legacy
+    // load-everything fallback, silently activating every tool.
+    let gatewayCalledThisTurn = false;
 
     // Title generation is a separate, short model call, awaited *before* the
     // main turn: the user is already waiting on their first message, so folding
@@ -445,8 +485,11 @@ export class ChatSessionService {
         // 5-word title, which would stall the whole turn behind it. When the
         // main turn runs with reasoning, explicitly disable it for the title
         // call. Only then — `'off'` is a wire-level disable that must not be
-        // sent to models that don't reason at all.
-        disableReasoning: input.reasoningEffort !== undefined,
+        // sent to models that don't reason at all, nor to models whose
+        // reasoning is mandatory (the provider rejects the disable outright).
+        disableReasoning:
+          input.reasoningEffort !== undefined &&
+          input.reasoningMandatory !== true,
         // Let the user's cancel tear the title call down with the turn.
         ...(input.signal ? { signal: input.signal } : {}),
       });
@@ -590,7 +633,12 @@ export class ChatSessionService {
       );
 
       for (const call of toolCalls) {
-        const toolResult = await this.runToolCall(call, input, working);
+        const toolResult = await this.runToolCall(
+          call,
+          input,
+          working,
+          activeToolNames
+        );
         working.push(
           createMessage('tool', toolResult.content, new Date(), undefined, {
             toolCallId: call.id,
@@ -599,10 +647,16 @@ export class ChatSessionService {
         );
 
         if (call.name === ToolName.LazyLoadTools) {
-          // Swap in the full toolset for the rest of the turn (minus any tool the
-          // user has turned off). The gateway stays in the set so the model can
-          // call it again later for a refreshed list.
-          toolDefinitions = withoutDisabledTools(fullToolDefinitions);
+          gatewayCalledThisTurn = true;
+        }
+        if (call.name === ToolName.LazyLoadTools && lazyToolLoadingEnabled) {
+          // The gateway may have toggled tools on or off: re-derive the
+          // advertised set (minus any tool the user has turned off) so the
+          // change reaches the very next model request of this same turn. The
+          // gateway itself stays in the set so the model can keep toggling.
+          // (With lazy loading off everything is already advertised — a stray
+          // gateway call must not shrink the set to just the toggled tools.)
+          toolDefinitions = withoutDisabledTools(lazyAdvertisedDefinitions());
           toolsEnabled =
             toolDefinitions.length > 0 &&
             !this.toolUnsupportedModels.has(input.model);
@@ -625,6 +679,16 @@ export class ChatSessionService {
         : {}),
       messages: working,
       updatedAt: new Date().toISOString(),
+      // Persist the gateway-toggled tool set so resuming the session restores
+      // it. Left absent while the gateway has never run, so sessions that never
+      // use tools don't grow the field. Stamped even when the set is empty
+      // (e.g. a catalog-only call), so a later turn can't mistake this session
+      // for a legacy one and take the load-everything fallback.
+      ...(input.conversation.activeTools !== undefined ||
+      activeToolNames.size > 0 ||
+      gatewayCalledThisTurn
+        ? { activeTools: [...activeToolNames] }
+        : {}),
     };
 
     // A title may have been persisted out of band since this turn started —
@@ -656,7 +720,8 @@ export class ChatSessionService {
   private async runToolCall(
     call: ToolCall,
     input: SubmitMessageInput,
-    history: ChatMessage[]
+    history: ChatMessage[],
+    activeToolNames: Set<string>
   ): Promise<ToolResult> {
     throwIfAborted(input.signal);
     const tool = this.toolRegistry?.get(call.name);
@@ -688,9 +753,23 @@ export class ChatSessionService {
     });
 
     let result: ToolResult;
-    // `view_history` is answered here, not by the tool: only the service holds
-    // the live message list, so it renders the requested window from `history`
-    // (which always carries the full conversation, including trimmed turns).
+    // `lazy_load_tools` and `view_history` are answered here, not by their
+    // tools: the tool instances are shared across sessions, and only the
+    // service holds this session's state — the live message list for
+    // `view_history`, and the active-tool set (plus the live registry and the
+    // user's disabled list) for the gateway.
+    if (call.name === ToolName.LazyLoadTools) {
+      result = this.lazyLoadTools(call, activeToolNames);
+      input.onToolActivity?.({
+        phase: 'end',
+        toolName: effectiveToolName,
+        toolCallId: call.id,
+        arguments: call.arguments,
+        view,
+        result,
+      });
+      return result;
+    }
     if (call.name === ToolName.ViewHistory) {
       result = this.viewHistory(call, history);
       input.onToolActivity?.({
@@ -749,6 +828,77 @@ export class ChatSessionService {
       result,
     });
     return result;
+  }
+
+  /**
+   * Handles a `lazy_load_tools` call against this session's active-tool set.
+   * With no toggle lists the result is the catalog: every loadable tool's name
+   * and description (from the live registry, so MCP tools that connected
+   * mid-session appear) plus whether it's currently active. With `enable` /
+   * `disable` lists it mutates `activeToolNames` in place — the caller
+   * re-derives the advertised set from it and persists it with the turn.
+   * Tools the user has turned off are excluded from both the catalog and the
+   * togglable set, so the model can never see or re-enable them.
+   */
+  private lazyLoadTools(
+    call: ToolCall,
+    activeToolNames: Set<string>
+  ): ToolResult {
+    const disabledToolNames = new Set(this.getDisabledToolNames());
+    const loadable = (this.toolRegistry?.list() ?? [])
+      .map((tool) => tool.definition)
+      .filter(
+        (definition) =>
+          definition.name !== ToolName.LazyLoadTools &&
+          !disabledToolNames.has(definition.name)
+      );
+    const loadableNames = new Set(
+      loadable.map((definition) => definition.name)
+    );
+
+    const { enable, disable } = parseLazyLoadArguments(call.arguments);
+
+    if (enable.length === 0 && disable.length === 0) {
+      // Names only — no descriptions. The catalog rides along in history for
+      // the rest of the session, so every byte here is paid on every request.
+      const catalog = loadable.map((definition) => definition.name);
+      const active = catalog.filter((name) => activeToolNames.has(name));
+      return {
+        content: [
+          'Available tools. Call lazy_load_tools again with {"enable": ["name", …]} to make the ones you need callable; use {"disable": [...]} for tools you no longer need.',
+          JSON.stringify(catalog),
+          ...(active.length > 0 ? [`Active: ${active.join(', ')}.`] : []),
+        ].join('\n'),
+      };
+    }
+
+    const enabled = enable.filter((name) => loadableNames.has(name));
+    for (const name of enabled) activeToolNames.add(name);
+    const disabled = disable.filter(
+      (name) => loadableNames.has(name) && activeToolNames.delete(name)
+    );
+    const unknown = [...enable, ...disable].filter(
+      (name) => !loadableNames.has(name)
+    );
+
+    const lines: string[] = [];
+    if (enabled.length > 0) {
+      lines.push(
+        `Enabled: ${enabled.join(', ')}. These tools are callable from the next model request — call the one you need directly now.`
+      );
+    }
+    if (disabled.length > 0) {
+      lines.push(`Disabled: ${disabled.join(', ')}.`);
+    }
+    if (unknown.length > 0) {
+      lines.push(
+        `Unknown or unavailable tool name(s), ignored: ${unknown.join(', ')}. Call lazy_load_tools with no arguments to list the available tools.`
+      );
+    }
+    lines.push(
+      `Active tools: ${activeToolNames.size > 0 ? [...activeToolNames].join(', ') : 'none'}.`
+    );
+    return { content: lines.join('\n') };
   }
 
   private viewHistory(call: ToolCall, history: ChatMessage[]): ToolResult {
@@ -862,9 +1012,10 @@ export class ChatSessionService {
 }
 
 /**
- * Whether the model has already called `lazy_load_tools` in this conversation.
- * The call is recorded on the assistant message that requested it, so its
- * presence anywhere in history means tools were loaded and should stay so.
+ * Whether the model called `lazy_load_tools` back when it was a load-everything
+ * gateway. Only consulted for legacy sessions that carry no persisted
+ * `activeTools`: the call recorded anywhere in history means every tool was
+ * loaded, so such a session resumes with the full set rather than none.
  */
 function hasLoadedTools(messages: ChatMessage[]): boolean {
   return messages.some(

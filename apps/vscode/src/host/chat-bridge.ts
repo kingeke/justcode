@@ -881,6 +881,10 @@ export class ChatBridge {
         ...(reasoningEffort
           ? { reasoningEffort: reasoningEffort as ReasoningEffortChoice }
           : {}),
+        ...(this.models.find((m) => m.id === this.activeModel)?.reasoning
+          ?.mandatory
+          ? { reasoningMandatory: true }
+          : {}),
         signal: abortController.signal,
         drainSteering: () => this.drainSteering(),
         onToken: (token) => {

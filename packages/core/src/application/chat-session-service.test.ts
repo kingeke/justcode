@@ -7,6 +7,7 @@ import { ToolRegistry } from '@core/application/tool-registry';
 import { createConversation } from '@core/domain/conversation';
 import { createMessage } from '@core/domain/message';
 import {
+  ReasoningEffort,
   ToolsUnsupportedError,
   type ChatRequest,
   type ChatResult,
@@ -523,6 +524,66 @@ describe('ChatSessionService', () => {
     expect(repository.conversation.title).toBe('Project Planning');
   });
 
+  it("disables reasoning for the title call, but not when the model's reasoning is mandatory", async () => {
+    // The title call is identified by its wrapped <message> user content; the
+    // reasoning effort each such call carries is recorded per scenario.
+    const titleEfforts: Array<string | undefined> = [];
+    const provider: ProviderClient = {
+      providerId: ProviderId.Ollama,
+      async sendChat({ messages, reasoningEffort }): Promise<ChatResult> {
+        const isTitleCall = messages.some(
+          (message) =>
+            message.role === 'user' && message.content.includes('<message>')
+        );
+        if (isTitleCall) {
+          titleEfforts.push(reasoningEffort);
+          return { content: 'A Title' };
+        }
+        return { content: 'reply' };
+      },
+      async listModels() {
+        return [
+          {
+            id: 'llama3.1',
+            displayName: 'llama3.1',
+            providerId: ProviderId.Ollama,
+          },
+        ];
+      },
+      getDefaultModel() {
+        return undefined;
+      },
+    };
+    // A fresh service and repository per scenario, so the first turn's saved
+    // title can't be reused by the second and suppress its title call.
+    // Reasoning turn on a model that can turn reasoning off: the title call
+    // sends the explicit 'off' so it stays fast.
+    await new ChatSessionService(
+      new InMemoryConversationRepository(),
+      provider
+    ).submitMessage({
+      conversation: createConversation('session-1'),
+      model: 'llama3.1',
+      reasoningEffort: ReasoningEffort.High,
+      content: 'Hello there',
+    });
+    // Reasoning turn on a mandatory-reasoning model (e.g. OpenRouter's gpt-oss):
+    // the wire-level disable would be rejected with a 400, so the title call
+    // must omit the reasoning parameter entirely instead.
+    await new ChatSessionService(
+      new InMemoryConversationRepository(),
+      provider
+    ).submitMessage({
+      conversation: createConversation('session-2'),
+      model: 'llama3.1',
+      reasoningEffort: ReasoningEffort.High,
+      reasoningMandatory: true,
+      content: 'Hello there',
+    });
+
+    expect(titleEfforts).toEqual(['off', undefined]);
+  });
+
   it('frames the title request as data and sanitizes a runaway reply', async () => {
     const repository = new InMemoryConversationRepository();
     let titleUserMessage: string | undefined;
@@ -930,7 +991,7 @@ describe('ChatSessionService', () => {
     expect(result.conversation.messages[2]?.content).toContain('rejected');
   });
 
-  it('starts with lazy_load_tools only, then exposes full tools after loading', async () => {
+  it('starts with lazy_load_tools only, then exposes the tools the model enables', async () => {
     const repository = new InMemoryConversationRepository();
     const delegatedTool = new RecordingWriteTool();
     const lazyLoadTool = new LazyLoadToolsTool([
@@ -946,6 +1007,8 @@ describe('ChatSessionService', () => {
       async sendChat(request: ChatRequest): Promise<ChatResult> {
         seenRequests.push(request.tools);
         turn += 1;
+        // First the model lists the catalog, then enables what it needs, then
+        // calls the enabled tool.
         if (turn === 1) {
           return {
             content: '',
@@ -959,6 +1022,18 @@ describe('ChatSessionService', () => {
           };
         }
         if (turn === 2) {
+          return {
+            content: '',
+            toolCalls: [
+              {
+                id: 'call-enable',
+                name: 'lazy_load_tools',
+                arguments: '{"enable":["write_file"]}',
+              },
+            ],
+          };
+        }
+        if (turn === 3) {
           return {
             content: '',
             toolCalls: [
@@ -1007,15 +1082,29 @@ describe('ChatSessionService', () => {
     expect(seenRequests[0]).toEqual([
       expect.objectContaining({ name: 'lazy_load_tools' }),
     ]);
-    // After loading, the real tools are advertised — and the gateway stays in the
-    // set so the model can call it again for a refreshed list.
+    // The catalog call lists tool names only (no descriptions — they'd ride
+    // along in history for the rest of the session) and activates nothing —
+    // the next request still advertises only the gateway.
+    const catalogResult = result.conversation.messages.find(
+      (message) =>
+        message.role === 'tool' && message.toolCallId === 'call-discover'
+    );
+    expect(catalogResult?.content).toContain('"write_file"');
+    expect(catalogResult?.content).not.toContain('writes a file');
     expect(seenRequests[1]?.map((tool) => tool.name)).toEqual([
+      'lazy_load_tools',
+    ]);
+    // After enabling, the tool's full schema is advertised — and the gateway
+    // stays in the set so the model can keep toggling.
+    expect(seenRequests[2]?.map((tool) => tool.name)).toEqual([
       'lazy_load_tools',
       'write_file',
     ]);
     expect(approvals).toEqual(['write_file']);
     expect(delegatedTool.executed).toEqual(['{"path":"a.txt","content":"hi"}']);
     expect(result.reply).toBe('All done.');
+    // The enabled set is persisted on the conversation so a resume restores it.
+    expect(result.conversation.activeTools).toEqual(['write_file']);
   });
 
   it('excludes a disabled tool when lazy loading swaps in the real toolset', async () => {
@@ -1047,12 +1136,16 @@ describe('ChatSessionService', () => {
       async sendChat(request: ChatRequest): Promise<ChatResult> {
         seenRequests.push(request.tools);
         turn += 1;
-        // First the model loads the toolset via the gateway, then it stops.
+        // The model tries to enable both tools via the gateway, then stops.
         if (turn === 1) {
           return {
             content: '',
             toolCalls: [
-              { id: 'call-discover', name: 'lazy_load_tools', arguments: '{}' },
+              {
+                id: 'call-enable',
+                name: 'lazy_load_tools',
+                arguments: '{"enable":["write_file","read_file"]}',
+              },
             ],
           };
         }
@@ -1080,19 +1173,28 @@ describe('ChatSessionService', () => {
       getDisabledToolNames: () => ['write_file'],
     });
 
-    await service.submitMessage({
+    const result = await service.submitMessage({
       conversation: titledConversation('session-1'),
       model: 'gpt',
       content: 'do something',
       requestApproval: async () => true,
     });
 
-    // The request right after the gateway runs carries the real toolset minus
-    // the disabled write_file. The gateway stays in so the model can re-call it.
+    // The request right after the toggle carries the enabled tool minus the
+    // user-disabled write_file — the model can't enable a tool the user turned
+    // off. The gateway stays in so the model can keep toggling.
     const postLoad = seenRequests[1]?.map((tool) => tool.name);
     expect(postLoad).toContain('read_file');
     expect(postLoad).not.toContain('write_file');
     expect(postLoad).toContain('lazy_load_tools');
+    // The refused name is reported back to the model and never persisted.
+    const toggleResult = result.conversation.messages.find(
+      (message) =>
+        message.role === 'tool' && message.toolCallId === 'call-enable'
+    );
+    expect(toggleResult?.content).toContain('write_file');
+    expect(toggleResult?.content).toContain('Unknown or unavailable');
+    expect(result.conversation.activeTools).toEqual(['read_file']);
   });
 
   it('advertises the full tool set from the first turn when lazy loading is off', async () => {
@@ -1238,7 +1340,7 @@ describe('ChatSessionService', () => {
     expect(result.reply).toBe('Understood.');
   });
 
-  it('keeps the real tool set (with the gateway) on later turns once lazy_load_tools has run', async () => {
+  it('keeps enabled tools advertised on later turns via the persisted active set', async () => {
     const repository = new InMemoryConversationRepository();
     const delegatedTool = new RecordingWriteTool();
     const lazyLoadTool = new LazyLoadToolsTool([
@@ -1254,12 +1356,16 @@ describe('ChatSessionService', () => {
       async sendChat(request: ChatRequest): Promise<ChatResult> {
         seenRequests.push(request.tools);
         turn += 1;
-        // First turn loads tools, every later turn just replies.
+        // First turn enables write_file, every later turn just replies.
         if (turn === 1) {
           return {
             content: '',
             toolCalls: [
-              { id: 'call-discover', name: 'lazy_load_tools', arguments: '{}' },
+              {
+                id: 'call-enable',
+                name: 'lazy_load_tools',
+                arguments: '{"enable":["write_file"]}',
+              },
             ],
           };
         }
@@ -1292,9 +1398,10 @@ describe('ChatSessionService', () => {
       content: 'discover',
     });
 
-    // Reusing the same conversation, the next turn must advertise the real tools
-    // up front instead of falling back to the gateway-only view — and the gateway
-    // stays in the set so the model can call it again for a refreshed list.
+    // Reusing the same conversation, the next turn must advertise the enabled
+    // tool up front — restored from the persisted active set, not re-derived
+    // from history — and the gateway stays in so the model can keep toggling.
+    expect(first.conversation.activeTools).toEqual(['write_file']);
     await service.submitMessage({
       conversation: first.conversation,
       model: 'gpt',
@@ -1306,6 +1413,80 @@ describe('ChatSessionService', () => {
       'lazy_load_tools',
       'write_file',
     ]);
+  });
+
+  it('falls back to every tool for a legacy session that called the old load-everything gateway', async () => {
+    const repository = new InMemoryConversationRepository();
+    const delegatedTool = new RecordingWriteTool();
+    const lazyLoadTool = new LazyLoadToolsTool([
+      {
+        ...delegatedTool.definition,
+        requiresApproval: delegatedTool.requiresApproval,
+      },
+    ]);
+    const seenRequests: Array<ChatRequest['tools']> = [];
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat(request: ChatRequest): Promise<ChatResult> {
+        seenRequests.push(request.tools);
+        return { content: 'Done.' };
+      },
+      async listModels() {
+        return [
+          { id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai },
+        ];
+      },
+      getDefaultModel() {
+        return 'gpt';
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry: new ToolRegistry(
+        [lazyLoadTool, delegatedTool],
+        [
+          {
+            ...lazyLoadTool.definition,
+            requiresApproval: lazyLoadTool.requiresApproval,
+          },
+        ]
+      ),
+    });
+
+    // A session saved by the old code: the gateway call is in history, but no
+    // `activeTools` was ever persisted.
+    const legacy = titledConversation('session-legacy');
+    legacy.messages.push(
+      createMessage('user', 'do something', new Date()),
+      createMessage('assistant', '', new Date(), undefined, {
+        toolCalls: [
+          { id: 'call-old', name: 'lazy_load_tools', arguments: '{}' },
+        ],
+      }),
+      createMessage(
+        'tool',
+        'Tool loading acknowledged.',
+        new Date(),
+        undefined,
+        {
+          toolCallId: 'call-old',
+          name: 'lazy_load_tools',
+        }
+      )
+    );
+
+    const result = await service.submitMessage({
+      conversation: legacy,
+      model: 'gpt',
+      content: 'continue',
+    });
+
+    // The legacy session resumes with everything advertised (its old behavior),
+    // and the fallback is made explicit by persisting the full set.
+    expect(seenRequests[0]?.map((tool) => tool.name)).toEqual([
+      'lazy_load_tools',
+      'write_file',
+    ]);
+    expect(result.conversation.activeTools).toEqual(['write_file']);
   });
 
   it('re-advertises the gateway on every turn until the model calls it', async () => {

@@ -2341,6 +2341,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         conversation: baseConversation,
         model: turnModel,
         ...(turnEffort ? { reasoningEffort: turnEffort } : {}),
+        ...(activeModelInfo?.reasoning?.mandatory
+          ? { reasoningMandatory: true }
+          : {}),
         content: cleanedValue,
         ...(turnImages.length ? { images: turnImages } : {}),
         attachments,

@@ -27,7 +27,8 @@ describe('buildSystemPrompt', () => {
     ]);
 
     expect(prompt).toContain('If the current request can be handled');
-    expect(prompt).toContain('use it only as a gateway');
-    expect(prompt).toContain('After that, call the actual tool you need.');
+    expect(prompt).toContain('use it only when the request');
+    expect(prompt).toContain('{"enable": [...]}');
+    expect(prompt).toContain('Disable tools you are done with');
   });
 });

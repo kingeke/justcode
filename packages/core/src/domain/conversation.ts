@@ -39,6 +39,14 @@ export interface Conversation {
   updatedAt: string;
   /** Footer metrics carried across reloads; absent for pre-stats sessions. */
   stats?: SessionStats;
+  /**
+   * Names of the tools the model has switched on via the `lazy_load_tools`
+   * gateway, persisted so resuming the session restores the same working set
+   * instead of forcing the model to rediscover it. Absent for sessions that
+   * never toggled anything (including pre-toggle sessions, which fall back to
+   * the legacy "gateway call loads everything" behavior).
+   */
+  activeTools?: string[];
 }
 
 export function createConversation(
