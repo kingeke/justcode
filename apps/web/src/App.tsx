@@ -163,7 +163,7 @@ export function App() {
               </div>
             ))}
             <div className="cmd">
-              <span className="cmd-label">code</span>
+              <span className="cmd-label">vscode</span>
               <code>{extensionInstall}</code>
               <CopyButton value={extensionInstall} />
               <a
