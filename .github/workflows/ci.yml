@@ -22,7 +22,11 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - name: Typecheck
+      # The root typecheck script fans out to all three TypeScript projects:
+      # the root tsconfig (CLI + packages), the VS Code extension
+      # (apps/vscode has its own tsconfig, excluded from the root one), and
+      # the web app (apps/web, which installs its own dependencies).
+      - name: Typecheck (CLI, extension, web)
         run: bun run typecheck
 
       - name: Format check
