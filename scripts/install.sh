@@ -57,16 +57,24 @@ detect_target() {
   os="$(uname -s)"
   arch="$(uname -m)"
   case "$os" in
-    Darwin) os="darwin" ;;
-    Linux)  os="linux" ;;
-    *)      err "unsupported OS: $os (use the npm install method on this platform)" ;;
+    Darwin)               os="darwin" ;;
+    Linux)                os="linux" ;;
+    MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+    *)                    err "unsupported OS: $os (use the npm install method on this platform)" ;;
   esac
   case "$arch" in
     arm64|aarch64) arch="arm64" ;;
     x86_64|amd64)  arch="x64" ;;
     *)             err "unsupported architecture: $arch" ;;
   esac
-  echo "justcode-${os}-${arch}"
+  # No native windows-arm64 build (Bun can't target it); Windows 11 on ARM
+  # runs x64 binaries via its built-in emulation layer.
+  if [ "$os" = "windows" ] && [ "$arch" = "arm64" ]; then
+    arch="x64"
+  fi
+  ext=""
+  [ "$os" = "windows" ] && ext=".exe"
+  echo "justcode-${os}-${arch}${ext}"
 }
 
 # Resolve the version: explicit override, else the latest GitHub release tag.
@@ -88,7 +96,10 @@ VERSION="$(resolve_version)"
 [ -n "$VERSION" ] || err "could not determine latest version; set JUSTCODE_VERSION=vX.Y.Z"
 
 URL="https://github.com/${REPO}/releases/download/${VERSION}/${ASSET}"
-DEST="${INSTALL_DIR}/justcode"
+case "$ASSET" in
+  *.exe) DEST="${INSTALL_DIR}/justcode.exe" ;;
+  *)     DEST="${INSTALL_DIR}/justcode" ;;
+esac
 
 info "Installing JustCode ${VERSION} (${ASSET}) to ${DEST}"
 mkdir -p "$INSTALL_DIR"

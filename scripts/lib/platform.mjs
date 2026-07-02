@@ -9,12 +9,15 @@ const ARCH_MAP = { arm64: 'arm64', x64: 'x64' };
 /** Normalized { os, arch } for the current runtime. Throws if unsupported. */
 export function osArch() {
   const os = OS_MAP[process.platform];
-  const arch = ARCH_MAP[process.arch];
+  let arch = ARCH_MAP[process.arch];
   if (!os || !arch) {
     throw new Error(
       `Unsupported platform: ${process.platform}/${process.arch}`
     );
   }
+  // No native windows-arm64 build (Bun can't target it); Windows 11 on ARM
+  // runs x64 binaries via its built-in emulation layer.
+  if (os === 'windows' && arch === 'arm64') arch = 'x64';
   return { os, arch };
 }
 
