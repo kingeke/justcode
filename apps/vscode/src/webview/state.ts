@@ -52,6 +52,12 @@ export interface LiveMessageItem {
   kind: LiveTurnItemKind.Message;
   id: string;
   content: string;
+  /**
+   * How the item renders; assistant when absent. User is used for the steering
+   * echo — a queued message folded into the running turn — so it shows at its
+   * actual position in the flow rather than above the turn's live output.
+   */
+  role?: WebviewRole;
 }
 
 export type LiveTurnItem = LiveThinkingItem | LiveToolItem | LiveMessageItem;
@@ -360,15 +366,21 @@ export function reducer(state: ChatState, action: Action): ChatState {
       // The host folded these queued follow-ups into the running turn. Drop their
       // pills and surface the combined message in the transcript now, so the
       // steering is visible immediately rather than only at turn end (the
-      // authoritative rebuild on TurnComplete replaces this echo).
+      // authoritative rebuild on TurnComplete replaces this echo). It must land
+      // *inside* the live turn — appending to `messages` would render it above
+      // everything the turn has produced so far. Flush the in-flight thinking
+      // and prose first so the echo sits after them, mirroring where the
+      // service actually inserts it (after the previous round-trip's output).
       const consumed = new Set(action.ids);
+      const flushed = flushStreaming(flushThinking(state));
       return {
-        ...state,
+        ...flushed,
         queuedMessages: state.queuedMessages.filter((m) => !consumed.has(m.id)),
-        messages: [
-          ...state.messages,
+        liveTurnItems: [
+          ...flushed.liveTurnItems,
           {
-            id: `steer-${Date.now()}`,
+            kind: LiveTurnItemKind.Message,
+            id: createLiveItemId(),
             role: WebviewRole.User,
             content: action.content,
           },

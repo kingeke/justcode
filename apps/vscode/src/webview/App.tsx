@@ -102,7 +102,10 @@ export function App(): React.JSX.Element {
     const committed = state.liveTurnItems.reduce(
       (sum, item) =>
         item.kind === LiveTurnItemKind.Thinking ||
-        item.kind === LiveTurnItemKind.Message
+        // Steering echoes render as user items in the live turn; they're the
+        // user's text, not model output, so keep them out of the tok/s count.
+        (item.kind === LiveTurnItemKind.Message &&
+          item.role !== WebviewRole.User)
           ? sum + item.content.length
           : sum,
       0
@@ -829,7 +832,7 @@ export function App(): React.JSX.Element {
                         key={item.id}
                         message={{
                           id: item.id,
-                          role: WebviewRole.Assistant,
+                          role: item.role ?? WebviewRole.Assistant,
                           content: item.content,
                         }}
                         expandTools={state.expandTools}
