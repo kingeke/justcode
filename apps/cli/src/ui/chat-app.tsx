@@ -227,10 +227,10 @@ const MAX_PREVIEW_LINES = 16;
 const EXIT_HINT = 'Press Ctrl+C again to exit';
 const EXIT_WINDOW_MS = 2000;
 const MARKDOWN_FG = '#d4d4d4';
+// Background of the clickable jump-to-top/bottom pills over the transcript.
 const INPUT_BG = '#008B8B';
-// Chat input placeholder: a muted gray that reads as hint text on the teal
-// input background without competing with the typed text.
-const INPUT_PLACEHOLDER = '#111111';
+// Border of the prompt input: dim enough to read as chrome, not content.
+const INPUT_BORDER = '#565b65';
 // App background: keeps the light-on-dark UI readable on light/white terminals.
 // The renderer also sets this as the global clear color; the root box repaints
 // it so the main view is covered even if the native clear is unavailable.
@@ -3291,25 +3291,33 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           </box>
         ) : null}
 
+        {/* Claude Code-style prompt: a thin rounded border on the app
+            background with a "❯"-style marker, instead of a filled block. */}
         <box
           marginTop={1}
           width="100%"
+          flexDirection="row"
+          border
+          borderStyle="rounded"
+          borderColor={INPUT_BORDER}
           paddingX={1}
-          paddingY={1}
-          backgroundColor={INPUT_BG}
         >
+          <text fg={MUTED} flexShrink={0}>
+            {'> '}
+          </text>
           <textarea
             key={inputKey}
             initialValue={input}
-            width="100%"
-            minHeight={3}
+            flexGrow={1}
+            flexShrink={1}
+            minHeight={1}
             maxHeight={6}
             wrapMode="word"
             placeholder={modePlaceholder(activeMode)}
-            backgroundColor={INPUT_BG}
-            textColor={INPUT_PLACEHOLDER}
-            focusedTextColor={INPUT_PLACEHOLDER}
-            placeholderColor={INPUT_PLACEHOLDER}
+            backgroundColor={APP_BG}
+            textColor={MARKDOWN_FG}
+            focusedTextColor="white"
+            placeholderColor={MUTED}
             cursorColor="white"
             // A terminal forwards a paste over stdin, but pasted image data is
             // not part of it — so when a paste carries no text, check the OS
