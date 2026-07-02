@@ -6,7 +6,7 @@
 [![MIT license](https://img.shields.io/badge/license-MIT-green)](https://github.com/kingeke/justcode/blob/main/LICENSE)
 
 **A lean, transparent coding assistant in your sidebar — where _you_ control
-every token.**
+every single token.**
 
 Most AI coding tools quietly inflate every request with huge hidden prompts you
 can't see or change — some spend tens of thousands of tokens on a single "hey."
