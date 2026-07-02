@@ -13,6 +13,10 @@ import {
   CUSTOM_MODE_CATEGORY,
   modePlaceholder,
 } from '@core/domain/chat-mode';
+import {
+  clampComposerHeight,
+  COMPOSER_MIN_ROWS,
+} from '@ext/webview/composer-autosize';
 import type {
   WebviewImage,
   WebviewMode,
@@ -148,6 +152,15 @@ export function Composer(props: ComposerProps): React.JSX.Element {
     props.initialImages ?? []
   );
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  // Grow the textarea from MIN_ROWS up to MAX_ROWS as its content changes,
+  // measuring the wrapped content height so long/wrapped lines count too.
+  React.useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${clampComposerHeight(el.scrollHeight)}px`;
+  }, [value, images]);
 
   // Mirror the draft up on every change so it outlives this component when a
   // full-screen view (model picker, sessions) takes over and unmounts it.
@@ -660,7 +673,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
           ref={textareaRef}
           className="composer-input"
           value={value}
-          rows={2}
+          rows={COMPOSER_MIN_ROWS}
           disabled={disabled}
           placeholder={
             disabled

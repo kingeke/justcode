@@ -1665,8 +1665,11 @@ textarea:focus {
   background: transparent;
   padding: 0;
   resize: none;
-  min-height: 44px;
-  max-height: 240px;
+  /* Grows from 2 rows up to 12 rows (font-size 13px × line-height 1.4).
+     Kept in sync with composer-autosize.ts, which sets the live height. */
+  min-height: 36px;
+  max-height: 218px;
+  overflow-y: auto;
   font-size: 13px;
   line-height: 1.4;
 }
