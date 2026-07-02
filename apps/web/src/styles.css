@@ -546,6 +546,9 @@ main {
   .nav nav {
     display: none;
   }
+  .nav .ghost-btn {
+    margin-left: auto;
+  }
 }
 @media (max-width: 640px) {
   .cmd code {
