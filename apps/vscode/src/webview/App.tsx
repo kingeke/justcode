@@ -173,9 +173,31 @@ export function App(): React.JSX.Element {
   // scrolled meaningfully away from the bottom; hidden again when they return.
   const [showJumpToBottom, setShowJumpToBottom] = React.useState(false);
 
+  // Set when we move the scrollbar ourselves, so the resulting scroll event
+  // isn't mistaken for the user scrolling up. Without this, content that grows
+  // between our pin and the event (a tool card laying out its output, an image
+  // loading) makes the measured distance-from-bottom nonzero and silently
+  // unsticks auto-scroll.
+  const programmaticScrollRef = React.useRef(false);
+
+  const pinToBottom = React.useCallback((): void => {
+    const el = transcriptRef.current;
+    if (!el) return;
+    const before = el.scrollTop;
+    el.scrollTop = el.scrollHeight;
+    // Only flag when the assignment actually moved the viewport; otherwise no
+    // scroll event fires and a stale flag would swallow the user's next scroll.
+    if (el.scrollTop !== before) programmaticScrollRef.current = true;
+  }, []);
+
   const onTranscriptScroll = (): void => {
     const el = transcriptRef.current;
     if (!el) return;
+    if (programmaticScrollRef.current) {
+      programmaticScrollRef.current = false;
+      setShowJumpToBottom(false);
+      return;
+    }
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     stickToBottomRef.current = distanceFromBottom <= 24;
     // A larger threshold than the auto-scroll pin so the button doesn't flicker
@@ -184,19 +206,36 @@ export function App(): React.JSX.Element {
   };
 
   const jumpToBottom = (): void => {
-    const el = transcriptRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
     stickToBottomRef.current = true;
     setShowJumpToBottom(false);
+    pinToBottom();
   };
 
-  // Keep the latest content in view as tokens stream and messages arrive — but
-  // only while the user hasn't scrolled up to read earlier output.
-  React.useEffect(() => {
-    const el = transcriptRef.current;
-    if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [state.messages, state.streaming, state.thinking, state.tools]);
+  // Keep the latest content in view as tokens stream, messages arrive, and tool
+  // cards render. Watching the content's real size (not React state) means
+  // height that lands after commit — tool output, syntax highlighting, images —
+  // still pins, while the user staying scrolled up is always respected.
+  //
+  // Attached as a callback ref, not a mount effect: the transcript is only in
+  // the tree on the chat view (sessions/loading return early), so an effect
+  // that runs once would find nothing to observe and auto-scroll would be dead
+  // for the whole session. The callback re-fires on every mount/unmount.
+  const contentObserverRef = React.useRef<ResizeObserver | null>(null);
+  const observeTranscriptContent = React.useCallback(
+    (node: HTMLDivElement | null): void => {
+      contentObserverRef.current?.disconnect();
+      contentObserverRef.current = null;
+      if (!node) return;
+      const observer = new ResizeObserver(() => {
+        if (stickToBottomRef.current) pinToBottom();
+      });
+      // ResizeObserver fires once on observe, which conveniently pins a freshly
+      // opened chat to its latest message.
+      observer.observe(node);
+      contentObserverRef.current = observer;
+    },
+    [pinToBottom]
+  );
 
   // When an approval/input gate appears it needs the user to act, so reveal it
   // unconditionally — even if they'd scrolled up — and re-arm auto-scroll. The
@@ -205,16 +244,14 @@ export function App(): React.JSX.Element {
   // height measured mid-render.
   React.useEffect(() => {
     if (!state.approval && !state.input) return;
-    const el = transcriptRef.current;
-    if (!el) return;
     const reveal = (): void => {
-      el.scrollTop = el.scrollHeight;
       stickToBottomRef.current = true;
+      pinToBottom();
     };
     reveal();
     const raf = requestAnimationFrame(reveal);
     return () => cancelAnimationFrame(raf);
-  }, [state.approval, state.input]);
+  }, [state.approval, state.input, pinToBottom]);
 
   const sendNow = (content: string, images: WebviewImage[]): void => {
     // Sending a new message should always snap to it, even if the user had
@@ -628,7 +665,7 @@ export function App(): React.JSX.Element {
   let lastPlanIndex = -1;
   for (let i = state.messages.length - 1; i >= 0; i -= 1) {
     const m = state.messages[i];
-    if (m.role === WebviewRole.Tool && m.toolName === PRESENT_PLAN_TOOL) {
+    if (m?.role === WebviewRole.Tool && m.toolName === PRESENT_PLAN_TOOL) {
       lastPlanIndex = i;
       break;
     }
@@ -692,147 +729,156 @@ export function App(): React.JSX.Element {
           ref={transcriptRef}
           onScroll={onTranscriptScroll}
         >
-          {state.notice ? <div className="notice">{state.notice}</div> : null}
+          {/* Single wrapper around everything scrollable so the auto-scroll
+              ResizeObserver sees every height change in one place. */}
+          <div className="transcript-content" ref={observeTranscriptContent}>
+            {state.notice ? <div className="notice">{state.notice}</div> : null}
 
-          {state.messages.map((message, index) => {
-            // Collapse mode: show only the user's own messages so they can scan
-            // back through what they asked without the long replies in between.
-            if (state.collapseResponses && message.role !== WebviewRole.User) {
-              return null;
-            }
-            // A presented plan renders as its own card (markdown + actions)
-            // rather than a generic tool row.
-            if (
-              message.role === WebviewRole.Tool &&
-              message.toolName === PRESENT_PLAN_TOOL
-            ) {
+            {state.messages.map((message, index) => {
+              // Collapse mode: show only the user's own messages so they can scan
+              // back through what they asked without the long replies in between.
+              if (
+                state.collapseResponses &&
+                message.role !== WebviewRole.User
+              ) {
+                return null;
+              }
+              // A presented plan renders as its own card (markdown + actions)
+              // rather than a generic tool row.
+              if (
+                message.role === WebviewRole.Tool &&
+                message.toolName === PRESENT_PLAN_TOOL
+              ) {
+                return (
+                  <PlanCard
+                    key={message.id}
+                    plan={message.content}
+                    showActions={index === lastPlanIndex && !state.busy}
+                    onStart={startImplementation}
+                    onEdit={() => editPlan(message.content)}
+                  />
+                );
+              }
+              const isLastMsg = index === state.messages.length - 1;
+              const isLastAssistant =
+                !state.busy &&
+                isLastMsg &&
+                message.role === WebviewRole.Assistant;
+              const thinkingItems = selectThinkingItems({
+                message,
+                isLastAssistant,
+                committedMessagesHaveThinking,
+                completedThinkingItems: state.completedThinkingItems,
+              });
               return (
-                <PlanCard
-                  key={message.id}
-                  plan={message.content}
-                  showActions={index === lastPlanIndex && !state.busy}
-                  onStart={startImplementation}
-                  onEdit={() => editPlan(message.content)}
-                />
-              );
-            }
-            const isLastMsg = index === state.messages.length - 1;
-            const isLastAssistant =
-              !state.busy &&
-              isLastMsg &&
-              message.role === WebviewRole.Assistant;
-            const thinkingItems = selectThinkingItems({
-              message,
-              isLastAssistant,
-              committedMessagesHaveThinking,
-              completedThinkingItems: state.completedThinkingItems,
-            });
-            return (
-              <React.Fragment key={message.id}>
-                {thinkingItems.map((item) => (
-                  <ThinkingBlock
-                    key={item.id}
-                    thinking={item.content}
-                    durationMs={item.durationMs}
-                    collapsed={state.thinkingCollapsed}
-                    busy={false}
-                  />
-                ))}
-                <MessageView
-                  message={message}
-                  expandTools={state.expandTools}
-                  onOpenFile={openFile}
-                  onOpenImage={setPreviewImage}
-                />
-              </React.Fragment>
-            );
-          })}
-
-          {(state.collapseResponses ? [] : state.liveTurnItems).map((item) => {
-            switch (item.kind) {
-              case LiveTurnItemKind.Thinking:
-                return (
-                  <ThinkingBlock
-                    key={item.id}
-                    thinking={item.content}
-                    durationMs={item.durationMs}
-                    collapsed={state.thinkingCollapsed}
-                    busy={false}
-                  />
-                );
-              case LiveTurnItemKind.Message:
-                return (
+                <React.Fragment key={message.id}>
+                  {thinkingItems.map((item) => (
+                    <ThinkingBlock
+                      key={item.id}
+                      thinking={item.content}
+                      durationMs={item.durationMs}
+                      collapsed={state.thinkingCollapsed}
+                      busy={false}
+                    />
+                  ))}
                   <MessageView
-                    key={item.id}
-                    message={{
-                      id: item.id,
-                      role: WebviewRole.Assistant,
-                      content: item.content,
-                    }}
-                    expandTools={state.expandTools}
-                  />
-                );
-              case LiveTurnItemKind.Tool: {
-                const tool = state.tools.find(
-                  (entry) => entry.toolCallId === item.toolCallId
-                );
-                return tool ? (
-                  <ToolActivityView
-                    key={item.id}
-                    tools={[tool]}
+                    message={message}
                     expandTools={state.expandTools}
                     onOpenFile={openFile}
+                    onOpenImage={setPreviewImage}
                   />
-                ) : null;
+                </React.Fragment>
+              );
+            })}
+
+            {(state.collapseResponses ? [] : state.liveTurnItems).map(
+              (item) => {
+                switch (item.kind) {
+                  case LiveTurnItemKind.Thinking:
+                    return (
+                      <ThinkingBlock
+                        key={item.id}
+                        thinking={item.content}
+                        durationMs={item.durationMs}
+                        collapsed={state.thinkingCollapsed}
+                        busy={false}
+                      />
+                    );
+                  case LiveTurnItemKind.Message:
+                    return (
+                      <MessageView
+                        key={item.id}
+                        message={{
+                          id: item.id,
+                          role: WebviewRole.Assistant,
+                          content: item.content,
+                        }}
+                        expandTools={state.expandTools}
+                      />
+                    );
+                  case LiveTurnItemKind.Tool: {
+                    const tool = state.tools.find(
+                      (entry) => entry.toolCallId === item.toolCallId
+                    );
+                    return tool ? (
+                      <ToolActivityView
+                        key={item.id}
+                        tools={[tool]}
+                        expandTools={state.expandTools}
+                        onOpenFile={openFile}
+                      />
+                    ) : null;
+                  }
+                }
               }
-            }
-          })}
+            )}
 
-          {!state.collapseResponses && state.busy && state.thinking ? (
-            <ThinkingBlock
-              thinking={state.thinking}
-              durationMs={state.thinkingDurationMs}
-              collapsed={false}
-              busy={true}
-            />
-          ) : null}
+            {!state.collapseResponses && state.busy && state.thinking ? (
+              <ThinkingBlock
+                thinking={state.thinking}
+                durationMs={state.thinkingDurationMs}
+                collapsed={false}
+                busy={true}
+              />
+            ) : null}
 
-          {!state.collapseResponses && state.busy && state.streaming ? (
-            <MessageView
-              message={{
-                id: 'streaming',
-                role: WebviewRole.Assistant,
-                content: state.streaming,
-              }}
-              expandTools={state.expandTools}
-            />
-          ) : null}
+            {!state.collapseResponses && state.busy && state.streaming ? (
+              <MessageView
+                message={{
+                  id: 'streaming',
+                  role: WebviewRole.Assistant,
+                  content: state.streaming,
+                }}
+                expandTools={state.expandTools}
+              />
+            ) : null}
 
-          {state.busy &&
-          !state.streaming &&
-          !state.thinking &&
-          !state.approval ? (
-            <div className="working">Tinkering…</div>
-          ) : null}
+            {state.busy &&
+            !state.streaming &&
+            !state.thinking &&
+            !state.approval ? (
+              <div className="working">Tinkering…</div>
+            ) : null}
 
-          {state.approval ? (
-            <ApprovalPrompt
-              request={state.approval}
-              onRespond={(approved) =>
-                respondApproval(state.approval!.id, approved)
-              }
-              onApproveAll={() => approveAllTools(state.approval!.id)}
-            />
-          ) : null}
+            {state.approval ? (
+              <ApprovalPrompt
+                request={state.approval}
+                onRespond={(approved) =>
+                  respondApproval(state.approval!.id, approved)
+                }
+                onApproveAll={() => approveAllTools(state.approval!.id)}
+              />
+            ) : null}
 
-          {state.input ? (
-            <InputPrompt
-              request={state.input}
-              onRespond={(value) => respondInput(state.input!.id, value)}
-            />
-          ) : null}
+            {state.input ? (
+              <InputPrompt
+                request={state.input}
+                onRespond={(value) => respondInput(state.input!.id, value)}
+              />
+            ) : null}
 
-          {state.error ? <div className="error">{state.error}</div> : null}
+            {state.error ? <div className="error">{state.error}</div> : null}
+          </div>
         </div>
         {showJumpToBottom ? (
           <button
