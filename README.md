@@ -34,7 +34,7 @@ rules.
   (Alibaba Cloud), Ollama, LM Studio, or any OpenAI-compatible endpoint.
 - **Self-contained binary** — ships with its runtime embedded; end users need
   no Node, no Bun, and no `node_modules`.
-- **File-backed sessions** — conversations are saved under `~/.justcode/sessions`
+- **File-backed sessions** — conversations are saved under `~/.cache/justcode/sessions`
   so you can resume, branch, and revisit past work.
 - **MCP servers**, **chat modes** (Build / Ask / Plan + custom), and a
   **VS Code extension** sharing the same lean engine.
