@@ -48,7 +48,10 @@ import type {
   ToolApprovalRequest,
 } from '@core/application/chat-session-service';
 import type { UserQuestionRequest } from '@core/ports/tool';
-import type { Conversation } from '@core/domain/conversation';
+import type {
+  Conversation,
+  SessionStats,
+} from '@core/domain/conversation';
 import type { ManageableToolInfo } from '@core/domain/tool-metadata';
 import {
   BUILD_MODE_ID,
@@ -427,7 +430,7 @@ function metricsLineContent(
     tc(metrics.inputTokens.toLocaleString(), { fg: 'white' }),
     tc(' cached ', { fg: MUTED }),
     tc(cachedTokens.toLocaleString(), { fg: 'white' }),
-    tc(' new ', { fg: MUTED }),
+    tc(' in ', { fg: MUTED }),
     tc(newTokens.toLocaleString(), { fg: 'white' }),
     tc(' out ', { fg: MUTED }),
     tc(metrics.outputTokens.toLocaleString(), { fg: 'white' }),
@@ -470,6 +473,14 @@ function getInitialMetrics(): {
     cost: 0,
     lastInputTokens: 0,
   };
+}
+
+type SessionMetrics = ReturnType<typeof getInitialMetrics>;
+
+interface TurnStats {
+  ttftMs: number;
+  tokensPerSecond: number;
+  avgTokensPerSecond: number;
 }
 
 export function ChatApp(props: ChatAppProps): React.ReactNode {
@@ -521,14 +532,25 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   >([]);
   const [savedConfig, setSavedConfig] = useState(props.savedConfig);
   const [metrics, setMetrics] = useState(getInitialMetrics);
-  const [lastStats, setLastStats] = useState<{
-    ttftMs: number;
-    tokensPerSecond: number;
-    avgTokensPerSecond: number;
-  } | null>(null);
-  // Every completed turn's tok/s, in order. The session average is just the mean
-  // of these samples (sum / count) — each turn weighted equally.
-  const tokensPerSecondSamplesRef = useRef<number[]>([]);
+  const [lastStats, setLastStats] = useState<TurnStats | null>(null);
+  // Mirror `metrics`/`lastStats` in refs so the end-of-turn stats persist can
+  // read current values synchronously instead of waiting for a React commit.
+  // Always write them through updateMetrics/updateLastStats.
+  const metricsRef = useRef<SessionMetrics>(getInitialMetrics());
+  const lastStatsRef = useRef<TurnStats | null>(null);
+  const updateMetrics = (
+    updater: (prev: SessionMetrics) => SessionMetrics
+  ): void => {
+    metricsRef.current = updater(metricsRef.current);
+    setMetrics(metricsRef.current);
+  };
+  const updateLastStats = (value: TurnStats | null): void => {
+    lastStatsRef.current = value;
+    setLastStats(value);
+  };
+  // The session tok/s average, maintained incrementally per completed turn:
+  // avg += (sample − avg) / count. Equal weight per turn, no re-averaging.
+  const tokensPerSecondAvgRef = useRef({ avg: 0, count: 0 });
   const responseTimingRef = useRef<{
     startMs: number;
     firstTokenMs: number | null;
@@ -646,8 +668,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setPendingImages([]);
     setConversation(null);
     setError(null);
-    setLastStats(null);
-    setMetrics(getInitialMetrics());
+    updateLastStats(null);
+    updateMetrics(() => getInitialMetrics());
     setStreamingContent('');
     setStreamingThinking('');
     setThinkingDuration(null);
@@ -659,7 +681,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     thinkingSegmentsRef.current = [];
     responseTimingRef.current = { startMs: 0, firstTokenMs: null };
     turnOutputCharsRef.current = 0;
-    tokensPerSecondSamplesRef.current = [];
+    tokensPerSecondAvgRef.current = { avg: 0, count: 0 };
   };
   const [status, setStatus] = useState<string>('Loading session...');
   const [isSending, setIsSending] = useState(false);
@@ -962,7 +984,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         responseTimingRef.current,
         turnOutputCharsRef.current,
         activityTick,
-        tokensPerSecondSamplesRef.current
+        tokensPerSecondAvgRef.current.avg
       )
     : lastStats;
   const mentionSuggestions = useMemo(
@@ -1478,6 +1500,48 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     }
   }, [input, disarmExit]);
 
+  // Writes the current footer metrics (ctx/cost/tok-s) onto the session's
+  // persisted conversation so resuming it restores them. Best-effort — the
+  // service swallows failures, so this never disturbs the turn.
+  const persistSessionStats = (sessionId: string): void => {
+    const stats: SessionStats = {
+      ...metricsRef.current,
+      ...(lastStatsRef.current
+        ? {
+            ttftMs: lastStatsRef.current.ttftMs,
+            tokensPerSecond: lastStatsRef.current.tokensPerSecond,
+          }
+        : {}),
+      avgTokensPerSecond: tokensPerSecondAvgRef.current.avg,
+      completedTurnCount: tokensPerSecondAvgRef.current.count,
+    };
+    void props.chatSessionService.saveSessionStats(sessionId, stats);
+  };
+
+  // Seeds the footer metrics from a loaded conversation's persisted stats, so
+  // reopening a session picks up where its ctx/cost/tok-s readouts left off.
+  const restoreSessionStats = (stats: SessionStats | undefined): void => {
+    if (!stats) return;
+    updateMetrics(() => ({
+      inputTokens: stats.inputTokens,
+      outputTokens: stats.outputTokens,
+      cachedTokens: stats.cachedTokens,
+      cost: stats.cost,
+      lastInputTokens: stats.lastInputTokens,
+    }));
+    tokensPerSecondAvgRef.current = {
+      avg: stats.avgTokensPerSecond ?? 0,
+      count: stats.completedTurnCount ?? 0,
+    };
+    if (stats.ttftMs !== undefined && stats.tokensPerSecond !== undefined) {
+      updateLastStats({
+        ttftMs: stats.ttftMs,
+        tokensPerSecond: stats.tokensPerSecond,
+        avgTokensPerSecond: tokensPerSecondAvgRef.current.avg,
+      });
+    }
+  };
+
   const loadSession = (sessionId: string, requestedModel?: string): void => {
     resetFreshSessionState();
     setStatus('Loading session...');
@@ -1502,6 +1566,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           setActiveModel(startedSession.activeModel);
           setConversation(startedSession.conversation);
           setActiveModelInfo(modelInfo);
+          restoreSessionStats(startedSession.conversation.stats);
           setStatus('Ready');
         });
       })
@@ -2098,7 +2163,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     thinkingSegmentsRef.current = [];
     responseTimingRef.current = { startMs: Date.now(), firstTokenMs: null };
     turnOutputCharsRef.current = 0;
-    setLastStats(null);
+    updateLastStats(null);
     setInput('');
     setStatus('Waiting for response...');
 
@@ -2232,7 +2297,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             stepUsage.cachedTokens *
               (pricing.cacheReadPerToken ?? pricing.inputPerToken)
           : 0);
-      setMetrics((prev) => ({
+      updateMetrics((prev) => ({
         inputTokens: prev.inputTokens + stepUsage.inputTokens,
         outputTokens: prev.outputTokens + stepUsage.outputTokens,
         cachedTokens: prev.cachedTokens + stepUsage.cachedTokens,
@@ -2443,20 +2508,22 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           const ttftMs = timing.firstTokenMs - timing.startMs;
           const genSeconds = Math.max(capturedGenerationMs, 1) / 1000;
           const turnTokensPerSecond = turnOutputTokens / genSeconds;
-          // Record this turn's rate and average over all turns so far.
-          const samples = tokensPerSecondSamplesRef.current;
-          samples.push(turnTokensPerSecond);
-          setLastStats({
+          // Fold this turn's rate into the running average:
+          // avg += (sample − avg) / count.
+          const running = tokensPerSecondAvgRef.current;
+          running.count += 1;
+          running.avg += (turnTokensPerSecond - running.avg) / running.count;
+          updateLastStats({
             ttftMs,
             tokensPerSecond: turnTokensPerSecond,
-            avgTokensPerSecond: average(samples),
+            avgTokensPerSecond: running.avg,
           });
         }
         // When the turn reported usage, the metrics line was already updated
         // live via onUsage (per response), so don't add it again here. Only when
         // no usage came back at all do we fall back to an output estimate.
         if (!turnReportedUsage) {
-          setMetrics((prev) => ({
+          updateMetrics((prev) => ({
             inputTokens: prev.inputTokens,
             outputTokens: prev.outputTokens + turnOutputTokens,
             cachedTokens: prev.cachedTokens,
@@ -2465,6 +2532,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           }));
         }
       });
+      // The startTransition callback ran synchronously, so the refs already
+      // hold this turn's final values — persist them with the conversation.
+      persistSessionStats(result.conversation.sessionId);
     } catch (caughtError: unknown) {
       clearInterval(flushInterval);
       setPendingApproval(null);
@@ -2527,6 +2597,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         setStatus('Interrupted');
         // Put the interrupted prompt back so the user can tweak and resend.
         interruptedPromptRef.current = submittedPromptRef.current || null;
+        // Keep whatever usage the completed steps reported before the interrupt.
+        persistSessionStats(baseConversation.sessionId);
       } else {
         streamingBufferRef.current = '';
         thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
@@ -3570,7 +3642,7 @@ function getLiveStats(
   timing: { startMs: number; firstTokenMs: number | null },
   outputChars: number,
   tick: number,
-  tokensPerSecondSamples: number[]
+  avgTokensPerSecond: number
 ): {
   ttftMs: number;
   tokensPerSecond: number;
@@ -3589,9 +3661,8 @@ function getLiveStats(
   const estimatedTokens =
     outputChars > 0 ? Math.max(1, Math.round(outputChars / 4)) : 0;
   const currentTokensPerSecond = estimatedTokens / (genElapsedMs / 1000);
-  // Average only the finalized turns — the in-progress rate is too jittery, so
-  // it isn't folded in until this turn lands its final tok/s.
-  const avgTokensPerSecond = average(tokensPerSecondSamples);
+  // The average shown mid-turn is the running mean of finalized turns only —
+  // the in-progress rate is too jittery to fold in before it lands.
 
   // `tick` is included so the caller can force a rerender on a timer.
   void tick;
@@ -3601,12 +3672,6 @@ function getLiveStats(
     tokensPerSecond: currentTokensPerSecond,
     avgTokensPerSecond,
   };
-}
-
-/** Arithmetic mean of the samples, or 0 when there are none. */
-function average(samples: number[]): number {
-  if (samples.length === 0) return 0;
-  return samples.reduce((sum, value) => sum + value, 0) / samples.length;
 }
 
 function estimateTokenCount(text: string): number {

@@ -6,6 +6,7 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import {
   createConversation,
   type Conversation,
+  type SessionStats,
 } from '@core/domain/conversation';
 import { APP_NAME } from '@core/branding';
 import {
@@ -186,8 +187,18 @@ export class ChatBridge {
     cachedTokens: 0,
     cost: 0,
   };
-  // Every completed turn's tok/s; the session average is their mean.
-  private tokensPerSecondSamples: number[] = [];
+  // The session tok/s average, maintained incrementally per completed turn:
+  // avg += (sample − avg) / count. Equal weight per turn, no re-averaging.
+  private avgTokensPerSecond = 0;
+  private completedTurnCount = 0;
+  // Input tokens of the most recent request, persisted with the session stats
+  // (the CLI derives its ctx(%) readout from it).
+  private lastInputTokens = 0;
+  // TTFT / tok/s of the most recent completed turn, kept so a Ready snapshot
+  // can restore the footer's timing readouts after a session switch or reload.
+  private lastTurnStats:
+    | { ttftMs: number; tokensPerSecond: number }
+    | undefined;
 
   public constructor(
     private readonly post: (message: HostToWebview) => void,
@@ -574,6 +585,7 @@ export class ChatBridge {
         ...(this.activeModel ? { requestedModel: this.activeModel } : {}),
       });
       this.conversation = session.conversation;
+      this.restoreStats(session.conversation);
       this.activeModel = session.activeModel;
 
       // Render immediately with just the active provider's models. Listing every
@@ -615,6 +627,7 @@ export class ChatBridge {
         ...(session.conversation.title !== undefined
           ? { sessionTitle: session.conversation.title }
           : {}),
+        ...this.statsSnapshot(),
       });
 
       void this.refreshAllModels(services, session.availableModels);
@@ -628,6 +641,7 @@ export class ChatBridge {
         .loadConversation(this.sessionId)
         .catch(() => createConversation(this.sessionId));
       this.conversation = conversation;
+      this.restoreStats(conversation);
       this.models = [];
 
       const providerErrors: WebviewProviderError[] = services.providerId
@@ -676,6 +690,7 @@ export class ChatBridge {
         ...(conversation.title !== undefined
           ? { sessionTitle: conversation.title }
           : {}),
+        ...this.statsSnapshot(),
       });
 
       // Populate the picker from every reachable provider so the user can pick a
@@ -926,13 +941,20 @@ export class ChatBridge {
         const ttftMs = Math.max(firstTokenMs - startMs, 0);
         const genSeconds = Math.max(endMs - firstTokenMs, 1) / 1000;
         const tokensPerSecond = (result.usage?.outputTokens ?? 0) / genSeconds;
-        this.tokensPerSecondSamples.push(tokensPerSecond);
+        this.completedTurnCount += 1;
+        this.avgTokensPerSecond +=
+          (tokensPerSecond - this.avgTokensPerSecond) / this.completedTurnCount;
+        this.lastTurnStats = { ttftMs, tokensPerSecond };
         stats = {
           ttftMs,
           tokensPerSecond,
-          avgTokensPerSecond: average(this.tokensPerSecondSamples),
+          avgTokensPerSecond: this.avgTokensPerSecond,
         };
       }
+
+      // Persist the footer metrics with the conversation so a resumed session
+      // restores them instead of starting from zero.
+      this.persistSessionStats(services);
 
       const hasUsage =
         this.cumulativeUsage.inputTokens > 0 ||
@@ -1005,6 +1027,8 @@ export class ChatBridge {
         // Persist now so the interrupted exchange survives a reload even if no
         // further turn is taken (a later turn would otherwise be the first save).
         await services.chatSessionService.saveConversation(this.conversation);
+        // Keep whatever usage the completed steps reported before the interrupt.
+        this.persistSessionStats(services);
         this.post({
           type: HostMessageType.TurnComplete,
           messages: await toWebviewMessages(
@@ -1039,6 +1063,7 @@ export class ChatBridge {
    */
   private accumulateUsage(usage: TokenUsage): void {
     const cost = usage.cost ?? this.estimateCost(usage);
+    this.lastInputTokens = usage.inputTokens;
     this.cumulativeUsage = {
       inputTokens: this.cumulativeUsage.inputTokens + usage.inputTokens,
       outputTokens: this.cumulativeUsage.outputTokens + usage.outputTokens,
@@ -1065,9 +1090,81 @@ export class ChatBridge {
       cachedTokens: 0,
       cost: 0,
     };
-    this.tokensPerSecondSamples = [];
+    this.avgTokensPerSecond = 0;
+    this.completedTurnCount = 0;
+    this.lastInputTokens = 0;
+    this.lastTurnStats = undefined;
     this.toolViewsByCallId.clear();
     this.capturedDeletions.clear();
+  }
+
+  /**
+   * Restores the footer metrics persisted with a loaded conversation. Skipped
+   * when live totals already exist — they include any turn since the last
+   * persist, so they're always at least as fresh as what's on disk.
+   */
+  private restoreStats(conversation: Conversation): void {
+    const stats = conversation.stats;
+    if (!stats) return;
+    if (
+      this.cumulativeUsage.inputTokens > 0 ||
+      this.cumulativeUsage.outputTokens > 0
+    ) {
+      return;
+    }
+    this.cumulativeUsage = {
+      inputTokens: stats.inputTokens,
+      outputTokens: stats.outputTokens,
+      cachedTokens: stats.cachedTokens,
+      cost: stats.cost,
+    };
+    this.lastInputTokens = stats.lastInputTokens;
+    this.avgTokensPerSecond = stats.avgTokensPerSecond ?? 0;
+    this.completedTurnCount = stats.completedTurnCount ?? 0;
+    this.lastTurnStats =
+      stats.ttftMs !== undefined && stats.tokensPerSecond !== undefined
+        ? { ttftMs: stats.ttftMs, tokensPerSecond: stats.tokensPerSecond }
+        : undefined;
+  }
+
+  /**
+   * The usage/stats fields of a Ready snapshot, present only when there's
+   * something to show — a fresh session's footer starts blank.
+   */
+  private statsSnapshot(): { usage?: WebviewUsage; stats?: WebviewStats } {
+    const hasUsage =
+      this.cumulativeUsage.inputTokens > 0 ||
+      this.cumulativeUsage.outputTokens > 0;
+    return {
+      ...(hasUsage ? { usage: { ...this.cumulativeUsage } } : {}),
+      // Restore the timing readouts whenever any turn has completed, even if
+      // the last turn's TTFT wasn't captured — the webview's live estimator
+      // reads the average from here, so omitting it would zero the AVG mid-turn.
+      ...(this.lastTurnStats || this.completedTurnCount > 0
+        ? {
+            stats: {
+              ttftMs: this.lastTurnStats?.ttftMs ?? 0,
+              tokensPerSecond: this.lastTurnStats?.tokensPerSecond ?? 0,
+              avgTokensPerSecond: this.avgTokensPerSecond,
+            },
+          }
+        : {}),
+    };
+  }
+
+  /**
+   * Writes the current footer metrics onto the session's persisted conversation
+   * so resuming it restores them. Best-effort — the service swallows failures.
+   */
+  private persistSessionStats(services: RuntimeServices): void {
+    const stats: SessionStats = {
+      ...this.cumulativeUsage,
+      lastInputTokens: this.lastInputTokens,
+      ...(this.lastTurnStats ? { ...this.lastTurnStats } : {}),
+      avgTokensPerSecond: this.avgTokensPerSecond,
+      completedTurnCount: this.completedTurnCount,
+    };
+    void services.chatSessionService.saveSessionStats(this.sessionId, stats);
   }
 
   private postToolActivity(event: ToolActivityEvent): void {
@@ -1277,6 +1374,7 @@ export class ChatBridge {
         const conversation =
           await this.services.chatSessionService.loadConversation(sessionId);
         this.conversation = conversation;
+        this.restoreStats(conversation);
         const resolvedFiles = await readResolvedFiles(configDir, sessionId);
         this.post({
           type: HostMessageType.Ready,
@@ -1306,6 +1404,7 @@ export class ChatBridge {
           ...(conversation.title !== undefined
             ? { sessionTitle: conversation.title }
             : {}),
+          ...this.statsSnapshot(),
         });
         return;
       } catch {
@@ -2051,11 +2150,6 @@ function toWebviewRole(role: MessageRole): WebviewRole {
     case 'system':
       return WebviewRole.System;
   }
-}
-
-function average(samples: number[]): number {
-  if (samples.length === 0) return 0;
-  return samples.reduce((sum, value) => sum + value, 0) / samples.length;
 }
 
 function truncate(text: string, limit: number): string {

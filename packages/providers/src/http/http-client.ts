@@ -234,16 +234,23 @@ export async function requestSseStream(
   let buffer = '';
   const usage: SseUsage = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
   const toolCalls = new ToolCallAccumulator();
-  // The full, verbatim SSE response as received from the provider — logged as-is
-  // so debug.log shows exactly what the provider sent, not a reconstruction.
-  let rawResponse = '';
+  // Assembled from the streamed deltas so debug.log shows the readable response
+  // (content, thinking, tool calls, usage) instead of the raw SSE transcript,
+  // which is enormous and unreadable once escaped into the log entry.
+  let content = '';
+  let thinking = '';
+  const assembledBody = (): unknown => ({
+    content,
+    ...(thinking ? { thinking } : {}),
+    toolCalls: toolCalls.toToolCalls(),
+    usage,
+  });
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
 
     const chunk = decoder.decode(value, { stream: true });
-    rawResponse += chunk;
     buffer += chunk;
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
@@ -260,7 +267,7 @@ export async function requestSseStream(
             url,
             status: response.status,
             ok: true,
-            body: rawResponse,
+            body: assembledBody(),
           },
         });
         return result;
@@ -289,12 +296,14 @@ export async function requestSseStream(
         };
         const delta = parsed.choices?.[0]?.delta;
         const deltaContent = delta?.content;
-        const thinking = delta?.reasoning ?? delta?.reasoning_content;
+        const deltaThinking = delta?.reasoning ?? delta?.reasoning_content;
         if (deltaContent) {
+          content += deltaContent;
           onToken(deltaContent);
         }
-        if (thinking) {
-          if (onThinkingToken) onThinkingToken(thinking);
+        if (deltaThinking) {
+          thinking += deltaThinking;
+          if (onThinkingToken) onThinkingToken(deltaThinking);
         }
         toolCalls.addDelta(delta?.tool_calls);
         if (parsed.usage) {
@@ -319,7 +328,7 @@ export async function requestSseStream(
       url,
       status: response.status,
       ok: true,
-      body: rawResponse,
+      body: assembledBody(),
     },
   });
   return result;
@@ -382,15 +391,22 @@ export async function requestNdjsonStream(
   // Ollama emits each tool call complete within a single message chunk (no
   // cross-chunk deltas), so we collect them as they arrive.
   const toolCalls: ToolCall[] = [];
-  // The full, verbatim NDJSON response as received — logged as-is.
-  let rawResponse = '';
+  // Assembled from the streamed chunks so debug.log shows the readable response
+  // instead of the raw NDJSON transcript.
+  let contentText = '';
+  let thinkingText = '';
+  const assembledBody = (): unknown => ({
+    content: contentText,
+    ...(thinkingText ? { thinking: thinkingText } : {}),
+    toolCalls: toolCalls.filter((call) => call.name),
+    usage,
+  });
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
 
     const chunk = decoder.decode(value, { stream: true });
-    rawResponse += chunk;
     buffer += chunk;
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
@@ -415,10 +431,12 @@ export async function requestNdjsonStream(
         const content = parsed.message?.content;
         const thinking = parsed.message?.thinking;
         if (content) {
+          contentText += content;
           onToken(content);
         }
-        if (thinking && onThinkingToken) {
-          onThinkingToken(thinking);
+        if (thinking) {
+          thinkingText += thinking;
+          if (onThinkingToken) onThinkingToken(thinking);
         }
         for (const call of parsed.message?.tool_calls ?? []) {
           const args = call.function?.arguments;
@@ -442,7 +460,7 @@ export async function requestNdjsonStream(
               url,
               status: response.status,
               ok: true,
-              body: rawResponse,
+              body: assembledBody(),
             },
           });
           return result;
@@ -456,7 +474,7 @@ export async function requestNdjsonStream(
   const result = { usage, toolCalls: toolCalls.filter((call) => call.name) };
   await logRequestResponse({
     request,
-    response: { url, status: response.status, ok: true, body: rawResponse },
+    response: { url, status: response.status, ok: true, body: assembledBody() },
   });
   return result;
 }

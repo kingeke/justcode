@@ -305,6 +305,50 @@ describe('ChatSessionService', () => {
     expect(repository.conversation.messages).toHaveLength(2);
   });
 
+  it('saves session stats onto the persisted conversation without touching messages', async () => {
+    const repository = new InMemoryConversationRepository();
+    const service = new ChatSessionService(repository, createProviderStub());
+
+    const started = await service.startSession({ sessionId: 'session-1' });
+    await service.submitMessage({
+      conversation: started.conversation,
+      model: started.activeModel,
+      content: 'Hello',
+    });
+
+    await service.saveSessionStats('session-1', {
+      inputTokens: 100,
+      outputTokens: 50,
+      cachedTokens: 20,
+      cost: 0.01,
+      lastInputTokens: 100,
+      ttftMs: 250,
+      tokensPerSecond: 40,
+      avgTokensPerSecond: 40,
+      completedTurnCount: 1,
+    });
+
+    expect(repository.conversation.stats?.inputTokens).toBe(100);
+    expect(repository.conversation.stats?.avgTokensPerSecond).toBe(40);
+    expect(repository.conversation.stats?.completedTurnCount).toBe(1);
+    expect(repository.conversation.messages).toHaveLength(2);
+  });
+
+  it('does not materialize an empty conversation just to hold stats', async () => {
+    const repository = new InMemoryConversationRepository();
+    const service = new ChatSessionService(repository, createProviderStub());
+
+    await service.saveSessionStats('session-1', {
+      inputTokens: 1,
+      outputTokens: 1,
+      cachedTokens: 0,
+      cost: 0,
+      lastInputTokens: 1,
+    });
+
+    expect(repository.conversation.stats).toBeUndefined();
+  });
+
   it('persists assistant thinking with the assistant message', async () => {
     const repository = new InMemoryConversationRepository();
     const provider: ProviderClient = {
@@ -451,7 +495,7 @@ describe('ChatSessionService', () => {
     expect(receivedCounts).toEqual([3]);
   });
 
-  it('generates and saves a session title in the background after the first turn', async () => {
+  it('generates the session title with the first turn and saves it with it', async () => {
     const repository = new InMemoryConversationRepository();
     const service = new ChatSessionService(
       repository,
@@ -462,25 +506,21 @@ describe('ChatSessionService', () => {
       sessionId: 'session-1',
     });
 
-    let resolveTitle: (title: string) => void;
-    const titlePromise = new Promise<string>((resolve) => {
-      resolveTitle = resolve;
-    });
-
+    let deliveredTitle: string | undefined;
     const result = await service.submitMessage({
       conversation: startedSession.conversation,
       model: startedSession.activeModel,
       content: 'Hello there',
-      onTitle: (_sessionId, title) => resolveTitle(title),
+      onTitle: (_sessionId, title) => {
+        deliveredTitle = title;
+      },
     });
 
-    // The turn returns immediately; the title arrives later via onTitle so it
-    // never blocks the user's next message.
-    expect(result.conversation.title).toBeUndefined();
-
-    const title = await titlePromise;
-    expect(title).toMatch(/^Project Planning$/);
-    expect(repository.conversation.title).toBe(title);
+    // The title call is awaited before the main turn (folded into the first
+    // message's wait), so the result already carries it and onTitle has fired.
+    expect(deliveredTitle).toBe('Project Planning');
+    expect(result.conversation.title).toBe('Project Planning');
+    expect(repository.conversation.title).toBe('Project Planning');
   });
 
   it('frames the title request as data and sanitizes a runaway reply', async () => {

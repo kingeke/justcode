@@ -353,6 +353,10 @@ export interface ReadyMessage {
   sessionTitle?: string | undefined;
   /** Absolute path of the workspace folder backing this session. */
   workspaceRoot: string;
+  /** Restored cumulative token usage for a resumed session's footer. */
+  usage?: WebviewUsage;
+  /** Restored timing stats (TTFT / tok/s) for a resumed session's footer. */
+  stats?: WebviewStats;
 }
 
 /** The sessions-list screen; sent on init or when the user navigates back. */

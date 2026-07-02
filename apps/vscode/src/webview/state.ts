@@ -304,8 +304,10 @@ export function reducer(state: ChatState, action: Action): ChatState {
         liveTurnItems: [],
         completedThinkingItems: [],
         error: undefined,
-        usage: undefined,
-        stats: undefined,
+        // A resumed session carries its persisted footer metrics; a fresh one
+        // resets them.
+        usage: action.usage,
+        stats: action.stats,
         autoApprove: action.autoApprove,
         expandTools: action.expandTools,
         maxReadLines: action.maxReadLines,

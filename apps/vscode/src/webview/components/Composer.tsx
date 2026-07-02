@@ -1284,7 +1284,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
             <span className="metric-value">
               {(props?.usage?.cachedTokens || 0).toLocaleString()}
             </span>
-            <span className="metric-label"> new </span>
+            <span className="metric-label"> in </span>
             <span className="metric-value">
               {Math.max(
                 (props?.usage?.inputTokens || 0) -

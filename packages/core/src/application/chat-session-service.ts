@@ -1,6 +1,7 @@
 import {
   createConversation,
   type Conversation,
+  type SessionStats,
 } from '@core/domain/conversation';
 import {
   createMessage,
@@ -126,9 +127,9 @@ export interface SubmitMessageInput {
   requestUserInput?: (request: UserQuestionRequest) => Promise<string>;
   onToolActivity?: (event: ToolActivityEvent) => void;
   /**
-   * Fired when a session title is generated in the background, after the turn
-   * has already returned. The title call runs independently so it never blocks
-   * the chat turn (and thus the user's next message).
+   * Fired as soon as a session title is generated. The title call is awaited
+   * before the main turn starts (folded into the first message's wait), so
+   * this fires before any tokens stream and the label is right from the start.
    */
   onTitle?: (sessionId: string, title: string) => void;
   /**
@@ -296,6 +297,28 @@ export class ChatSessionService {
     return this.repository.list();
   }
 
+  /**
+   * Persists the host-computed footer metrics (ctx/cost/tok-s) for a session so
+   * resuming it restores them. Re-loads the latest conversation and writes only
+   * the stats over it, so a save racing this (e.g. background title generation)
+   * can never lose messages or the title. Best-effort: stats are cosmetic, so a
+   * failure here must never surface as a turn error.
+   */
+  public async saveSessionStats(
+    sessionId: string,
+    stats: SessionStats
+  ): Promise<void> {
+    try {
+      const latest = await this.repository.load(sessionId);
+      // A missing file loads as an empty conversation; don't materialize a
+      // session on disk just to hold stats.
+      if (latest.messages.length === 0) return;
+      await this.repository.save({ ...latest, stats });
+    } catch {
+      // Ignore: losing a stats update only costs a footer readout on reload.
+    }
+  }
+
   public async submitMessage(
     input: SubmitMessageInput
   ): Promise<SubmitMessageResult> {
@@ -393,22 +416,46 @@ export class ChatSessionService {
     let usage: TokenUsage | undefined;
     let reply = '';
 
-    // Title generation is a separate, short model call. Fire it *before* the main
-    // turn so the name request goes out first and resolves in parallel — not
-    // after the whole turn (and any tool round-trips) finishes. Only the model
-    // call runs now; persisting the result is deferred until after this turn's own
-    // save (below), so a fast title can never clobber the messages this turn is
-    // about to write. Left undefined when the session is already titled/in-flight.
-    let titlePromise: Promise<string | undefined> | undefined;
+    // Title generation is a separate, short model call, awaited *before* the
+    // main turn: the user is already waiting on their first message, so folding
+    // the title into that wait makes it appear with the response instead of
+    // trickling in later. The title then rides on this turn's own save — no
+    // out-of-band persist that could race it.
+    let generatedTitle: string | undefined;
     if (
       !input.conversation.title &&
       !this.titledSessions.has(input.conversation.sessionId)
     ) {
       this.titledSessions.add(input.conversation.sessionId);
-      titlePromise = this.generateSessionTitle({
+      // A title may already be on disk that this in-memory copy predates (e.g.
+      // written out of band by another window) — reuse it over regenerating.
+      try {
+        const persisted = await this.repository.load(
+          input.conversation.sessionId
+        );
+        generatedTitle = persisted.title;
+      } catch {
+        // Unreadable — fall through to generating one.
+      }
+      generatedTitle ??= await this.generateSessionTitle({
         model: input.model,
         userMessage: trimmedContent,
+        // A reasoning model burns seconds (and tokens) deliberating over a
+        // 5-word title, which would stall the whole turn behind it. When the
+        // main turn runs with reasoning, explicitly disable it for the title
+        // call. Only then — `'off'` is a wire-level disable that must not be
+        // sent to models that don't reason at all.
+        disableReasoning: input.reasoningEffort !== undefined,
+        // Let the user's cancel tear the title call down with the turn.
+        ...(input.signal ? { signal: input.signal } : {}),
       });
+      if (generatedTitle) {
+        // Surface it immediately so the label updates while the turn streams.
+        input.onTitle?.(input.conversation.sessionId, generatedTitle);
+      } else {
+        // Let a later turn retry rather than leaving the session untitled.
+        this.titledSessions.delete(input.conversation.sessionId);
+      }
     }
 
     // The agent keeps taking tool-call turns until the model stops asking for
@@ -571,6 +618,9 @@ export class ChatSessionService {
 
     const updatedConversation: Conversation = {
       ...input.conversation,
+      ...(generatedTitle && !input.conversation.title
+        ? { title: generatedTitle }
+        : {}),
       messages: working,
       updatedAt: new Date().toISOString(),
     };
@@ -593,18 +643,6 @@ export class ChatSessionService {
     }
 
     await this.repository.save(updatedConversation);
-
-    // The title call was kicked off before the turn; now that this turn's
-    // messages are on disk, persist the title without clobbering them. Runs off
-    // the critical path so it never delays the turn result, and is delivered via
-    // onTitle once ready.
-    if (titlePromise) {
-      void this.persistSessionTitle({
-        sessionId: updatedConversation.sessionId,
-        titlePromise,
-        ...(input.onTitle ? { onTitle: input.onTitle } : {}),
-      });
-    }
 
     return {
       conversation: updatedConversation,
@@ -745,45 +783,17 @@ export class ChatSessionService {
     }
   }
 
-  /**
-   * Awaits a title model call that was fired at the start of the turn, then
-   * persists the result off the critical path without clobbering any newer
-   * messages: it re-loads the latest conversation and only sets the title if one
-   * still hasn't been assigned. Called after the turn's own save, so the reload
-   * always sees this turn's messages.
-   */
-  private async persistSessionTitle(input: {
-    sessionId: string;
-    titlePromise: Promise<string | undefined>;
-    onTitle?: (sessionId: string, title: string) => void;
-  }): Promise<void> {
-    const title = await input.titlePromise;
-    if (!title) {
-      // Let a later turn retry, matching the original retry-on-failure behavior.
-      this.titledSessions.delete(input.sessionId);
-      return;
-    }
-
-    try {
-      const latest = await this.repository.load(input.sessionId);
-      if (latest.title) return;
-      await this.repository.save({ ...latest, title });
-    } catch {
-      // The session may have been cleared/reset before the title resolved.
-      this.titledSessions.delete(input.sessionId);
-      return;
-    }
-
-    input.onTitle?.(input.sessionId, title);
-  }
-
   private async generateSessionTitle(input: {
     model: string;
     userMessage: string;
+    disableReasoning: boolean;
+    signal?: AbortSignal;
   }): Promise<string | undefined> {
     try {
       const result = await this.provider.sendChat({
         model: input.model,
+        ...(input.disableReasoning ? { reasoningEffort: 'off' as const } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
         messages: [
           createMessage('system', SESSION_TITLE_SYSTEM_PROMPT),
           createMessage(

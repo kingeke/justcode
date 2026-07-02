@@ -216,14 +216,11 @@ export class AnthropicProvider implements ProviderClient {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    // The full, verbatim SSE response as received from Anthropic — logged as-is.
-    let rawResponse = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value, { stream: true });
-      rawResponse += chunk;
       buffer += chunk;
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
@@ -248,9 +245,16 @@ export class AnthropicProvider implements ProviderClient {
         headers: requestOptions.headers as Record<string, string>,
         body,
       },
-      // Log the full, verbatim provider response (raw SSE), not the
-      // reconstructed result, so debug.log shows exactly what came back.
-      response: { url, status: response.status, ok: true, body: rawResponse },
+      // Log the reconstructed result (plus streamed thinking) rather than the
+      // raw SSE transcript, which is enormous and unreadable once escaped.
+      response: {
+        url,
+        status: response.status,
+        ok: true,
+        body: accumulator.reasoning
+          ? { ...result, reasoning: accumulator.reasoning }
+          : result,
+      },
     });
     return result;
   }
@@ -304,6 +308,11 @@ class AnthropicStreamAccumulator {
     private readonly onToken?: (token: string) => void,
     private readonly onThinkingToken?: (token: string) => void
   ) {}
+
+  /** The model's streamed thinking, kept for debug logging alongside the result. */
+  public get reasoning(): string {
+    return this.thinking;
+  }
 
   public handle(event: {
     type?: string;
