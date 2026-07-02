@@ -46,6 +46,13 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    # Named environments make each publish target show up in the repo's
+    # Deployments panel (which otherwise only lists github-pages). Purely
+    # informational — no protection rules — but they also become the place to
+    # scope secrets or add approval gates later.
+    environment:
+      name: github-release
+      url: https://github.com/kingeke/justcode/releases/tag/${{ github.ref_name }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -68,6 +75,9 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    environment:
+      name: homebrew
+      url: https://github.com/kingeke/homebrew-justcode
     steps:
       - name: Build the formula and push it to the tap
         env:
@@ -157,6 +167,9 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/justcode-cli
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -178,6 +191,9 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    environment:
+      name: vscode-marketplace
+      url: https://marketplace.visualstudio.com/items?itemName=kingeke.justcode-vscode
     permissions:
       contents: write
     env:

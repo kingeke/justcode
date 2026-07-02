@@ -7,6 +7,14 @@
 </p>
 
 <p align="center">
+  <a href="https://www.npmjs.com/package/justcode-cli"><img src="https://img.shields.io/npm/v/justcode-cli?label=npm" alt="npm version" /></a>
+  <a href="https://github.com/kingeke/justcode/actions/workflows/ci.yml"><img src="https://github.com/kingeke/justcode/actions/workflows/ci.yml/badge.svg" alt="build status" /></a>
+  <a href="https://github.com/kingeke/justcode/actions/workflows/release.yml"><img src="https://github.com/kingeke/justcode/actions/workflows/release.yml/badge.svg" alt="release status" /></a>
+  <a href="https://github.com/kingeke/justcode/releases/latest"><img src="https://img.shields.io/github/v/release/kingeke/justcode?label=release" alt="latest release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license" /></a>
+</p>
+
+<p align="center">
   <a href="https://justcodeapp.dev/">Website</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="release.md">Releasing</a> ·
