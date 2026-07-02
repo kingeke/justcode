@@ -938,6 +938,31 @@ textarea:focus {
   border-bottom: 1px solid var(--vscode-panel-border, transparent);
 }
 
+.sessions-search {
+  padding: 8px 12px 0;
+}
+
+.sessions-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-input-border, rgba(127, 127, 127, 0.35));
+  border-radius: 4px;
+  padding: 4px 8px;
+  font: inherit;
+  background: var(--vscode-input-background, transparent);
+  color: var(--vscode-input-foreground, inherit);
+}
+
+.sessions-search-input:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder, rgba(127, 127, 127, 0.6));
+}
+
+.sessions-search-input::placeholder {
+  color: var(--vscode-input-placeholderForeground, inherit);
+  opacity: 0.6;
+}
+
 .sessions-title {
   font-weight: 600;
   font-size: 13px;

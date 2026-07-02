@@ -100,7 +100,7 @@ export function SessionPicker({
         sessions,
         query,
         (session) =>
-          `${session.sessionId} ${session.createdAt} ${session.updatedAt} ${session.messageCount}`
+          `${session.title ?? ''} ${session.sessionId} ${session.createdAt} ${session.updatedAt} ${session.messageCount}`
       ),
     [query, sessions]
   );

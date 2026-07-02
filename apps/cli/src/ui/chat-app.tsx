@@ -1142,23 +1142,32 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
   const renderer = useRenderer();
 
-  // Transient "Copied" toast shown bottom-right after a selection is copied.
+  // Transient "Copied" flash shown in the status line after a selection copies.
   const [copiedNotice, setCopiedNotice] = useState(false);
   const copiedNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
 
   // Copy text as soon as the user finishes highlighting it with the mouse
-  // (the "selection" event fires once on mouse-up). Prefers OSC52 (works over
-  // SSH) and falls back to the platform's native clipboard CLI. We keep the
-  // highlight visible — copying is a side effect, not a selection change.
+  // (the "selection" event fires once on mouse-up). We keep the highlight
+  // visible — copying is a side effect, not a selection change.
   useSelectionHandler((selection) => {
     const selectedText = selection.getSelectedText();
     if (!selectedText.trim()) return;
 
-    if (!renderer.copyToClipboardOSC52(selectedText)) {
-      copyToClipboard(selectedText);
-    }
+    // Over SSH the platform clipboard CLI writes the *remote* machine's
+    // clipboard, so OSC52 — which the terminal relays to the local one — is
+    // the only path that reaches the user. Locally it's the opposite: some
+    // terminals (macOS Terminal.app among them) silently discard OSC52 while
+    // emitting it still "succeeds", so the native CLI is authoritative and
+    // OSC52 is only the fallback.
+    const overSsh = Boolean(process.env.SSH_TTY ?? process.env.SSH_CONNECTION);
+    const copied = overSsh
+      ? renderer.copyToClipboardOSC52(selectedText) ||
+        copyToClipboard(selectedText)
+      : copyToClipboard(selectedText) ||
+        renderer.copyToClipboardOSC52(selectedText);
+    if (!copied) return;
 
     setCopiedNotice(true);
     if (copiedNoticeTimerRef.current) {
@@ -2859,6 +2868,24 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       // component draws, so a full-size root box is what actually covers it).
       backgroundColor={APP_BG}
       padding={1}
+      // Clicking anywhere in the app puts the caret back in the prompt, so
+      // typing resumes without hunting for the input. On mouse-up (bubbled from
+      // whatever was clicked) rather than mouse-down so it never fights a
+      // child's own click handling, and skipped in the modes that deliberately
+      // steer focus away from the prompt (browse/queue-edit/approval).
+      onMouseUp={() => {
+        if (
+          browseIndex !== null ||
+          queueEditIndex !== null ||
+          pendingApproval !== null
+        ) {
+          return;
+        }
+        const area = promptAreaRef.current;
+        if (area && !area.isDestroyed && !area.focused) {
+          area.focus();
+        }
+      }}
     >
       <box flexDirection="column" flexShrink={0}>
         <text
@@ -3447,7 +3474,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           <text content={metricsLineContent(metrics, activeModelInfo)} />
         </box>
         <box marginTop={1} flexDirection="row" justifyContent="flex-end">
-          {displayStats ? (
+          {/* The copied flash briefly takes over the notification slot, then the
+              usual stats/status content returns when the timer clears it. */}
+          {copiedNotice ? (
+            <text content={statusLineContent('✓ Copied to clipboard')} />
+          ) : displayStats ? (
             <text
               content={
                 new StyledText([
@@ -3472,18 +3503,6 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           </box>
         ) : null}
       </box>
-
-      {copiedNotice ? (
-        <box
-          position="absolute"
-          bottom={1}
-          right={2}
-          paddingX={1}
-          backgroundColor="#1f6f43"
-        >
-          <text fg="white">✓ Copied</text>
-        </box>
-      ) : null}
     </box>
   );
 }

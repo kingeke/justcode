@@ -33,6 +33,19 @@ export function SessionsView({
   onClearAll,
   onNewSession,
 }: SessionsViewProps): React.JSX.Element {
+  const [query, setQuery] = React.useState('');
+
+  // Case-insensitive substring match on the title (falling back to the id for
+  // untitled sessions), mirroring what the row itself displays.
+  const trimmedQuery = query.trim().toLowerCase();
+  const filteredSessions = trimmedQuery
+    ? sessions.filter((session) =>
+        `${session.title ?? 'New chat'} ${session.sessionId}`
+          .toLowerCase()
+          .includes(trimmedQuery)
+      )
+    : sessions;
+
   return (
     <div className="sessions-view">
       <div className="sessions-header">
@@ -69,13 +82,25 @@ export function SessionsView({
         </div>
       </div>
 
+      <div className="sessions-search">
+        <input
+          type="text"
+          className="sessions-search-input"
+          placeholder="Search sessions…"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </div>
+
       <div className="sessions-list">
         {loading ? (
           <div className="sessions-empty">Loading…</div>
         ) : sessions.length === 0 ? (
           <div className="sessions-empty">No sessions yet.</div>
+        ) : filteredSessions.length === 0 ? (
+          <div className="sessions-empty">No sessions match “{query}”.</div>
         ) : (
-          sessions.map((session) => (
+          filteredSessions.map((session) => (
             <div key={session.sessionId} className="session-row">
               <button
                 type="button"
