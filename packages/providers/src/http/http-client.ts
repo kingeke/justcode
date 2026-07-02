@@ -1,5 +1,6 @@
 import type { ToolCall } from '@core/domain/message';
 import { logRequestResponse } from '@core/application/debug-log';
+import { appUserAgent } from '@core/version';
 import { sanitizeToolCallName } from '@providers/openai-compatible/openai-wire';
 
 export class HttpError extends Error {
@@ -67,6 +68,7 @@ export async function requestJson<T>(
     method: options.method ?? 'GET',
     headers: {
       'content-type': 'application/json',
+      'user-agent': appUserAgent(),
       ...options.headers,
     },
     signal: options.signal
@@ -190,6 +192,7 @@ export async function requestSseStream(
     headers: {
       'content-type': 'application/json',
       accept: 'text/event-stream',
+      'user-agent': appUserAgent(),
       ...options.headers,
     },
     ...(options.signal ? { signal: options.signal } : {}),
@@ -345,6 +348,7 @@ export async function requestNdjsonStream(
     method: options.method ?? 'POST',
     headers: {
       'content-type': 'application/json',
+      'user-agent': appUserAgent(),
       ...options.headers,
     },
     ...(options.signal ? { signal: options.signal } : {}),
