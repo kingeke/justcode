@@ -2,7 +2,7 @@
 
 [![build status](https://github.com/kingeke/justcode/actions/workflows/ci.yml/badge.svg)](https://github.com/kingeke/justcode/actions/workflows/ci.yml)
 [![release status](https://github.com/kingeke/justcode/actions/workflows/release.yml/badge.svg)](https://github.com/kingeke/justcode/actions/workflows/release.yml)
-[![latest release](https://img.shields.io/github/v/release/kingeke/justcode?label=release)](https://github.com/kingeke/justcode/releases/latest)
+[![latest release](https://img.shields.io/github/v/release/kingeke/justcode?label=release&sort=semver)](https://github.com/kingeke/justcode/releases/latest)
 [![MIT license](https://img.shields.io/badge/license-MIT-green)](https://github.com/kingeke/justcode/blob/main/LICENSE)
 
 **A lean, transparent coding assistant in your sidebar — where _you_ control
