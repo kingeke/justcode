@@ -84,7 +84,8 @@ body {
      the whole transcript a horizontal scrollbar. Clip instead — code blocks keep
      their own internal scroll, and prose wraps. */
   overflow-x: hidden;
-  padding: 8px;
+  /* Extra right padding keeps content off the vertical scrollbar. */
+  padding: 8px 14px 8px 8px;
   min-width: 0;
 }
 
