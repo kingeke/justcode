@@ -26,7 +26,7 @@ export function ChangesPanel({
   onUndo,
   onKeepAll,
   onUndoAll,
-  onOpenFile,
+  onOpenDiff,
 }: {
   files: ChangedFile[];
   error?: string | undefined;
@@ -34,7 +34,7 @@ export function ChangesPanel({
   onUndo: (file: ChangedFile) => void;
   onKeepAll: () => void;
   onUndoAll: () => void;
-  onOpenFile: (path: string) => void;
+  onOpenDiff: (file: ChangedFile) => void;
 }): React.JSX.Element | null {
   const [collapsed, setCollapsed] = React.useState(false);
   const [expanded, setExpanded] = React.useState<string | null>(null);
@@ -125,9 +125,9 @@ export function ChangesPanel({
                     className="changes-name changes-name-link"
                     onClick={(event) => {
                       event.stopPropagation();
-                      onOpenFile(file.path);
+                      onOpenDiff(file);
                     }}
-                    title={`Open ${file.path}`}
+                    title={`Open diff for ${file.path}`}
                   >
                     {basename(file.path)}
                   </button>

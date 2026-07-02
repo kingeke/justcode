@@ -524,6 +524,15 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.OpenFile, path });
   };
 
+  const openDiff = (file: ChangedFile): void => {
+    postToHost({
+      type: WebviewMessageType.OpenDiff,
+      path: file.path,
+      baseline: file.baseline,
+      created: file.created,
+    });
+  };
+
   const openMcpConfig = (): void => {
     postToHost({ type: WebviewMessageType.OpenMcpConfig });
   };
@@ -845,7 +854,7 @@ export function App(): React.JSX.Element {
         onUndo={undoFile}
         onKeepAll={keepAllFiles}
         onUndoAll={undoAllFiles}
-        onOpenFile={openFile}
+        onOpenDiff={openDiff}
       />
 
       {state.queuedMessages.length > 0 ? (

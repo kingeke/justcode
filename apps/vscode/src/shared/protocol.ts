@@ -66,6 +66,7 @@ export enum WebviewMessageType {
   OpenSettings = 'openSettings',
   RevertFile = 'revertFile',
   OpenFile = 'openFile',
+  OpenDiff = 'openDiff',
   OpenMcpConfig = 'openMcpConfig',
   ViewChatLog = 'viewChatLog',
   SaveResolvedFiles = 'saveResolvedFiles',
@@ -769,6 +770,21 @@ export interface OpenFileMessage {
 }
 
 /**
+ * The user clicked a changed file's name in the changes panel to open VSCode's
+ * native side-by-side diff editor: `baseline` (pre-session content) on the left
+ * against the current on-disk file on the right.
+ */
+export interface OpenDiffMessage {
+  type: WebviewMessageType.OpenDiff;
+  /** Workspace-relative path to diff. */
+  path: string;
+  /** Pre-session baseline content shown on the diff's left side. */
+  baseline: string;
+  /** True when the file was created this session, so the baseline is empty. */
+  created: boolean;
+}
+
+/**
  * The user chose "Configure MCP servers" in the manage-tools popup. The host
  * seeds `mcp.json` in the cache directory if absent and opens it in the editor.
  */
@@ -837,4 +853,5 @@ export type WebviewToHost =
   | RequestWorkspaceFilesMessage
   | RequestFileSymbolsMessage
   | OpenFileMessage
+  | OpenDiffMessage
   | OpenMcpConfigMessage;

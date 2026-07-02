@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 import { APP_NAME } from '@core/branding';
 import { ChatBridge } from '@ext/host/chat-bridge';
+import { DiffBaselineProvider } from '@ext/host/diff-baseline-provider';
 import { SettingsPanel } from '@ext/host/settings-panel';
 import { WebviewMessageType, type WebviewToHost } from '@ext/shared/protocol';
 
@@ -40,6 +41,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [mediaUri],
     };
 
+    const baselineProvider = new DiffBaselineProvider();
+    const baselineSub = vscode.workspace.registerTextDocumentContentProvider(
+      DiffBaselineProvider.scheme,
+      baselineProvider
+    );
+
     const bridge = new ChatBridge(
       (message) => {
         // postMessage is fire-and-forget; ignore the returned promise.
@@ -60,6 +67,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         void vscode.window.showTextDocument(vscode.Uri.file(absolutePath), {
           preview: false,
         });
+      },
+      (absolutePath, relativePath, baseline, created) => {
+        baselineProvider.setBaseline(relativePath, baseline);
+        const left = DiffBaselineProvider.uriFor(relativePath);
+        const right = vscode.Uri.file(absolutePath);
+        const name = relativePath.split('/').pop() ?? relativePath;
+        const title = created
+          ? `${name} (created)`
+          : `${name} (baseline ↔ current)`;
+        void vscode.commands.executeCommand('vscode.diff', left, right, title);
       }
     );
     this.bridge = bridge;
@@ -82,6 +99,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.onDidDispose(() => {
       activeEditorSub.dispose();
+      baselineSub.dispose();
+      baselineProvider.dispose();
       bridge.dispose();
       if (this.bridge === bridge) {
         this.bridge = undefined;

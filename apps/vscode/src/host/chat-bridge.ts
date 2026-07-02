@@ -207,7 +207,18 @@ export class ChatBridge {
      */
     private readonly onOpenSettings?: (section?: SettingsSection) => void,
     /** Opens a workspace file in the editor; injected by the view provider. */
-    private readonly onOpenFile?: (absolutePath: string) => void
+    private readonly onOpenFile?: (absolutePath: string) => void,
+    /**
+     * Opens VSCode's native diff editor for a changed file: `baseline`
+     * (pre-session content) against the current on-disk file. Injected by the
+     * view provider.
+     */
+    private readonly onOpenDiff?: (
+      absolutePath: string,
+      relativePath: string,
+      baseline: string,
+      created: boolean
+    ) => void
   ) {
     // The extension host's cwd isn't the workspace, and anchoring to the
     // workspace root would scatter a debug.log into every project (and force the
@@ -325,6 +336,9 @@ export class ChatBridge {
         return;
       case WebviewMessageType.OpenFile:
         this.openFile(message.path);
+        return;
+      case WebviewMessageType.OpenDiff:
+        this.openDiff(message.path, message.baseline, message.created);
         return;
       case WebviewMessageType.OpenMcpConfig:
         // Open the Settings tab's MCP section, where the user edits mcp.json in a
@@ -1597,6 +1611,19 @@ export class ChatBridge {
     const rel = relative(this.workspaceRoot, target);
     if (rel.startsWith('..') || isAbsolute(rel)) return;
     this.onOpenFile?.(target);
+  }
+
+  /**
+   * Opens VSCode's native diff editor for a changed file: the pre-session
+   * `baseline` against the current on-disk file. The path is workspace-relative
+   * and is resolved + bounds-checked mirroring {@link openFile}, so a malformed
+   * path can't diff something outside the workspace.
+   */
+  private openDiff(path: string, baseline: string, created: boolean): void {
+    const target = resolve(this.workspaceRoot, path);
+    const rel = relative(this.workspaceRoot, target);
+    if (rel.startsWith('..') || isAbsolute(rel)) return;
+    this.onOpenDiff?.(target, path, created ? '' : baseline, created);
   }
 
   private async selectProvider(providerId: string): Promise<void> {
