@@ -1,5 +1,3 @@
-NEVER read entire repositories by default.
-
 Always:
 
 - Search first.
