@@ -649,13 +649,14 @@ export class ChatSessionService {
         if (call.name === ToolName.LazyLoadTools) {
           gatewayCalledThisTurn = true;
         }
-        if (call.name === ToolName.LazyLoadTools && lazyToolLoadingEnabled) {
-          // The gateway may have toggled tools on or off: re-derive the
+        if (lazyToolLoadingEnabled) {
+          // The active set may have changed — a gateway toggle, or an implicit
+          // enable from calling a catalog tool directly. Re-derive the
           // advertised set (minus any tool the user has turned off) so the
           // change reaches the very next model request of this same turn. The
           // gateway itself stays in the set so the model can keep toggling.
-          // (With lazy loading off everything is already advertised — a stray
-          // gateway call must not shrink the set to just the toggled tools.)
+          // (With lazy loading off everything is already advertised — nothing
+          // here may shrink the set to just the toggled tools.)
           toolDefinitions = withoutDisabledTools(lazyAdvertisedDefinitions());
           toolsEnabled =
             toolDefinitions.length > 0 &&
@@ -726,7 +727,21 @@ export class ChatSessionService {
     throwIfAborted(input.signal);
     const tool = this.toolRegistry?.get(call.name);
     if (!tool) {
-      return { content: `Unknown tool: ${call.name}`, isError: true };
+      // Name the callable tools so a small model can self-correct: given only
+      // "Unknown tool", gpt-oss retried the same mangled name and gave up.
+      const disabled = new Set(this.getDisabledToolNames());
+      const available = (this.toolRegistry?.list() ?? [])
+        .map((registered) => registered.definition.name)
+        .filter(
+          (name) => name !== ToolName.LazyLoadTools && !disabled.has(name)
+        );
+      return {
+        content:
+          available.length > 0
+            ? `Unknown tool: ${call.name}. Available tools: ${available.join(', ')}. Call one of them by its exact name.`
+            : `Unknown tool: ${call.name}`,
+        isError: true,
+      };
     }
     // The tool was advertised on an earlier turn but the user has since turned it
     // off: refuse rather than run it, and tell the model it's no longer available.
@@ -735,6 +750,13 @@ export class ChatSessionService {
         content: `The ${call.name} tool is currently disabled and cannot be used.`,
         isError: true,
       };
+    }
+    // Calling a real tool directly is an implicit enable: small models often
+    // skip the gateway's {"enable": [...]} round trip and call a catalog name
+    // straight away. Honor that — run the call and mark the tool active so its
+    // full schema is advertised for the rest of the session.
+    if (call.name !== ToolName.LazyLoadTools) {
+      activeToolNames.add(call.name);
     }
 
     const effectiveToolName = call.name;
@@ -865,7 +887,7 @@ export class ChatSessionService {
       const active = catalog.filter((name) => activeToolNames.has(name));
       return {
         content: [
-          'Available tools. Call lazy_load_tools again with {"enable": ["name", …]} to make the ones you need callable; use {"disable": [...]} for tools you no longer need.',
+          'Available tools. Call any of them directly by its exact name (calling a tool activates it), or call lazy_load_tools again with {"enable": ["name", …]} to activate several at once; use {"disable": [...]} for tools you no longer need.',
           JSON.stringify(catalog),
           ...(active.length > 0 ? [`Active: ${active.join(', ')}.`] : []),
         ].join('\n'),

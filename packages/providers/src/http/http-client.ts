@@ -1,5 +1,6 @@
 import type { ToolCall } from '@core/domain/message';
 import { logRequestResponse } from '@core/application/debug-log';
+import { sanitizeToolCallName } from '@providers/openai-compatible/openai-wire';
 
 export class HttpError extends Error {
   public constructor(
@@ -171,7 +172,7 @@ class ToolCallAccumulator {
       .sort(([left], [right]) => left - right)
       .map(([index, call]) => ({
         id: call.id || `call_${index}`,
-        name: call.name,
+        name: sanitizeToolCallName(call.name),
         arguments: call.arguments,
       }))
       .filter((call) => call.name);

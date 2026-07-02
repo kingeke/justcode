@@ -86,6 +86,20 @@ export interface RawOpenAiToolCall {
   function?: { name?: string; arguments?: string };
 }
 
+/**
+ * Strips the artifacts gpt-oss's harmony format leaks into tool-call names when
+ * the upstream server doesn't parse it fully: a `<|channel|>commentary`-style
+ * suffix (`glob<|channel|>commentary`) and a `functions.` namespace prefix
+ * (`functions.glob`). Without this the agentic loop's exact-name registry
+ * lookup fails with "Unknown tool" even though the model picked a real tool.
+ */
+export function sanitizeToolCallName(name: string): string {
+  const withoutChannel = name.split('<|')[0] ?? '';
+  return withoutChannel.startsWith('functions.')
+    ? withoutChannel.slice('functions.'.length)
+    : withoutChannel;
+}
+
 /** Parse `message.tool_calls` from a non-streaming completion response. */
 export function parseOpenAiToolCalls(
   raw: RawOpenAiToolCall[] | undefined
@@ -97,7 +111,7 @@ export function parseOpenAiToolCalls(
   return raw
     .map((toolCall, index) => ({
       id: toolCall.id ?? `call_${index}`,
-      name: toolCall.function?.name ?? '',
+      name: sanitizeToolCallName(toolCall.function?.name ?? ''),
       arguments: toolCall.function?.arguments ?? '',
     }))
     .filter((toolCall) => toolCall.name);

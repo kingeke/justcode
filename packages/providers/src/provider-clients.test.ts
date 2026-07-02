@@ -260,6 +260,82 @@ describe('provider clients', () => {
     expect(responsesBody.tools?.length).toBe(1);
   });
 
+  it('falls back to the reasoning channel when an OpenRouter stream has no content', async () => {
+    // Reasoning models (e.g. gpt-oss, GLM) sometimes emit their whole turn on
+    // the reasoning channel and finish with empty content — that must become
+    // the answer, not an "empty response" error.
+    const sseBody = [
+      'data: {"choices":[{"delta":{"reasoning":"thought-only answer"}}]}',
+      '',
+      'data: {"choices":[{"delta":{}}],"usage":{"prompt_tokens":5,"completion_tokens":2}}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n');
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(sseBody, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new OpenRouterProvider('test-api-key').sendChat({
+      model: 'z-ai/glm-5.2',
+      messages: [userMessage('hey')],
+      onToken: () => {},
+    });
+
+    expect(result.content).toBe('thought-only answer');
+  });
+
+  it('sanitizes harmony-mangled tool-call names in a streamed response', async () => {
+    // gpt-oss via OpenRouter leaks `<|channel|>commentary` into the streamed
+    // function name when the upstream doesn't parse the harmony format fully.
+    const sseBody = [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"glob<|channel|>commentary","arguments":"{\\"pattern\\":\\"**/*\\"}"}}]}}]}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n');
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(sseBody, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new OpenRouterProvider('test-api-key').sendChat({
+      model: 'openai/gpt-oss-20b',
+      messages: [userMessage('list files')],
+      onToken: () => {},
+    });
+
+    expect(result.toolCalls).toEqual([
+      { id: 'call-1', name: 'glob', arguments: '{"pattern":"**/*"}' },
+    ]);
+  });
+
+  it('falls back to message.reasoning when a non-streamed OpenRouter response has no content', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      createJsonResponse({
+        choices: [
+          { message: { content: '', reasoning: 'thought-only answer' } },
+        ],
+        usage: { prompt_tokens: 5, completion_tokens: 2 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new OpenRouterProvider('test-api-key').sendChat({
+      model: 'z-ai/glm-5.2',
+      messages: [userMessage('hey')],
+    });
+
+    expect(result.content).toBe('thought-only answer');
+  });
+
   it('writes request and response logs to debug.log', async () => {
     // Logging defaults to off (production-safe); turn it on for this assertion.
     setDebugLoggingEnabled(true);

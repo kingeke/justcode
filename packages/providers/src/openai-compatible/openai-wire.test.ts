@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { createMessage } from '@core/domain/message';
-import { toOpenAiWireMessages } from './openai-wire.js';
+import {
+  parseOpenAiToolCalls,
+  sanitizeToolCallName,
+  toOpenAiWireMessages,
+} from './openai-wire.js';
 
 describe('toOpenAiWireMessages with images', () => {
   it('builds multi-part content with a data-URI image_url part', () => {
@@ -27,5 +31,34 @@ describe('toOpenAiWireMessages with images', () => {
   it('keeps the plain string form when there are no images', () => {
     const [wire] = toOpenAiWireMessages([createMessage('user', 'hello')]);
     expect(wire?.content).toBe('hello');
+  });
+});
+
+describe('sanitizeToolCallName', () => {
+  it('strips harmony channel suffixes and functions. prefixes gpt-oss leaks', () => {
+    // Observed on the wire from gpt-oss via OpenRouter: the upstream server
+    // doesn't fully parse the harmony format out of the function name.
+    expect(sanitizeToolCallName('glob<|channel|>commentary')).toBe('glob');
+    expect(sanitizeToolCallName('functions.glob')).toBe('glob');
+    expect(sanitizeToolCallName('functions.glob<|channel|>commentary')).toBe(
+      'glob'
+    );
+    expect(sanitizeToolCallName('glob')).toBe('glob');
+  });
+
+  it('is applied when parsing non-streaming tool calls', () => {
+    const calls = parseOpenAiToolCalls([
+      {
+        id: 'call-1',
+        function: {
+          name: 'bash<|channel|>commentary',
+          arguments: '{"command":"ls"}',
+        },
+      },
+    ]);
+
+    expect(calls).toEqual([
+      { id: 'call-1', name: 'bash', arguments: '{"command":"ls"}' },
+    ]);
   });
 });

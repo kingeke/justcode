@@ -54,6 +54,8 @@ interface OpenRouterChatResponse {
   choices?: Array<{
     message?: {
       content?: string;
+      /** The reasoning-channel text, for models that stream/return thinking. */
+      reasoning?: string;
       tool_calls?: RawOpenAiToolCall[];
     };
   }>;
@@ -108,6 +110,7 @@ export class OpenRouterProvider implements ProviderClient {
 
     if (request.onToken) {
       let accumulated = '';
+      let streamedReasoning = '';
       const { usage: streamUsage, toolCalls } = await requestSseStream(
         joinUrl(this.baseUrl, '/chat/completions'),
         {
@@ -128,15 +131,23 @@ export class OpenRouterProvider implements ProviderClient {
           accumulated += token;
           request.onToken!(token);
         },
-        request.onThinkingToken
+        (token) => {
+          streamedReasoning += token;
+          request.onThinkingToken?.(token);
+        }
       );
 
-      if (!accumulated.trim() && toolCalls.length === 0) {
+      // Reasoning models (e.g. gpt-oss, GLM) sometimes emit their whole turn on
+      // the reasoning channel and finish with empty content. Treat the reasoning
+      // as the answer rather than failing the turn (mirrors the OpenAI-compatible
+      // provider).
+      const content = accumulated.trim() ? accumulated : streamedReasoning;
+      if (!content.trim() && toolCalls.length === 0) {
         throw new Error(`Provider 'openrouter' returned an empty response.`);
       }
 
       return {
-        content: accumulated,
+        content,
         ...(streamUsage.inputTokens > 0 ? { usage: streamUsage } : {}),
         ...(toolCalls.length ? { toolCalls } : {}),
       };
@@ -183,6 +194,13 @@ export class OpenRouterProvider implements ProviderClient {
 
     if (toolCalls.length) {
       return { content: '', ...extraSpread };
+    }
+
+    // Same reasoning-as-answer fallback as the streaming branch, for models
+    // that put their whole turn on the reasoning channel.
+    const reasoningContent = response.choices?.[0]?.message?.reasoning;
+    if (typeof reasoningContent === 'string' && reasoningContent.trim()) {
+      return { content: reasoningContent, ...extraSpread };
     }
 
     throw new Error(`Provider 'openrouter' returned an empty response.`);

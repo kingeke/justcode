@@ -33,9 +33,10 @@ export class LazyLoadToolsTool implements Tool {
     name: ToolName.LazyLoadTools,
     description:
       'Discover and activate tools. Call with no arguments to list every ' +
-      'available tool by name (as JSON). Call with ' +
-      '{"enable": ["name", …]} to make specific tools callable on later ' +
-      'requests, and {"disable": ["name", …]} to drop tools you no longer ' +
+      'available tool by name (as JSON); any listed tool can then be called ' +
+      'directly by its exact name (calling it activates it). Call with ' +
+      '{"enable": ["name", …]} to activate several tools at once, and ' +
+      '{"disable": ["name", …]} to drop tools you no longer ' +
       'need so requests stay small. Only enable tools you actually intend ' +
       'to call. Do not call this for normal conversation, explanation, or ' +
       'reasoning-only tasks.',
@@ -85,7 +86,7 @@ export class LazyLoadToolsTool implements Tool {
       const catalog = this.availableTools.map((tool) => tool.name);
       return {
         content: [
-          'Available tools. Call lazy_load_tools again with {"enable": ["name", …]} to make the ones you need callable; use {"disable": [...]} for tools you no longer need.',
+          'Available tools. Call any of them directly by its exact name (calling a tool activates it), or call lazy_load_tools again with {"enable": ["name", …]} to activate several at once; use {"disable": [...]} for tools you no longer need.',
           JSON.stringify(catalog),
         ].join('\n'),
       };

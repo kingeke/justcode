@@ -1415,6 +1415,138 @@ describe('ChatSessionService', () => {
     ]);
   });
 
+  it('treats a direct call of a catalog tool as an implicit enable', async () => {
+    const repository = new InMemoryConversationRepository();
+    const delegatedTool = new RecordingWriteTool();
+    const lazyLoadTool = new LazyLoadToolsTool([
+      {
+        ...delegatedTool.definition,
+        requiresApproval: delegatedTool.requiresApproval,
+      },
+    ]);
+    const seenRequests: Array<ChatRequest['tools']> = [];
+    let turn = 0;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat(request: ChatRequest): Promise<ChatResult> {
+        seenRequests.push(request.tools);
+        turn += 1;
+        // The model skips the {"enable": [...]} round trip and calls the tool
+        // straight off the catalog (small models do this constantly).
+        if (turn === 1) {
+          return {
+            content: '',
+            toolCalls: [
+              {
+                id: 'call-write',
+                name: 'write_file',
+                arguments: '{"path":"a.txt","content":"hi"}',
+              },
+            ],
+          };
+        }
+        return { content: 'Done.' };
+      },
+      async listModels() {
+        return [
+          { id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai },
+        ];
+      },
+      getDefaultModel() {
+        return 'gpt';
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry: new ToolRegistry(
+        [lazyLoadTool, delegatedTool],
+        [
+          {
+            ...lazyLoadTool.definition,
+            requiresApproval: lazyLoadTool.requiresApproval,
+          },
+        ]
+      ),
+    });
+
+    const result = await service.submitMessage({
+      conversation: titledConversation('session-1'),
+      model: 'gpt',
+      content: 'create a.txt',
+      requestApproval: async () => true,
+    });
+
+    // The call ran, the tool became active (schema advertised on the very next
+    // request of the same turn), and the implicit enable is persisted.
+    expect(delegatedTool.executed).toEqual(['{"path":"a.txt","content":"hi"}']);
+    expect(seenRequests[1]?.map((tool) => tool.name)).toEqual([
+      'lazy_load_tools',
+      'write_file',
+    ]);
+    expect(result.conversation.activeTools).toEqual(['write_file']);
+  });
+
+  it('lists the callable tools when the model calls an unknown tool name', async () => {
+    const repository = new InMemoryConversationRepository();
+    const delegatedTool = new RecordingWriteTool();
+    const lazyLoadTool = new LazyLoadToolsTool([
+      {
+        ...delegatedTool.definition,
+        requiresApproval: delegatedTool.requiresApproval,
+      },
+    ]);
+    let turn = 0;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat(): Promise<ChatResult> {
+        turn += 1;
+        // A harmony-style mangled name that never reaches the registry.
+        if (turn === 1) {
+          return {
+            content: '',
+            toolCalls: [
+              { id: 'call-bad', name: 'not_a_tool', arguments: '{}' },
+            ],
+          };
+        }
+        return { content: 'Done.' };
+      },
+      async listModels() {
+        return [
+          { id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai },
+        ];
+      },
+      getDefaultModel() {
+        return 'gpt';
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry: new ToolRegistry(
+        [lazyLoadTool, delegatedTool],
+        [
+          {
+            ...lazyLoadTool.definition,
+            requiresApproval: lazyLoadTool.requiresApproval,
+          },
+        ]
+      ),
+    });
+
+    const result = await service.submitMessage({
+      conversation: titledConversation('session-1'),
+      model: 'gpt',
+      content: 'do something',
+    });
+
+    // The error names the real tools so the model can self-correct instead of
+    // retrying the bad name — and the failed call activates nothing.
+    const errorResult = result.conversation.messages.find(
+      (message) => message.role === 'tool' && message.toolCallId === 'call-bad'
+    );
+    expect(errorResult?.content).toContain('Unknown tool: not_a_tool');
+    expect(errorResult?.content).toContain('Available tools: write_file');
+    expect(result.conversation.activeTools ?? []).toEqual([]);
+  });
+
   it('falls back to every tool for a legacy session that called the old load-everything gateway', async () => {
     const repository = new InMemoryConversationRepository();
     const delegatedTool = new RecordingWriteTool();
