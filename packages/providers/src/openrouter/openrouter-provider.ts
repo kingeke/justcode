@@ -101,6 +101,12 @@ export class OpenRouterProvider implements ProviderClient {
         : request.reasoningEffort
           ? { reasoning: { effort: request.reasoningEffort } }
           : {};
+    // Groups the session's requests in OpenRouter's dashboard and acts as a
+    // sticky routing key: every request in the session goes to the same upstream
+    // provider, so the agentic loop keeps hitting the same prompt cache.
+    const session = request.sessionId
+      ? { session_id: request.sessionId }
+      : {};
 
     if (request.onToken) {
       let accumulated = '';
@@ -116,6 +122,7 @@ export class OpenRouterProvider implements ProviderClient {
             stream: true,
             stream_options: { include_usage: true },
             ...reasoning,
+            ...session,
             ...(tools ? { tools, tool_choice: 'auto' } : {}),
           },
         },
@@ -148,6 +155,7 @@ export class OpenRouterProvider implements ProviderClient {
           messages,
           stream: false,
           ...reasoning,
+          ...session,
           ...(tools ? { tools, tool_choice: 'auto' } : {}),
         },
       }

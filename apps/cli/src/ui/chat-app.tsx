@@ -497,6 +497,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       scroll.scrollTo(scroll.scrollHeight);
     }
   }, []);
+  const scrollToTop = useCallback((): void => {
+    const scroll = scrollRef.current;
+    if (scroll && !scroll.isDestroyed) {
+      scroll.scrollTo(0);
+    }
+  }, []);
   // No provider connected yet: open straight into the connect screen and hold
   // off on starting a session until the user picks one.
   const needsConnect = props.providerId === undefined;
@@ -1181,6 +1187,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   // we poll it on a short interval; setState bails out when the value is
   // unchanged, so this stays cheap.
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  // The "Jump to top" twin: only while unpinned from the bottom (the user
+  // started scrolling up) and not already parked at the top.
+  const [showJumpToTop, setShowJumpToTop] = useState(false);
   // Whether the transcript is currently parked at the bottom. Read by the
   // auto-scroll effect so a finished turn only snaps down when the user was
   // already at the bottom — if they've scrolled up to read, we leave them be.
@@ -1191,6 +1200,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       const scrollBox = scrollRef.current;
       if (!scrollBox) {
         setShowJumpToBottom(false);
+        setShowJumpToTop(false);
         return;
       }
       const maxScroll = Math.max(
@@ -1201,6 +1211,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       const atBottom = scrollBox.scrollTop >= maxScroll - 1;
       isAtBottomRef.current = atBottom;
       setShowJumpToBottom(maxScroll > 0 && !atBottom);
+      setShowJumpToTop(maxScroll > 0 && !atBottom && scrollBox.scrollTop > 1);
     }, 150);
     return () => clearInterval(interval);
   }, []);
@@ -3167,15 +3178,27 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           </box>
         ) : null}
 
-        {showJumpToBottom ? (
+        {showJumpToBottom || showJumpToTop ? (
           <box marginTop={1} flexDirection="row" justifyContent="center">
-            <box
-              paddingX={1}
-              backgroundColor={INPUT_BG}
-              onMouseDown={scrollToBottom}
-            >
-              <text fg="cyan">↓ Jump to bottom</text>
-            </box>
+            {showJumpToTop ? (
+              <box
+                paddingX={1}
+                marginRight={showJumpToBottom ? 2 : 0}
+                backgroundColor={INPUT_BG}
+                onMouseDown={scrollToTop}
+              >
+                <text fg="cyan">↑ Jump to top</text>
+              </box>
+            ) : null}
+            {showJumpToBottom ? (
+              <box
+                paddingX={1}
+                backgroundColor={INPUT_BG}
+                onMouseDown={scrollToBottom}
+              >
+                <text fg="cyan">↓ Jump to bottom</text>
+              </box>
+            ) : null}
           </box>
         ) : null}
 

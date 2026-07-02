@@ -130,6 +130,14 @@ export function ChevronDownIcon({ size = 16 }: IconProps): React.JSX.Element {
   );
 }
 
+export function ChevronUpIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M6 15l6-6 6 6" />
+    </svg>
+  );
+}
+
 export function CheckIcon({ size = 16 }: IconProps): React.JSX.Element {
   return (
     <svg {...svgProps(size)} aria-hidden="true">

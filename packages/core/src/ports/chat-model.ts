@@ -84,6 +84,13 @@ export interface ChatRequest {
    * model that would otherwise reason. Ignored by models that don't reason.
    */
   reasoningEffort?: ReasoningEffortChoice;
+  /**
+   * The chat session this request belongs to. Providers that support it (e.g.
+   * OpenRouter's `session_id`) use it to group the session's requests in their
+   * dashboard and as a sticky routing key, so every request in the session hits
+   * the same upstream provider and its prompt cache. Others ignore it.
+   */
+  sessionId?: string;
 }
 
 export interface ChatResult {

@@ -39,6 +39,14 @@ interface OpenAiCompatibleProviderOptions {
   getAccessToken?: () => Promise<string>;
   /** Extra headers sent on every request (e.g. Copilot integration headers). */
   extraHeaders?: Record<string, string>;
+  /**
+   * Whether the endpoint understands OpenAI's `prompt_cache_key` param. When
+   * set, the request's sessionId is sent as the cache key so every request in
+   * a session routes to the same cache shard. Only enable for endpoints known
+   * to accept it (the real OpenAI API) — other OpenAI-compatible servers may
+   * reject unknown params.
+   */
+  supportsPromptCacheKey?: boolean;
 }
 
 interface OpenAiModelsResponse {
@@ -149,13 +157,28 @@ export class OpenAiCompatibleProvider implements ProviderClient {
       },
       request,
       providerId: String(this.providerId),
+      ...this.promptCacheKeyParam(request),
     });
+  }
+
+  /**
+   * OpenAI's `prompt_cache_key`, keyed by the chat session, so the session's
+   * requests route to the same cache shard. Empty unless the endpoint opted in
+   * via {@link OpenAiCompatibleProviderOptions.supportsPromptCacheKey}.
+   */
+  private promptCacheKeyParam(
+    request: ChatRequest
+  ): { prompt_cache_key?: string } {
+    return this.options.supportsPromptCacheKey && request.sessionId
+      ? { prompt_cache_key: request.sessionId }
+      : {};
   }
 
   private async sendChatCompletions(request: ChatRequest): Promise<ChatResult> {
     const messages = toOpenAiWireMessages(request.messages);
     const tools = toOpenAiToolDefinitions(request.tools);
     const reasoningParam = toReasoningParam(request);
+    const cacheKey = this.promptCacheKeyParam(request);
 
     if (request.onToken) {
       let accumulated = '';
@@ -172,6 +195,7 @@ export class OpenAiCompatibleProvider implements ProviderClient {
             stream: true,
             stream_options: { include_usage: true },
             ...reasoningParam,
+            ...cacheKey,
             ...(tools ? { tools, tool_choice: 'auto' } : {}),
           },
         },
@@ -213,6 +237,7 @@ export class OpenAiCompatibleProvider implements ProviderClient {
           messages,
           stream: false,
           ...reasoningParam,
+          ...cacheKey,
           ...(tools ? { tools, tool_choice: 'auto' } : {}),
         },
       }

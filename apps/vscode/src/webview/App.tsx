@@ -27,6 +27,7 @@ import { SessionsView } from '@ext/webview/components/SessionsView';
 import { ModelPickerView } from '@ext/webview/components/ModelPickerView';
 import {
   ChevronDownIcon,
+  ChevronUpIcon,
   CollapseIcon,
   JsonIcon,
   PencilIcon,
@@ -172,6 +173,10 @@ export function App(): React.JSX.Element {
   // Whether to show the floating "jump to bottom" button. True once the user has
   // scrolled meaningfully away from the bottom; hidden again when they return.
   const [showJumpToBottom, setShowJumpToBottom] = React.useState(false);
+  // Whether to show the floating "jump to top" button. Only while the user is
+  // unpinned from the bottom (i.e. they started scrolling up) and there's
+  // meaningful content above — never while parked at the bottom or the top.
+  const [showJumpToTop, setShowJumpToTop] = React.useState(false);
 
   // Set when we move the scrollbar ourselves, so the resulting scroll event
   // isn't mistaken for the user scrolling up. Without this, content that grows
@@ -196,6 +201,8 @@ export function App(): React.JSX.Element {
     if (programmaticScrollRef.current) {
       programmaticScrollRef.current = false;
       setShowJumpToBottom(false);
+      // A programmatic move is always a pin to the bottom — keep it hidden.
+      setShowJumpToTop(false);
       return;
     }
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -203,12 +210,24 @@ export function App(): React.JSX.Element {
     // A larger threshold than the auto-scroll pin so the button doesn't flicker
     // in and out on the last sliver of scroll.
     setShowJumpToBottom(distanceFromBottom > 120);
+    setShowJumpToTop(distanceFromBottom > 120 && el.scrollTop > 120);
   };
 
   const jumpToBottom = (): void => {
     stickToBottomRef.current = true;
     setShowJumpToBottom(false);
+    setShowJumpToTop(false);
     pinToBottom();
+  };
+
+  const jumpToTop = (): void => {
+    const el = transcriptRef.current;
+    if (!el) return;
+    stickToBottomRef.current = false;
+    setShowJumpToTop(false);
+    // Not flagged as programmatic: the resulting scroll event re-derives the
+    // button states (top hidden, bottom shown) from the new position.
+    el.scrollTop = 0;
   };
 
   // Keep the latest content in view as tokens stream, messages arrive, and tool
@@ -880,6 +899,17 @@ export function App(): React.JSX.Element {
             {state.error ? <div className="error">{state.error}</div> : null}
           </div>
         </div>
+        {showJumpToTop ? (
+          <button
+            type="button"
+            className="jump-to-bottom-btn jump-to-top-btn"
+            title="Scroll to top"
+            aria-label="Scroll to top"
+            onClick={jumpToTop}
+          >
+            <ChevronUpIcon size={16} />
+          </button>
+        ) : null}
         {showJumpToBottom ? (
           <button
             type="button"

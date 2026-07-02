@@ -439,6 +439,7 @@ export class ChatSessionService {
       }
       generatedTitle ??= await this.generateSessionTitle({
         model: input.model,
+        sessionId: input.conversation.sessionId,
         userMessage: trimmedContent,
         // A reasoning model burns seconds (and tokens) deliberating over a
         // 5-word title, which would stall the whole turn behind it. When the
@@ -518,6 +519,7 @@ export class ChatSessionService {
       try {
         response = await this.provider.sendChat({
           model: input.model,
+          sessionId: input.conversation.sessionId,
           messages: [systemMessage, ...history],
           ...(input.reasoningEffort
             ? { reasoningEffort: input.reasoningEffort }
@@ -785,6 +787,7 @@ export class ChatSessionService {
 
   private async generateSessionTitle(input: {
     model: string;
+    sessionId: string;
     userMessage: string;
     disableReasoning: boolean;
     signal?: AbortSignal;
@@ -792,6 +795,7 @@ export class ChatSessionService {
     try {
       const result = await this.provider.sendChat({
         model: input.model,
+        sessionId: input.sessionId,
         ...(input.disableReasoning ? { reasoningEffort: 'off' as const } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
         messages: [

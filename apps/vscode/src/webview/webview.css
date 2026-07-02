@@ -76,6 +76,11 @@ body {
   );
 }
 
+/* Stacked directly above the jump-to-bottom button, same styling. */
+.jump-to-top-btn {
+  bottom: 48px;
+}
+
 .transcript {
   flex: 1;
   overflow-y: auto;

@@ -21,6 +21,11 @@ export interface SendResponsesRequestOptions {
   request: ChatRequest;
   /** Provider id, used only for the empty-response error message. */
   providerId: string;
+  /**
+   * OpenAI's cache-routing key, sent as `prompt_cache_key` when set. Only pass
+   * it for endpoints known to accept the param (the real OpenAI API).
+   */
+  prompt_cache_key?: string;
 }
 
 /**
@@ -35,12 +40,14 @@ export async function sendResponsesRequest({
   headers,
   request,
   providerId,
+  prompt_cache_key,
 }: SendResponsesRequestOptions): Promise<ChatResult> {
   const { instructions, input } = toResponsesPayload(request.messages);
   const tools = toResponsesToolDefinitions(request.tools);
 
   const body = {
     model: request.model,
+    ...(prompt_cache_key ? { prompt_cache_key } : {}),
     ...(instructions ? { instructions } : {}),
     input,
     ...(tools
