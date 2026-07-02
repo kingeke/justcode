@@ -104,9 +104,7 @@ export class OpenRouterProvider implements ProviderClient {
     // Groups the session's requests in OpenRouter's dashboard and acts as a
     // sticky routing key: every request in the session goes to the same upstream
     // provider, so the agentic loop keeps hitting the same prompt cache.
-    const session = request.sessionId
-      ? { session_id: request.sessionId }
-      : {};
+    const session = request.sessionId ? { session_id: request.sessionId } : {};
 
     if (request.onToken) {
       let accumulated = '';

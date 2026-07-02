@@ -166,9 +166,9 @@ export class OpenAiCompatibleProvider implements ProviderClient {
    * requests route to the same cache shard. Empty unless the endpoint opted in
    * via {@link OpenAiCompatibleProviderOptions.supportsPromptCacheKey}.
    */
-  private promptCacheKeyParam(
-    request: ChatRequest
-  ): { prompt_cache_key?: string } {
+  private promptCacheKeyParam(request: ChatRequest): {
+    prompt_cache_key?: string;
+  } {
     return this.options.supportsPromptCacheKey && request.sessionId
       ? { prompt_cache_key: request.sessionId }
       : {};

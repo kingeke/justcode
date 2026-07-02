@@ -48,10 +48,7 @@ import type {
   ToolApprovalRequest,
 } from '@core/application/chat-session-service';
 import type { UserQuestionRequest } from '@core/ports/tool';
-import type {
-  Conversation,
-  SessionStats,
-} from '@core/domain/conversation';
+import type { Conversation, SessionStats } from '@core/domain/conversation';
 import type { ManageableToolInfo } from '@core/domain/tool-metadata';
 import {
   BUILD_MODE_ID,
