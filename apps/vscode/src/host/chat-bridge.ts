@@ -197,8 +197,7 @@ export class ChatBridge {
   // TTFT / tok/s of the most recent completed turn, kept so a Ready snapshot
   // can restore the footer's timing readouts after a session switch or reload.
   private lastTurnStats:
-    | { ttftMs: number; tokensPerSecond: number }
-    | undefined;
+    { ttftMs: number; tokensPerSecond: number } | undefined;
 
   public constructor(
     private readonly post: (message: HostToWebview) => void,
@@ -2057,8 +2056,7 @@ function effectiveEffort(
   // picker) can't disable it — fall back to the default effort instead.
   if (stored && !(reasoning.mandatory && stored === 'off')) return stored;
   return (reasoning.defaultEffort ?? reasoning.effortLevels[0]) as
-    | WebviewReasoningChoice
-    | undefined;
+    WebviewReasoningChoice | undefined;
 }
 
 function toToolView(view: ToolInvocationView): WebviewToolView {

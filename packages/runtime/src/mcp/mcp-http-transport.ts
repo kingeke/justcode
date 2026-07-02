@@ -136,8 +136,7 @@ export class HttpTransport implements McpTransport {
         return await readSseForId(response, expectId);
       }
       const json = (await response.json()) as
-        | JsonRpcResponse
-        | JsonRpcResponse[];
+        JsonRpcResponse | JsonRpcResponse[];
       return matchResponse(json, expectId);
     } catch (error) {
       if (controller.signal.aborted) {
