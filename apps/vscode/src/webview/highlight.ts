@@ -122,7 +122,7 @@ export function highlightLine(
 ): string {
   if (!language) return escapeHtml(text);
   try {
-    return hljs.highlight(text, { language, ignoreIllegal: true }).value;
+    return hljs.highlight(text, { language, ignoreIllegals: true }).value;
   } catch {
     return escapeHtml(text);
   }

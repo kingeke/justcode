@@ -35,7 +35,13 @@ describe('SessionsList focus behavior', () => {
   it('refreshes session data in place without leaving chat when focus is false', () => {
     const next = reducer(inChat, {
       type: HostMessageType.SessionsList,
-      sessions: [{ sessionId: 's1', updatedAt: 1, messageCount: 3 }],
+      sessions: [
+        {
+          sessionId: 's1',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          messageCount: 3,
+        },
+      ],
       hasConnectedProvider: true,
       focus: false,
     });
