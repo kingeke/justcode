@@ -1099,6 +1099,9 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                     <div className="settings-popup-row">
                       <span className="settings-popup-label">
                         Max Context Window
+                        <span className="settings-popup-hint">
+                          set 0 to turn off
+                        </span>
                       </span>
                       {editingHistoryLimit ? (
                         <input

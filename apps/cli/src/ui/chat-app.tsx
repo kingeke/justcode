@@ -48,7 +48,11 @@ import type {
   ToolApprovalRequest,
 } from '@core/application/chat-session-service';
 import type { UserQuestionRequest } from '@core/ports/tool';
-import type { Conversation, SessionStats } from '@core/domain/conversation';
+import {
+  createConversation,
+  type Conversation,
+  type SessionStats,
+} from '@core/domain/conversation';
 import type { ManageableToolInfo } from '@core/domain/tool-metadata';
 import {
   BUILD_MODE_ID,
@@ -2019,10 +2023,27 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       }
 
       case CommandName.NewSession: {
+        // A session that never received a message is already fresh — reuse it
+        // instead of minting another. Re-save it so its file exists on disk
+        // even when the session was started before this persist-on-create.
+        if (conversation && conversation.messages.length === 0) {
+          // Best-effort: the first turn's save creates the file if this fails.
+          void props.chatSessionService
+            .saveConversation(conversation)
+            .catch(() => {});
+          setStatus('Already in a fresh session');
+          return;
+        }
         resetFreshSessionState();
         const newId = randomUUID();
         const nextRequestedModel = activeModel || props.requestedModel;
         nextSessionRequestedModelRef.current = nextRequestedModel;
+        // Persist the empty session immediately so it exists (and shows in
+        // the session picker) before the first message is sent.
+        // Best-effort: the first turn's save creates the file if this fails.
+        void props.chatSessionService
+          .saveConversation(createConversation(newId))
+          .catch(() => {});
         setCurrentSessionId(newId);
         return;
       }

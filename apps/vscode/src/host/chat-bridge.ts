@@ -1928,9 +1928,16 @@ export class ChatBridge {
   }
 
   private async resetSession(): Promise<void> {
-    // Start a new session without touching the existing one — it's already
-    // persisted and should remain visible in the sessions list.
-    this.sessionId = randomUUID();
+    // Clicking "+" while the current session has no messages reuses it instead
+    // of minting another — repeated clicks shouldn't scatter empty sessions.
+    const reuseEmptySession =
+      this.conversation !== undefined &&
+      this.conversation.messages.length === 0;
+    if (!reuseEmptySession) {
+      // Start a new session without touching the existing one — it's already
+      // persisted and should remain visible in the sessions list.
+      this.sessionId = randomUUID();
+    }
     this.resetMetrics();
 
     // Fast path: a new session is just an empty conversation reusing the model
@@ -1944,7 +1951,10 @@ export class ChatBridge {
       this.activeModel &&
       this.models.length > 0
     ) {
-      this.conversation = createConversation(this.sessionId);
+      if (!reuseEmptySession) {
+        this.conversation = createConversation(this.sessionId);
+      }
+      await this.persistEmptySession();
       this.post({
         type: HostMessageType.Ready,
         providerId: this.services.providerId,
@@ -1972,6 +1982,24 @@ export class ChatBridge {
 
     this.conversation = undefined;
     await this.sendReady();
+    await this.persistEmptySession();
+  }
+
+  /**
+   * Writes the current conversation to disk when it's still empty, so a new
+   * session exists as a file (and in the sessions list) before the first
+   * message. Best-effort: on failure the first turn's save creates it as
+   * before.
+   */
+  private async persistEmptySession(): Promise<void> {
+    const conversation = this.conversation;
+    if (!conversation || conversation.messages.length > 0) return;
+    try {
+      const services = await this.ensureServices();
+      await services.chatSessionService.saveConversation(conversation);
+    } catch {
+      // Non-fatal: the file will be created by the first turn's save.
+    }
   }
 }
 

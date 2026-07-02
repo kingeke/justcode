@@ -1994,6 +1994,13 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.settings-popup-hint {
+  display: block;
+  font-size: 10px;
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
 .settings-popup-value-btn {
   font-size: 12px;
   font-family: inherit;
