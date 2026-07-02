@@ -2,7 +2,6 @@ import * as React from 'react';
 
 import type { ChangedFile } from '@ext/webview/changes';
 import { summarizeChanges } from '@ext/webview/changes';
-import { DiffView } from '@ext/webview/components/DiffView';
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -17,7 +16,7 @@ import {
  * created, mirroring the per-message diffs into one place. Each file can be
  * Kept (accepted, removed from the panel) or Undone (reverted on disk via the
  * host), with Keep all / Undo all acting on every still-pending file.
- * Ctrl/Cmd-clicking a file name opens it in the editor.
+ * Clicking a file opens the native VS Code diff view for it.
  */
 export function ChangesPanel({
   files,
@@ -37,7 +36,6 @@ export function ChangesPanel({
   onOpenDiff: (file: ChangedFile) => void;
 }): React.JSX.Element | null {
   const [collapsed, setCollapsed] = React.useState(false);
-  const [expanded, setExpanded] = React.useState<string | null>(null);
 
   if (files.length === 0) return null;
 
@@ -91,16 +89,14 @@ export function ChangesPanel({
         <ul className="changes-list">
           {files.map((file) => (
             <li key={file.path} className="changes-row">
-              {/* Clicking the row toggles the inline diff; the filename itself
-                  opens the file, so it stops propagation. */}
+              {/* Clicking the row opens the native VS Code diff view; deleted
+                  files have no current content to diff against. */}
               <div
                 className="changes-row-main"
-                onClick={() =>
-                  setExpanded((current) =>
-                    current === file.path ? null : file.path
-                  )
-                }
-                title="Click to toggle diff"
+                onClick={() => {
+                  if (!file.deleted) onOpenDiff(file);
+                }}
+                title={file.deleted ? undefined : `Open diff for ${file.path}`}
               >
                 {file.created ? (
                   <span className="changes-badge" title="New file">
@@ -115,23 +111,11 @@ export function ChangesPanel({
                     <TrashIcon size={12} />
                   </span>
                 ) : null}
-                {file.deleted ? (
-                  <span className="changes-name is-deleted">
-                    {basename(file.path)}
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    className="changes-name changes-name-link"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onOpenDiff(file);
-                    }}
-                    title={`Open diff for ${file.path}`}
-                  >
-                    {basename(file.path)}
-                  </button>
-                )}
+                <span
+                  className={`changes-name${file.deleted ? ' is-deleted' : ''}`}
+                >
+                  {basename(file.path)}
+                </span>
                 <span className="changes-dir">{dirname(file.path)}</span>
                 <span className="changes-stat changes-added">
                   +{file.added}
@@ -162,15 +146,6 @@ export function ChangesPanel({
                   <UndoIcon size={15} />
                 </button>
               </div>
-              {expanded === file.path ? (
-                <DiffView
-                  diff={{
-                    path: file.path,
-                    oldText: file.baseline,
-                    newText: file.current,
-                  }}
-                />
-              ) : null}
             </li>
           ))}
         </ul>
