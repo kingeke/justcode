@@ -12,3 +12,4 @@ debug.log
 .test-cache/
 .claude
 .agent
+.playwright-mcp
