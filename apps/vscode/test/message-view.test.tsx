@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { WebviewRole } from '@ext/shared/protocol';
-import { MessageView } from '@ext/webview/components/MessageView';
+import { MessageView, formatTime } from '@ext/webview/components/MessageView';
 
 describe('MessageView', () => {
   it('renders collapsed historical tool results with tool styling and name by default', () => {
@@ -105,6 +105,73 @@ new`);
 
     expect(markup).toContain('data:image/png;base64,BBBB');
     expect(markup).not.toContain('msg-content');
+  });
+
+  it('renders the sent hour:minute under a user message', () => {
+    const createdAt = '2026-07-02T10:15:30.000Z';
+    const markup = renderToStaticMarkup(
+      <MessageView
+        message={{
+          id: 'u3',
+          role: WebviewRole.User,
+          content: 'hello',
+          createdAt,
+          llmReceivedAt: '2026-07-02T10:15:31.000Z',
+        }}
+      />
+    );
+
+    expect(markup).toContain('msg-time');
+    expect(markup).toContain(formatTime(createdAt));
+    // The LLM-received time renders under the assistant reply, not here.
+    expect(markup).not.toContain('Received');
+  });
+
+  it('omits the timestamp footer when a user message has no timestamp', () => {
+    const markup = renderToStaticMarkup(
+      <MessageView
+        message={{
+          id: 'u5',
+          role: WebviewRole.User,
+          content: 'hello',
+        }}
+      />
+    );
+
+    expect(markup).not.toContain('msg-time');
+  });
+
+  it('renders the LLM-received time under an assistant message', () => {
+    const llmReceivedAt = '2026-07-02T10:15:31.000Z';
+    const markup = renderToStaticMarkup(
+      <MessageView
+        message={{
+          id: 'a1',
+          role: WebviewRole.Assistant,
+          content: 'hi there',
+          createdAt: '2026-07-02T10:15:35.000Z',
+          llmReceivedAt,
+        }}
+      />
+    );
+
+    expect(markup).toContain('msg-time');
+    expect(markup).toContain(formatTime(llmReceivedAt));
+  });
+
+  it('omits the assistant footer when no LLM-received time is present', () => {
+    const markup = renderToStaticMarkup(
+      <MessageView
+        message={{
+          id: 'a2',
+          role: WebviewRole.Assistant,
+          content: 'hi there',
+          createdAt: '2026-07-02T10:15:35.000Z',
+        }}
+      />
+    );
+
+    expect(markup).not.toContain('msg-time');
   });
 
   it('renders input preview for whitelisted historical tools', () => {

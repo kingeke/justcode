@@ -5,6 +5,16 @@ import { DiffView } from '@ext/webview/components/DiffView';
 import { ToolTitle } from '@ext/webview/components/ToolTitle';
 import { renderMarkdown } from '@ext/webview/markdown';
 
+/** Formats an ISO date as a local hour:minute time, or '' when unparsable. */
+export function formatTime(isoDate: string): string {
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 const TOOL_INPUT_PREVIEW_NAMES = new Set(['grep', 'glob', 'bash']);
 const TOOL_CHANGE_PREVIEW_NAMES = new Set([
   'apply_patch',
@@ -71,15 +81,27 @@ export function MessageView({
   // Assistant replies are Markdown; render them. User/system text is shown
   // verbatim so what the user typed isn't reflowed or reinterpreted.
   if (message.role === WebviewRole.Assistant) {
+    // When the LLM received the request that produced this reply.
+    const assistantTiming = message.llmReceivedAt
+      ? formatTime(message.llmReceivedAt)
+      : '';
     return (
       <div className="msg msg-assistant">
         <div
           className="msg-content markdown-body"
           dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
         />
+        {assistantTiming ? (
+          <div className="msg-time">{assistantTiming}</div>
+        ) : null}
       </div>
     );
   }
+
+  const timing =
+    message.role === WebviewRole.User && message.createdAt
+      ? formatTime(message.createdAt)
+      : '';
 
   return (
     <div className={`msg msg-${message.role}`}>
@@ -105,6 +127,7 @@ export function MessageView({
         {message.content ? (
           <pre className="msg-content">{message.content}</pre>
         ) : null}
+        {timing ? <div className="msg-time">{timing}</div> : null}
       </div>
     </div>
   );

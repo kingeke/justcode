@@ -32,6 +32,13 @@ export interface ChatMessage {
   role: MessageRole;
   content: string;
   createdAt: string;
+  /**
+   * When the LLM received the request, as an ISO timestamp. Set on `user`
+   * messages the first time they are dispatched to the model, and on
+   * `assistant` messages to record when the model received the request that
+   * produced the reply.
+   */
+  llmReceivedAt?: string;
   attachments?: MessageAttachment[];
   /** Images attached to a `user` message, sent to the model as image blocks. */
   images?: MessageImage[];
@@ -57,6 +64,8 @@ export interface CreateMessageExtras {
     content: string;
     durationMs: number;
   };
+  /** For `assistant` messages: when the LLM received the producing request. */
+  llmReceivedAt?: string;
 }
 
 export function createMessage(
@@ -77,7 +86,26 @@ export function createMessage(
     ...(extras?.toolCallId ? { toolCallId: extras.toolCallId } : {}),
     ...(extras?.name ? { name: extras.name } : {}),
     ...(extras?.thinking ? { thinking: extras.thinking } : {}),
+    ...(extras?.llmReceivedAt ? { llmReceivedAt: extras.llmReceivedAt } : {}),
   };
+}
+
+/**
+ * Stamps `llmReceivedAt` on every `user` message that hasn't been dispatched to
+ * the model yet. Called right before a provider request with the messages that
+ * request carries, so the timestamp records when the LLM first received them.
+ * Messages already stamped (earlier steps of the same turn, prior turns) are
+ * left untouched.
+ */
+export function markLlmReceived(
+  messages: ChatMessage[],
+  receivedAt = new Date()
+): void {
+  for (const message of messages) {
+    if (message.role === 'user' && !message.llmReceivedAt) {
+      message.llmReceivedAt = receivedAt.toISOString();
+    }
+  }
 }
 
 export function renderMessageContentForModel(message: ChatMessage): string {

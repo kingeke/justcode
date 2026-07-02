@@ -231,6 +231,13 @@ export interface WebviewMessage {
   id: string;
   role: WebviewRole;
   content: string;
+  /** ISO timestamp of when the message was created (user: when it was sent). */
+  createdAt?: string;
+  /**
+   * When the LLM received the request: set on user messages once dispatched,
+   * and on assistant messages for the request that produced the reply.
+   */
+  llmReceivedAt?: string;
   /** Present on tool messages, names the tool that produced the result. */
   toolName?: string;
   /** Present on tool messages when we can reconstruct the original call view. */

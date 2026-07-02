@@ -419,6 +419,10 @@ export function reducer(state: ChatState, action: Action): ChatState {
             id: `local-${Date.now()}`,
             role: WebviewRole.User,
             content: action.content,
+            // Sent time shows immediately; the authoritative rebuild at turn
+            // end replaces this echo with the persisted timestamps (including
+            // when the LLM received it).
+            createdAt: new Date().toISOString(),
             ...(action.images.length
               ? {
                   images: action.images.map((image) => ({

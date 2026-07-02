@@ -282,6 +282,41 @@ describe('ChatSessionService', () => {
     expect(repository.conversation.messages).toHaveLength(2);
   });
 
+  it('stamps the user message with the time the LLM received it', async () => {
+    const repository = new InMemoryConversationRepository();
+    const service = new ChatSessionService(repository, createProviderStub());
+
+    const startedSession = await service.startSession({
+      sessionId: 'session-1',
+    });
+    const before = Date.now();
+    const result = await service.submitMessage({
+      conversation: startedSession.conversation,
+      model: startedSession.activeModel,
+      content: 'Hello',
+    });
+    const after = Date.now();
+
+    const userMessage = result.conversation.messages[0];
+    expect(userMessage?.role).toBe('user');
+    expect(userMessage?.llmReceivedAt).toBeDefined();
+    const receivedMs = new Date(userMessage!.llmReceivedAt!).getTime();
+    expect(receivedMs).toBeGreaterThanOrEqual(before);
+    expect(receivedMs).toBeLessThanOrEqual(after);
+    expect(receivedMs).toBeGreaterThanOrEqual(
+      new Date(userMessage!.createdAt).getTime()
+    );
+    // The stamp rides on the persisted conversation too.
+    expect(repository.conversation.messages[0]?.llmReceivedAt).toBe(
+      userMessage?.llmReceivedAt
+    );
+    // The assistant reply carries the same instant: when the LLM received the
+    // request that produced it, shown under the reply in the UIs.
+    expect(result.conversation.messages[1]?.llmReceivedAt).toBe(
+      userMessage?.llmReceivedAt
+    );
+  });
+
   it('preserves a title persisted out of band when a later turn saves', async () => {
     const repository = new InMemoryConversationRepository();
     const service = new ChatSessionService(repository, createProviderStub());

@@ -109,3 +109,25 @@ describe('chat app tool diff rendering', () => {
     expect(source).toContain("message.content !== ''");
   });
 });
+
+describe('chat app user message layout', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'apps/cli/src/ui/chat-app.tsx'),
+    'utf8'
+  );
+
+  it('right-aligns user messages and their attachments', () => {
+    expect(source).toContain(
+      "? { alignItems: 'flex-end' as const, paddingRight: 2 }"
+    );
+    expect(source).toContain("border={['right']}");
+  });
+
+  it('skips the empty content line on image-only user messages', () => {
+    expect(source).toContain('{message.content ? (');
+  });
+
+  it('keeps the image-attached line emoji-free so right alignment never clips it', () => {
+    expect(source).not.toContain('🖼');
+  });
+});

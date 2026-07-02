@@ -5,6 +5,7 @@ import {
 } from '@core/domain/conversation';
 import {
   createMessage,
+  markLlmReceived,
   type ChatMessage,
   type MessageAttachment,
   type MessageImage,
@@ -559,6 +560,14 @@ export class ChatSessionService {
         input.onThinkingToken?.(token);
       };
 
+      // Record when each not-yet-dispatched user message actually reaches the
+      // model. `history` shares message objects with `working`, so the stamp
+      // rides on the conversation that gets persisted below. The same instant
+      // is stamped onto this step's assistant message so the UI can show when
+      // the LLM received the request that produced the reply.
+      const llmReceivedAt = new Date().toISOString();
+      markLlmReceived(history, new Date(llmReceivedAt));
+
       try {
         response = await this.provider.sendChat({
           model: input.model,
@@ -619,6 +628,7 @@ export class ChatSessionService {
       if (toolCalls.length === 0) {
         working.push(
           createMessage('assistant', response.content, new Date(), undefined, {
+            llmReceivedAt,
             ...(thinking ? { thinking } : {}),
           })
         );
@@ -628,6 +638,7 @@ export class ChatSessionService {
       working.push(
         createMessage('assistant', response.content, new Date(), undefined, {
           toolCalls,
+          llmReceivedAt,
           ...(thinking ? { thinking } : {}),
         })
       );

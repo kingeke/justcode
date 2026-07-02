@@ -2116,6 +2116,10 @@ export async function toWebviewMessages(
       id: message.id,
       role: toWebviewRole(message.role),
       content: message.content,
+      createdAt: message.createdAt,
+      ...(message.llmReceivedAt
+        ? { llmReceivedAt: message.llmReceivedAt }
+        : {}),
       ...(message.role === 'tool' && message.name
         ? { toolName: message.name }
         : {}),

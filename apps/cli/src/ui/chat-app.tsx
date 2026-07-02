@@ -79,6 +79,7 @@ import {
   isCommandName,
   parseCommandInput,
 } from '@cli/ui/commands.js';
+import { formatTime } from '@cli/ui/format-message-timing.js';
 import { openFileInEditor } from '@cli/ui/open-file.js';
 import { KeyName } from '@cli/ui/key-name.js';
 import { prepareMarkdown } from '@cli/ui/markdown.js';
@@ -2948,7 +2949,16 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                 ? (message.thinking ?? messageThinking[message.id])
                 : undefined;
             return (
-              <box key={message.id} flexDirection="column">
+              <box
+                key={message.id}
+                flexDirection="column"
+                // User messages (and their attachments) hug the right edge,
+                // mirroring the extension, so it's clear which messages are
+                // the user's. The padding keeps the text off the scrollbar.
+                {...(message.role === 'user'
+                  ? { alignItems: 'flex-end' as const, paddingRight: 2 }
+                  : {})}
+              >
                 {thinking ? (
                   <box flexDirection="column" marginBottom={0}>
                     <text fg="yellow">
@@ -2963,15 +2973,20 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                 {message.role === 'user' ? (
                   <box
                     flexDirection="column"
-                    border={['left']}
+                    alignItems="flex-end"
+                    border={['right']}
                     borderStyle="rounded"
                     borderColor="cyan"
-                    paddingLeft={1}
+                    paddingRight={1}
                     marginY={1}
                   >
-                    <text fg="white" attributes={BOLD}>
-                      {message.content}
-                    </text>
+                    {/* An image-only message has no prose — skip the empty
+                        line so the bubble doesn't render a blank row. */}
+                    {message.content ? (
+                      <text fg="white" attributes={BOLD}>
+                        {message.content}
+                      </text>
+                    ) : null}
                     <text fg={MUTED}>{formatTime(message.createdAt)}</text>
                   </box>
                 ) : message.role === 'assistant' ? (
@@ -2994,6 +3009,16 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                           ⚙ {call.name}({summarizeToolArgs(call.arguments)})
                         </text>
                       ))}
+                    {/* When the LLM received the request that produced this
+                        reply — only under the final answer of a turn, not
+                        every tool-call step. */}
+                    {message.llmReceivedAt &&
+                    message.content &&
+                    !message.toolCalls?.length ? (
+                      <text fg={MUTED}>
+                        {formatTime(message.llmReceivedAt)}
+                      </text>
+                    ) : null}
                   </box>
                 ) : message.role === 'tool' ? (
                   message.name === 'bash' ? (
@@ -3040,9 +3065,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     attached: @{attachment.path}
                   </text>
                 ))}
+                {/* No emoji here: double-width glyphs are measured as one
+                    column, which clips the right-aligned line at the edge. */}
                 {message.images?.length ? (
                   <text fg={MUTED}>
-                    🖼 {message.images.length} image
+                    {message.images.length} image
                     {message.images.length === 1 ? '' : 's'} attached
                   </text>
                 ) : null}
@@ -3864,15 +3891,6 @@ function mergeProviders(
   }
 
   return [...byId.values()];
-}
-
-function formatTime(isoDate: string): string {
-  const date = new Date(isoDate);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString(undefined, {
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 }
 
 function formatDuration(ms: number): string {

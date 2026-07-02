@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createMessage,
+  markLlmReceived,
   renderMessageContentForModel,
 } from '@core/domain/message';
 
@@ -49,5 +50,35 @@ describe('renderMessageContentForModel', () => {
     );
 
     expect(message.thinking).toEqual({ content: 'thinking', durationMs: 42 });
+  });
+
+  it('carries the LLM-received time passed via extras', () => {
+    const message = createMessage('assistant', 'hi', new Date(), undefined, {
+      llmReceivedAt: '2026-07-02T10:00:05.000Z',
+    });
+
+    expect(message.llmReceivedAt).toBe('2026-07-02T10:00:05.000Z');
+  });
+});
+
+describe('markLlmReceived', () => {
+  it('stamps unstamped user messages with the received time', () => {
+    const user = createMessage('user', 'hello');
+    const assistant = createMessage('assistant', 'hi');
+    const receivedAt = new Date('2026-07-02T10:00:05.000Z');
+
+    markLlmReceived([user, assistant], receivedAt);
+
+    expect(user.llmReceivedAt).toBe('2026-07-02T10:00:05.000Z');
+    expect(assistant.llmReceivedAt).toBeUndefined();
+  });
+
+  it('leaves already-stamped user messages untouched', () => {
+    const user = createMessage('user', 'hello');
+    user.llmReceivedAt = '2026-07-02T09:00:00.000Z';
+
+    markLlmReceived([user], new Date('2026-07-02T10:00:05.000Z'));
+
+    expect(user.llmReceivedAt).toBe('2026-07-02T09:00:00.000Z');
   });
 });
