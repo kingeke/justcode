@@ -6,7 +6,10 @@ import { PlusIcon, RefreshIcon } from '@ext/webview/components/Icons';
 // ── Sort ─────────────────────────────────────────────────────────────────────
 
 export type SortMode =
-  'provider' | 'input-cost' | 'output-cost' | 'context-window';
+  | 'provider'
+  | 'input-cost'
+  | 'output-cost'
+  | 'context-window';
 export type SortDir = 'asc' | 'desc';
 
 const SORT_MODES: SortMode[] = [
