@@ -11,6 +11,7 @@ import {
 import { APP_NAME } from '@core/branding';
 import {
   createMessage,
+  type ChatMessage,
   type MessageAttachment,
   type MessageRole,
 } from '@core/domain/message';
@@ -2067,12 +2068,19 @@ function isErrorToolResultContent(content: string): boolean {
   );
 }
 
-/** Flags a rebuilt tool view as errored when its result content says so. */
+/**
+ * Flags a rebuilt tool view as errored. Prefers the persisted `isError` flag on
+ * the tool message; the content heuristic remains as a fallback for sessions
+ * saved before the flag existed.
+ */
 function markToolViewError(
   view: WebviewToolView,
-  resultContent: string
+  message: ChatMessage
 ): WebviewToolView {
-  if (view.isError || !isErrorToolResultContent(resultContent)) return view;
+  if (view.isError) return view;
+  if (message.isError !== true && !isErrorToolResultContent(message.content)) {
+    return view;
+  }
   return { ...view, isError: true };
 }
 
@@ -2208,7 +2216,7 @@ export async function toWebviewMessages(
         ? {
             toolView: markToolViewError(
               toolViewsByCallId.get(message.toolCallId)!,
-              message.content
+              message
             ),
           }
         : {}),

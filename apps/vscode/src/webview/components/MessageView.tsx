@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { WebviewRole, type WebviewMessage } from '@ext/shared/protocol';
 import { DiffView } from '@ext/webview/components/DiffView';
+import { CheckIcon, CopyIcon } from '@ext/webview/components/Icons';
 import { ToolTitle } from '@ext/webview/components/ToolTitle';
 import { renderMarkdown } from '@ext/webview/markdown';
 
@@ -34,12 +35,24 @@ export function MessageView({
   /** Opens a full-size preview of a transcript image (data URL). */
   onOpenImage?: (src: string) => void;
 }): React.JSX.Element {
+  // Copy-to-clipboard feedback for the user/assistant copy buttons. Copies the
+  // raw message text (assistant replies: the Markdown source, not rendered
+  // HTML). Declared before the role branches so the hook runs unconditionally.
+  const [copied, setCopied] = React.useState(false);
+  const copyContent = (): void => {
+    void navigator.clipboard?.writeText(message.content).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
   if (message.role === WebviewRole.Tool) {
+    const isError = message.toolView?.isError === true;
     return (
       <div className="tools tools-history">
-        <div className="tool tool-done">
+        <div className={`tool tool-done ${isError ? 'tool-error' : ''}`}>
           <div className="tool-head">
-            <span className="tool-status">✓</span>
+            <span className="tool-status">{isError ? '✗' : '✓'}</span>
             <ToolTitle
               title={message.toolView?.title ?? 'Tool result'}
               path={message.toolView?.path}
@@ -91,9 +104,21 @@ export function MessageView({
           className="msg-content markdown-body"
           dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
         />
-        {assistantTiming ? (
-          <div className="msg-time">{assistantTiming}</div>
-        ) : null}
+        <div className="msg-footer">
+          {assistantTiming ? (
+            <div className="msg-time">{assistantTiming}</div>
+          ) : null}
+          {message.content ? (
+            <button
+              type="button"
+              className="msg-copy-btn"
+              title={copied ? 'Copied' : 'Copy response as Markdown'}
+              onClick={copyContent}
+            >
+              {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+            </button>
+          ) : null}
+        </div>
       </div>
     );
   }
@@ -127,7 +152,21 @@ export function MessageView({
         {message.content ? (
           <pre className="msg-content">{message.content}</pre>
         ) : null}
-        {timing ? <div className="msg-time">{timing}</div> : null}
+        {timing || (message.role === WebviewRole.User && message.content) ? (
+          <div className="msg-footer">
+            {message.role === WebviewRole.User && message.content ? (
+              <button
+                type="button"
+                className="msg-copy-btn"
+                title={copied ? 'Copied' : 'Copy prompt'}
+                onClick={copyContent}
+              >
+                {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+              </button>
+            ) : null}
+            {timing ? <div className="msg-time">{timing}</div> : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -19,9 +19,10 @@ export const DEFAULT_BASH_TIMEOUT_MS = 120_000;
 export const MAX_BASH_TIMEOUT_MS = 600_000;
 /**
  * Combined stdout+stderr cap. Output beyond this is dropped (head kept) so a
- * runaway command can't flood the model's context.
+ * runaway command can't flood the model's context, while staying roomy enough
+ * for the tool's real jobs — test runs, builds, and repo-wide searches.
  */
-export const MAX_BASH_OUTPUT_CHARS = 2_000;
+export const MAX_BASH_OUTPUT_CHARS = 10_000;
 
 /**
  * Runs a shell command in the workspace root and returns its combined output
@@ -188,8 +189,11 @@ export class BashTool implements Tool {
     killReason: 'timeout' | 'aborted' | undefined
   ): ToolResult {
     const body = output.length > 0 ? output : '(no output)';
+    // On truncation, point the model at the paging-aware read path — the
+    // moment bash clips a file read is exactly when read_file is the better
+    // tool, and the redirect lands better here than as an upfront prompt rule.
     const note = truncated
-      ? `\n\n(output truncated at ${MAX_BASH_OUTPUT_CHARS} characters)`
+      ? `\n\n(output truncated at ${MAX_BASH_OUTPUT_CHARS} characters — to read a file, use the read_file tool instead, which pages cleanly)`
       : '';
 
     if (killReason === 'timeout') {

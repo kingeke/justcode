@@ -675,6 +675,9 @@ export class ChatSessionService {
             createMessage('tool', toolResult.content, new Date(), undefined, {
               toolCallId: call.id,
               name: call.name,
+              // Persist the failure flag so the transcript still shows the
+              // call as errored after the turn commits (and across reloads).
+              ...(toolResult.isError ? { isError: true } : {}),
             })
           );
 
@@ -1231,7 +1234,7 @@ function appendInterruptedStepArtifacts(
           '[Interrupted by user — this tool call was cancelled before it produced a result.]',
           new Date(),
           undefined,
-          { toolCallId: call.id, name: call.name }
+          { toolCallId: call.id, name: call.name, isError: true }
         )
       );
     }
