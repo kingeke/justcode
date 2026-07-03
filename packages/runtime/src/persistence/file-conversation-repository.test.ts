@@ -141,7 +141,10 @@ describe('FileConversationRepository', () => {
     // …and migrates to the split layout on the next save.
     await repository.save(loaded);
     const files = (await readdir(directory)).sort();
-    expect(files).toEqual(['legacy-session.json', 'legacy-session.messages.json']);
+    expect(files).toEqual([
+      'legacy-session.json',
+      'legacy-session.messages.json',
+    ]);
   });
 
   it('clears both files for a session', async () => {

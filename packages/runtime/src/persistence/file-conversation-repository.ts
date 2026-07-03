@@ -59,16 +59,15 @@ export class FileConversationRepository implements ConversationRepository {
 
   public async clear(sessionId: string): Promise<void> {
     await Promise.all(
-      [
-        this.getMessagesFilePath(sessionId),
-        this.getFilePath(sessionId),
-      ].map(async (filePath) => {
-        try {
-          await rm(filePath);
-        } catch (error) {
-          if (!isFileMissingError(error)) throw error;
+      [this.getMessagesFilePath(sessionId), this.getFilePath(sessionId)].map(
+        async (filePath) => {
+          try {
+            await rm(filePath);
+          } catch (error) {
+            if (!isFileMissingError(error)) throw error;
+          }
         }
-      })
+      )
     );
   }
 

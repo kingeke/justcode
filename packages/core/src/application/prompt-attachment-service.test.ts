@@ -209,9 +209,10 @@ describe('PromptAttachmentService', () => {
   });
 
   it('lists @currentFile:: symbols by resolving to the open editor file', async () => {
-    const file = ['export function alpha() {}', 'export function beta() {}'].join(
-      '\n'
-    );
+    const file = [
+      'export function alpha() {}',
+      'export function beta() {}',
+    ].join('\n');
     const service = new PromptAttachmentService(
       new InMemoryWorkspaceFiles({ 'src/app.ts': file }),
       undefined,

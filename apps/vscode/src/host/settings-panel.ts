@@ -276,7 +276,8 @@ export class SettingsPanel {
 
     const builtIn = BUILT_IN_PROMPTS[modeId];
     if (builtIn) {
-      const override = trimmed && trimmed !== builtIn.default ? trimmed : undefined;
+      const override =
+        trimmed && trimmed !== builtIn.default ? trimmed : undefined;
       const next = { ...config };
       if (override) next[builtIn.configKey] = override;
       else delete next[builtIn.configKey];
