@@ -189,6 +189,10 @@ export const commands: Item[] = [
     name: '/context-window',
     description: 'Set how many recent context items are sent to the model.',
   },
+  {
+    name: '/context-usage',
+    description: "Show how much of the model's context window is used.",
+  },
   { name: '/config', description: 'Open the config file in your editor.' },
   {
     name: '/reset',
@@ -249,6 +253,8 @@ export const surfaces: { name: string; blurb: string; points: string[] }[] = [
     points: [
       'Install via curl, npm, or Homebrew',
       'Slash commands, modes, and session history',
+      'Live context-usage meter with /context-usage',
+      'Model picker with collapsible provider groups',
       'Works over SSH and in any shell',
     ],
   },
@@ -258,6 +264,7 @@ export const surfaces: { name: string; blurb: string; points: string[] }[] = [
       'The exact same lean engine, in a sidebar chat panel — bring the assistant right next to the code you are editing.',
     points: [
       'Chat in the sidebar with inline diffs for every edit',
+      'Context ring with a session-info breakdown at a glance',
       'Settings UI for providers and MCP servers',
       'Attach images, browse and resume sessions',
     ],

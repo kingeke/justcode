@@ -20,6 +20,7 @@ export enum CommandName {
   ConfigureMcpServers = 'configure-mcp-servers',
   ReadLimit = 'read-limit',
   ContextWindow = 'context-window',
+  ContextUsage = 'context-usage',
   Config = 'config',
   Reset = 'reset',
 }
@@ -115,6 +116,10 @@ export const COMMANDS: Command[] = [
     name: CommandName.ContextWindow,
     description:
       'Set how many recent context window items are sent to the model, e.g. /context-window 50',
+  },
+  {
+    name: CommandName.ContextUsage,
+    description: "Show how much of the model's context window is used",
   },
   {
     name: CommandName.Config,

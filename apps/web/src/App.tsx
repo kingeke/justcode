@@ -237,7 +237,7 @@ export function App() {
               Install the VS Code extension
             </span>
             <div className="cmd">
-              <span className="cmd-label">code</span>
+              <span className="cmd-label">vscode</span>
               <code>{extensionInstall}</code>
               <CopyButton value={extensionInstall} />
             </div>

@@ -63,11 +63,19 @@ interface ModelPickerProps {
   onCancel: () => void;
 }
 
-interface GroupedModel {
-  model: ModelInfo;
-  isFirstInGroup: boolean;
-  groupName: string;
-}
+/**
+ * A row of the picker list: either a provider heading (focusable, toggles its
+ * group's collapse) or a selectable model.
+ */
+type PickerRow =
+  | {
+      kind: 'header';
+      providerId: ProviderId;
+      groupName: string;
+      count: number;
+      collapsed: boolean;
+    }
+  | { kind: 'model'; model: ModelInfo };
 
 export function ModelPicker(props: ModelPickerProps): React.ReactNode {
   const [query, setQuery] = useState('');
@@ -76,7 +84,14 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
     direction: 'asc',
   });
   const [focusedIndex, setFocusedIndex] = useState(0);
+  const [collapsedProviders, setCollapsedProviders] = useState<Set<ProviderId>>(
+    new Set()
+  );
   const scrollOffsetRef = useRef(0);
+
+  // A live search overrides collapsing so matches are never hidden; the
+  // collapsed set is kept and applies again once the query is cleared.
+  const searching = query.trim().length > 0;
 
   const filteredModels = useMemo(
     () =>
@@ -89,33 +104,71 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
     [props.models, query]
   );
 
-  const grouped: GroupedModel[] = useMemo(() => {
-    const result: GroupedModel[] = [];
+  const rows: PickerRow[] = useMemo(() => {
     const sorted = [...filteredModels].sort((a, b) =>
       compareModels(a, b, sortState)
     );
+    if (sortState.mode !== 'provider') {
+      return sorted.map((model) => ({ kind: 'model' as const, model }));
+    }
 
+    const counts = new Map<ProviderId, number>();
     for (const model of sorted) {
-      const isFirstInGroup =
-        sortState.mode === 'provider' &&
-        model.providerId !== result.at(-1)?.model.providerId;
-      result.push({
-        model,
-        isFirstInGroup,
-        groupName: PROVIDER_BY_ID[model.providerId]?.name ?? model.providerId,
-      });
+      counts.set(model.providerId, (counts.get(model.providerId) ?? 0) + 1);
+    }
+
+    const result: PickerRow[] = [];
+    let lastProviderId: ProviderId | undefined;
+    for (const model of sorted) {
+      if (model.providerId !== lastProviderId) {
+        lastProviderId = model.providerId;
+        result.push({
+          kind: 'header',
+          providerId: model.providerId,
+          groupName: PROVIDER_BY_ID[model.providerId]?.name ?? model.providerId,
+          count: counts.get(model.providerId) ?? 0,
+          collapsed: !searching && collapsedProviders.has(model.providerId),
+        });
+      }
+      if (!searching && collapsedProviders.has(model.providerId)) continue;
+      result.push({ kind: 'model', model });
     }
 
     return result;
-  }, [filteredModels, sortState]);
+  }, [filteredModels, sortState, collapsedProviders, searching]);
 
   const clampFocus = (next: number) =>
-    Math.max(0, Math.min(next, grouped.length - 1));
+    Math.max(0, Math.min(next, rows.length - 1));
+
+  const toggleProvider = (providerId: ProviderId): void => {
+    setCollapsedProviders((prev) => {
+      const next = new Set(prev);
+      if (next.has(providerId)) {
+        next.delete(providerId);
+      } else {
+        next.add(providerId);
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
-    setFocusedIndex(0);
+    // Land on the first model, not the heading above it, so Enter still picks
+    // a model straight away like it did before headers became focusable.
+    setFocusedIndex(sortState.mode === 'provider' ? 1 : 0);
     scrollOffsetRef.current = 0;
   }, [query, sortState]);
+
+  // Collapsing shrinks the list; keep focus and scroll inside it.
+  useEffect(() => {
+    setFocusedIndex((current) =>
+      Math.max(0, Math.min(current, rows.length - 1))
+    );
+    const maxOffset = Math.max(0, rows.length - VISIBLE_ROWS);
+    if (scrollOffsetRef.current > maxOffset) {
+      scrollOffsetRef.current = maxOffset;
+    }
+  }, [rows.length]);
 
   useKeyboard((key) => {
     if (key.name === KeyName.Escape || (key.ctrl && key.name === KeyName.C)) {
@@ -124,8 +177,29 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
     }
 
     if (key.name === KeyName.Return) {
-      const entry = grouped[focusedIndex];
-      if (entry) props.onSelect(entry.model);
+      const entry = rows[focusedIndex];
+      if (entry?.kind === 'model') props.onSelect(entry.model);
+      else if (entry?.kind === 'header') toggleProvider(entry.providerId);
+      return;
+    }
+
+    if (key.name === KeyName.Left || key.name === KeyName.Right) {
+      if (sortState.mode !== 'provider') return;
+      const shouldCollapse = key.name === KeyName.Left;
+      // Shift folds/unfolds every provider group at once.
+      if (key.shift) {
+        setCollapsedProviders(
+          shouldCollapse
+            ? new Set(filteredModels.map((m) => m.providerId))
+            : new Set()
+        );
+        return;
+      }
+      const entry = rows[focusedIndex];
+      if (entry?.kind === 'header') {
+        if (shouldCollapse !== entry.collapsed)
+          toggleProvider(entry.providerId);
+      }
       return;
     }
 
@@ -174,7 +248,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
     }
   });
 
-  const visibleRows = grouped.slice(
+  const visibleRows = rows.slice(
     scrollOffsetRef.current,
     scrollOffsetRef.current + VISIBLE_ROWS
   );
@@ -188,12 +262,9 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
       paddingLeft={1}
       paddingRight={1}
     >
-      <box flexDirection="row" justifyContent="space-between" marginBottom={1}>
+      <box marginBottom={1}>
         <text fg="cyan" attributes={BOLD}>
           Select model
-        </text>
-        <text fg={MUTED}>
-          tab sort · {formatSortState(sortState)} · esc to cancel
         </text>
       </box>
 
@@ -201,7 +272,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
         <text content={queryLineContent(query)} />
       </box>
 
-      {grouped.length === 0 ? (
+      {rows.length === 0 ? (
         <text fg={MUTED}>
           {props.models.length === 0 ? 'Loading models...' : 'No models match.'}
         </text>
@@ -210,6 +281,31 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
           {visibleRows.map((entry, i) => {
             const absoluteIndex = scrollOffsetRef.current + i;
             const isFocused = absoluteIndex === focusedIndex;
+
+            if (entry.kind === 'header') {
+              return (
+                <box key={`header:${entry.providerId}`} flexDirection="column">
+                  <text
+                    attributes={BOLD}
+                    {...(isFocused
+                      ? { bg: 'cyan', fg: 'black' }
+                      : { fg: 'cyan' })}
+                  >
+                    {'\n'}
+                    {isFocused ? '› ' : '  '}
+                    {entry.collapsed ? '▸ ' : '▾ '}
+                    {entry.groupName}
+                    {entry.collapsed ? (
+                      <span fg={isFocused ? 'black' : MUTED}>
+                        {' '}
+                        · {entry.count} model{entry.count === 1 ? '' : 's'}
+                      </span>
+                    ) : null}
+                  </text>
+                </box>
+              );
+            }
+
             const isCurrent =
               entry.model.id === props.currentModel &&
               (props.currentProviderId === undefined ||
@@ -218,54 +314,52 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
             return (
               <box
                 key={`${entry.model.providerId}:${entry.model.id}`}
-                flexDirection="column"
+                flexDirection="row"
               >
-                {entry.isFirstInGroup ? (
-                  <text fg="cyan" attributes={BOLD}>
-                    {'\n'}
-                    {entry.groupName}
-                  </text>
-                ) : null}
-                <box flexDirection="row">
-                  <text
-                    flexGrow={1}
-                    {...(isFocused ? { bg: 'cyan', fg: 'black' } : {})}
-                  >
-                    {isFocused ? '› ' : '  '}
-                    {entry.model.displayName}
-                    {sortState.mode === 'provider' ? null : (
-                      <span fg={isFocused ? 'black' : MUTED}>
-                        {' '}
-                        ·{' '}
-                        {PROVIDER_BY_ID[entry.model.providerId]?.name ??
-                          entry.model.providerId}
-                      </span>
-                    )}
-                    {isCurrent ? (
-                      <span fg={isFocused ? 'black' : MUTED}> ✓</span>
-                    ) : null}
-                  </text>
-                  <text
-                    {...(isFocused
-                      ? { bg: 'cyan', fg: 'black' }
-                      : { fg: MUTED })}
-                  >
-                    {formatModelMeta(entry.model)}
-                  </text>
-                </box>
+                <text
+                  flexGrow={1}
+                  {...(isFocused ? { bg: 'cyan', fg: 'black' } : {})}
+                >
+                  {isFocused ? '› ' : '  '}
+                  {entry.model.displayName}
+                  {sortState.mode === 'provider' ? null : (
+                    <span fg={isFocused ? 'black' : MUTED}>
+                      {' '}
+                      ·{' '}
+                      {PROVIDER_BY_ID[entry.model.providerId]?.name ??
+                        entry.model.providerId}
+                    </span>
+                  )}
+                  {isCurrent ? (
+                    <span fg={isFocused ? 'black' : MUTED}> ✓</span>
+                  ) : null}
+                </text>
+                <text
+                  {...(isFocused ? { bg: 'cyan', fg: 'black' } : { fg: MUTED })}
+                >
+                  {formatModelMeta(entry.model)}
+                </text>
               </box>
             );
           })}
-          {grouped.length > VISIBLE_ROWS ? (
+          {rows.length > VISIBLE_ROWS ? (
             <text fg={MUTED}>
               {'\n'}
-              {scrollOffsetRef.current + VISIBLE_ROWS < grouped.length
-                ? `↓ ${grouped.length - scrollOffsetRef.current - VISIBLE_ROWS} more`
+              {scrollOffsetRef.current + VISIBLE_ROWS < rows.length
+                ? `↓ ${rows.length - scrollOffsetRef.current - VISIBLE_ROWS} more`
                 : ''}
             </text>
           ) : null}
         </box>
       )}
+
+      <box flexDirection="row" justifyContent="flex-end" marginTop={1}>
+        <text fg={MUTED}>
+          tab sort · {formatSortState(sortState)}
+          {sortState.mode === 'provider' ? ' · ←→ fold (shift: all)' : ''} · esc
+          to cancel
+        </text>
+      </box>
     </box>
   );
 }

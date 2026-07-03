@@ -176,6 +176,8 @@ export function Composer(props: ComposerProps): React.JSX.Element {
     Set<string>
   >(new Set());
   const [showModes, setShowModes] = React.useState(false);
+  const [showContextInfo, setShowContextInfo] = React.useState(false);
+  const contextInfoRef = React.useRef<HTMLDivElement>(null);
   // When set, the mode popup shows the "create custom mode" form instead.
   const [creatingMode, setCreatingMode] = React.useState(false);
   const [modeNameDraft, setModeNameDraft] = React.useState('');
@@ -209,6 +211,21 @@ export function Composer(props: ComposerProps): React.JSX.Element {
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [showSettings]);
+
+  // Close the context-info popup when clicking outside it.
+  React.useEffect(() => {
+    if (!showContextInfo) return;
+    const onPointerDown = (e: PointerEvent): void => {
+      if (
+        contextInfoRef.current &&
+        !contextInfoRef.current.contains(e.target as Node)
+      ) {
+        setShowContextInfo(false);
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [showContextInfo]);
 
   // Close the reasoning popup when clicking outside it.
   React.useEffect(() => {
@@ -358,6 +375,22 @@ export function Composer(props: ComposerProps): React.JSX.Element {
       (m) =>
         m.id === props.activeModel && m.providerId === props.activeProviderId
     ) ?? props.models.find((m) => m.id === props.activeModel);
+  // Context usage shown as a ring gauge before the tools icon: the session's
+  // input-token total (the status bar's "ctx" readout) against the model's
+  // window. Only models that report a context window get it.
+  const contextWindow = activeModelObj?.contextWindow;
+  const contextInfo =
+    contextWindow != null && contextWindow > 0
+      ? {
+          used: props.usage?.inputTokens ?? 0,
+          window: contextWindow,
+          pct: Math.min(
+            100,
+            Math.round(((props.usage?.inputTokens ?? 0) / contextWindow) * 100)
+          ),
+        }
+      : undefined;
+
   const reasoning = activeModelObj?.reasoning;
   const reasoningLevels = reasoning?.effortLevels ?? [];
   const reasoningSupported = reasoningLevels.length > 0;
@@ -940,6 +973,41 @@ export function Composer(props: ComposerProps): React.JSX.Element {
           </div>
 
           <div className="toolbar-right">
+            {contextInfo ? (
+              <div className="settings-popup-anchor" ref={contextInfoRef}>
+                {showContextInfo ? (
+                  <div className="settings-popup context-popup">
+                    <div className="settings-popup-section">
+                      <div className="settings-popup-heading">Session Info</div>
+                      <div className="context-popup-title">Context Window</div>
+                      <div className="context-popup-row">
+                        <span>
+                          {fmtTokenCount(contextInfo.used)} /{' '}
+                          {fmtTokenCount(contextInfo.window)} tokens
+                        </span>
+                        <span className="context-popup-pct">
+                          {contextInfo.pct}%
+                        </span>
+                      </div>
+                      <div className="context-popup-bar">
+                        <div
+                          className={`context-popup-bar-fill ${contextPressureClass(contextInfo.pct)}`}
+                          style={{ width: `${contextInfo.pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  className={`icon-btn ${showContextInfo ? 'icon-btn-active' : ''} ${contextPressureClass(contextInfo.pct)}`}
+                  title={`Context window ${contextInfo.pct}% full — ${fmtTokenCount(contextInfo.used)} / ${fmtTokenCount(contextInfo.window)} tokens`}
+                  onClick={() => setShowContextInfo((s) => !s)}
+                >
+                  <ContextRing pct={contextInfo.pct} />
+                </button>
+              </div>
+            ) : null}
             <div className="settings-popup-anchor" ref={toolsRef}>
               {showTools ? (
                 <div className="settings-popup tools-popup">
@@ -1339,6 +1407,58 @@ export function Composer(props: ComposerProps): React.JSX.Element {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Context-pressure styling: amber above 60% full, red above 80%. */
+function contextPressureClass(pct: number): string {
+  if (pct > 80) return 'context-ring-danger';
+  if (pct > 60) return 'context-ring-warn';
+  return '';
+}
+
+/** Compact token count for the context readout (e.g. 22.1K, 131K, 1M). */
+function fmtTokenCount(n: number): string {
+  return new Intl.NumberFormat('en', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(n);
+}
+
+/** A small circular gauge showing how full the model's context window is. */
+function ContextRing({ pct }: { pct: number }): React.JSX.Element {
+  const radius = 5.5;
+  const circumference = 2 * Math.PI * radius;
+  const filled = (Math.min(pct, 100) / 100) * circumference;
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 14 14"
+      role="img"
+      aria-label={`Context window ${pct}% full`}
+    >
+      <circle
+        cx={7}
+        cy={7}
+        r={radius}
+        fill="none"
+        stroke="currentColor"
+        strokeOpacity={0.25}
+        strokeWidth={2}
+      />
+      <circle
+        cx={7}
+        cy={7}
+        r={radius}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeDasharray={`${filled} ${circumference}`}
+        strokeLinecap="round"
+        transform="rotate(-90 7 7)"
+      />
+    </svg>
   );
 }
 

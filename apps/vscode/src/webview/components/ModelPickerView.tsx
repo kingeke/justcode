@@ -121,6 +121,9 @@ export function ModelPickerView({
   const [sortMode, setSortMode] = React.useState<SortMode>('provider');
   const [sortDir, setSortDir] = React.useState<SortDir>('asc');
   const [refreshing, setRefreshing] = React.useState(false);
+  const [collapsedProviders, setCollapsedProviders] = React.useState<
+    Set<string>
+  >(new Set());
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
@@ -174,6 +177,32 @@ export function ModelPickerView({
       }
     }
   }
+
+  // A live search overrides collapsing so matches are never hidden; the
+  // collapsed set is kept and applies again once the query is cleared.
+  const searching = query.trim().length > 0;
+  const toggleProvider = (providerId: string): void => {
+    setCollapsedProviders((prev) => {
+      const next = new Set(prev);
+      if (next.has(providerId)) {
+        next.delete(providerId);
+      } else {
+        next.add(providerId);
+      }
+      return next;
+    });
+  };
+
+  // Fold or unfold every provider group at once. "Collapse all" until every
+  // visible group is collapsed, then it flips to "Expand all".
+  const allCollapsed =
+    groups.length > 0 &&
+    groups.every((g) => collapsedProviders.has(g.providerId));
+  const toggleAllProviders = (): void => {
+    setCollapsedProviders(
+      allCollapsed ? new Set() : new Set(groups.map((g) => g.providerId))
+    );
+  };
 
   // Clicking the active sort flips its direction; clicking another switches to
   // it ascending. Only one mode is ever active.
@@ -254,6 +283,20 @@ export function ModelPickerView({
             </button>
           );
         })}
+        {byProvider && !searching && groups.length > 0 ? (
+          <button
+            type="button"
+            className="model-sort-btn model-collapse-all-btn"
+            title={
+              allCollapsed
+                ? 'Expand every provider group'
+                : 'Collapse every provider group'
+            }
+            onClick={toggleAllProviders}
+          >
+            {allCollapsed ? 'Expand all' : 'Collapse all'}
+          </button>
+        ) : null}
       </div>
 
       <div className="model-picker-list">
@@ -278,22 +321,44 @@ export function ModelPickerView({
               : 'No models match.'}
           </div>
         ) : byProvider ? (
-          groups.map((group) => (
-            <div key={group.providerId} className="model-group">
-              <div className="model-group-header">{group.providerName}</div>
-              {group.models.map((model) => (
-                <ModelRow
-                  key={`${model.providerId}:${model.id}`}
-                  model={model}
-                  active={
-                    model.id === activeModel &&
-                    model.providerId === activeProviderId
-                  }
-                  onSelect={onSelect}
-                />
-              ))}
-            </div>
-          ))
+          groups.map((group) => {
+            const collapsed =
+              !searching && collapsedProviders.has(group.providerId);
+            return (
+              <div key={group.providerId} className="model-group">
+                <button
+                  type="button"
+                  className="model-group-header"
+                  title={collapsed ? 'Expand provider' : 'Collapse provider'}
+                  aria-expanded={!collapsed}
+                  onClick={() => toggleProvider(group.providerId)}
+                >
+                  <span className="model-group-chevron">
+                    {collapsed ? '▸' : '▾'}
+                  </span>
+                  {group.providerName}
+                  {collapsed ? (
+                    <span className="model-group-count">
+                      {group.models.length}
+                    </span>
+                  ) : null}
+                </button>
+                {collapsed
+                  ? null
+                  : group.models.map((model) => (
+                      <ModelRow
+                        key={`${model.providerId}:${model.id}`}
+                        model={model}
+                        active={
+                          model.id === activeModel &&
+                          model.providerId === activeProviderId
+                        }
+                        onSelect={onSelect}
+                      />
+                    ))}
+              </div>
+            );
+          })
         ) : (
           sorted.map((model) => (
             <ModelRow

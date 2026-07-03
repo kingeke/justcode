@@ -422,10 +422,12 @@ function metricsLineContent(
 ): StyledText {
   const cachedTokens = metrics.cachedTokens;
   const newTokens = Math.max(metrics.inputTokens - cachedTokens, 0);
+  // ctx(%) tracks the same number as the "ctx" readout beside it (the
+  // session's input-token total), so the two can never disagree.
   const pct =
     activeModelInfo?.contextWindow == null
       ? null
-      : contextPct(metrics.lastInputTokens, activeModelInfo.contextWindow);
+      : contextPct(metrics.inputTokens, activeModelInfo.contextWindow);
 
   const chunks: TextChunk[] = [
     tc('ctx ', { fg: MUTED }),
@@ -441,7 +443,7 @@ function metricsLineContent(
   if (pct != null) {
     chunks.push(
       tc(' ctx(%) ', { fg: MUTED }),
-      tc(`${pct}%`, { fg: pct > 80 ? 'yellow' : 'white' })
+      tc(`${pct}%`, { fg: contextUsageColor(pct) })
     );
   }
 
@@ -1193,6 +1195,37 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     []
   );
 
+  // Transient command output (e.g. /context-usage) flashed in the notification
+  // slot. Plain `status` is masked by the TTFT/tok-s readout once a turn has
+  // completed, so command feedback needs this higher-priority slot to stay
+  // visible; it clears after a few seconds and the stats return.
+  const [commandNotice, setCommandNotice] = useState<
+    StyledText | string | null
+  >(null);
+  const commandNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+
+  const flashCommandNotice = (text: StyledText | string): void => {
+    setCommandNotice(text);
+    if (commandNoticeTimerRef.current) {
+      clearTimeout(commandNoticeTimerRef.current);
+    }
+    commandNoticeTimerRef.current = setTimeout(() => {
+      setCommandNotice(null);
+      commandNoticeTimerRef.current = null;
+    }, 6000);
+  };
+
+  useEffect(
+    () => () => {
+      if (commandNoticeTimerRef.current) {
+        clearTimeout(commandNoticeTimerRef.current);
+      }
+    },
+    []
+  );
+
   // Show a "Jump to bottom" affordance whenever the transcript is scrolled up
   // away from the latest output. The scrollbox has no public scroll event, so
   // we poll it on a short interval; setState bails out when the value is
@@ -1876,6 +1909,31 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           count > 0
             ? `Context window set to ${count} items`
             : 'Context window turned off — sending the full conversation'
+        );
+        return;
+      }
+
+      case CommandName.ContextUsage: {
+        const windowSize = activeModelInfo?.contextWindow;
+        if (windowSize == null) {
+          flashCommandNotice(
+            activeModelInfo
+              ? `${activeModelInfo.displayName} doesn't report a context window`
+              : 'Pick a model before checking context usage'
+          );
+          return;
+        }
+        const pct = contextPct(metrics.inputTokens, windowSize);
+        flashCommandNotice(
+          new StyledText([
+            tc('Context ', { fg: MUTED }),
+            tc(`${contextBar(pct)} ${pct}%`, { fg: contextUsageColor(pct) }),
+            tc(' · ', { fg: MUTED }),
+            tc(
+              `${metrics.inputTokens.toLocaleString()} / ${windowSize.toLocaleString()} tokens`,
+              { fg: 'white' }
+            ),
+          ])
         );
         return;
       }
@@ -3537,6 +3595,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
               usual stats/status content returns when the timer clears it. */}
           {copiedNotice ? (
             <text content={statusLineContent('✓ Copied to clipboard')} />
+          ) : commandNotice ? (
+            <text
+              content={
+                typeof commandNotice === 'string'
+                  ? statusLineContent(commandNotice)
+                  : commandNotice
+              }
+            />
           ) : displayStats ? (
             <text
               content={
@@ -3894,7 +3960,21 @@ function truncatePreview(preview: string): string {
 }
 
 function contextPct(inputTokens: number, contextWindow: number): number {
-  return Math.round((inputTokens / contextWindow) * 100);
+  return Math.min(100, Math.round((inputTokens / contextWindow) * 100));
+}
+
+/** ASCII progress bar for the /context-usage readout, e.g. [████░░░░░░░░]. */
+function contextBar(pct: number, width = 20): string {
+  const filled = Math.round((Math.min(Math.max(pct, 0), 100) / 100) * width);
+  return `[${'█'.repeat(filled)}${'░'.repeat(width - filled)}]`;
+}
+
+/** Context-pressure color, matching the extension's ring: amber above 60%,
+ * red above 80%. */
+function contextUsageColor(pct: number): string {
+  if (pct > 80) return 'red';
+  if (pct > 60) return 'yellow';
+  return 'white';
 }
 
 function mergeProviders(
