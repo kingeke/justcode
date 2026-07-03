@@ -310,6 +310,9 @@ export function reducer(state: ChatState, action: Action): ChatState {
         liveTurnItems: [],
         completedThinkingItems: [],
         error: undefined,
+        // View-only toggle: every session snapshot starts with responses visible
+        // so a collapse from a previous session doesn't hide the new one.
+        collapseResponses: false,
         // A resumed session carries its persisted footer metrics; a fresh one
         // resets them.
         usage: action.usage,

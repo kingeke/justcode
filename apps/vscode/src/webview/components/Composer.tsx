@@ -1363,23 +1363,25 @@ export function Composer(props: ComposerProps): React.JSX.Element {
           <span className="status-usage" title="Token usage this session">
             <span className="metric-label">ctx </span>
             <span className="metric-value">
-              {(props?.usage?.inputTokens || 0).toLocaleString()}
+              {formatTokens(props?.usage?.inputTokens || 0)}
             </span>
             <span className="metric-label"> cached </span>
             <span className="metric-value">
-              {(props?.usage?.cachedTokens || 0).toLocaleString()}
+              {formatTokens(props?.usage?.cachedTokens || 0)}
             </span>
             <span className="metric-label"> in </span>
             <span className="metric-value">
-              {Math.max(
-                (props?.usage?.inputTokens || 0) -
-                  (props?.usage?.cachedTokens || 0),
-                0
-              ).toLocaleString()}
+              {formatTokens(
+                Math.max(
+                  (props?.usage?.inputTokens || 0) -
+                    (props?.usage?.cachedTokens || 0),
+                  0
+                )
+              )}
             </span>
             <span className="metric-label"> out </span>
             <span className="metric-value">
-              {(props?.usage?.outputTokens || 0).toLocaleString()}
+              {formatTokens(props?.usage?.outputTokens || 0)}
             </span>
             {props?.usage && props?.usage.cost !== undefined ? (
               <>
@@ -1460,6 +1462,17 @@ function ContextRing({ pct }: { pct: number }): React.JSX.Element {
       />
     </svg>
   );
+}
+
+/** Compacts a token count for the footer (817851 → 818k, 8151 → 8.2k, 1234567 → 1.2m). */
+function formatTokens(count: number): string {
+  if (count < 1000) return String(count);
+  const scaled = count < 1_000_000 ? count / 1000 : count / 1_000_000;
+  const suffix = count < 1_000_000 ? 'k' : 'm';
+  // One decimal while it adds precision (8.2k, 1.2m); whole numbers past 10.
+  const rounded =
+    scaled < 10 ? Math.round(scaled * 10) / 10 : Math.round(scaled);
+  return `${rounded}${suffix}`;
 }
 
 /** Formats a millisecond duration the way the CLI footer does (e.g. 1.5s). */
