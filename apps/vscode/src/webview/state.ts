@@ -97,6 +97,14 @@ export interface ChatState {
    * in webview state and isn't persisted.
    */
   collapseResponses: boolean;
+  /**
+   * When true, the ChatGPT-style conversation sidebar is shown on the right edge
+   * of the chat view: a hover strip that expands into an outline of the user's
+   * messages in the open conversation, each a truncated plain-text preview that
+   * scrolls the transcript on click. A view-only preference the user toggles
+   * from the chat header; defaults on.
+   */
+  showConversationSidebar: boolean;
   sessions: WebviewSessionSummary[];
   hasConnectedProvider: boolean;
   /** The session currently open in the chat view. */
@@ -192,6 +200,7 @@ export const initialState: ChatState = {
   status: ChatStatus.Loading,
   view: 'sessions',
   collapseResponses: false,
+  showConversationSidebar: true,
   sessions: [],
   hasConnectedProvider: false,
   sessionId: undefined,
@@ -246,6 +255,7 @@ export enum LocalActionType {
   SetHistoryLimit = 'setHistoryLimit',
   SetView = 'setView',
   ToggleCollapseResponses = 'toggleCollapseResponses',
+  ToggleConversationSidebar = 'toggleConversationSidebar',
   SetTitle = 'setTitle',
   QueueMessage = 'queueMessage',
   DequeueMessage = 'dequeueMessage',
@@ -280,6 +290,7 @@ export type LocalAction =
   | { type: LocalActionType.SetHistoryLimit; count: number }
   | { type: LocalActionType.SetView; view: ChatView }
   | { type: LocalActionType.ToggleCollapseResponses }
+  | { type: LocalActionType.ToggleConversationSidebar }
   | { type: LocalActionType.SetTitle; title: string }
   | {
       type: LocalActionType.QueueMessage;
@@ -638,6 +649,12 @@ export function reducer(state: ChatState, action: Action): ChatState {
 
     case LocalActionType.ToggleCollapseResponses:
       return { ...state, collapseResponses: !state.collapseResponses };
+
+    case LocalActionType.ToggleConversationSidebar:
+      return {
+        ...state,
+        showConversationSidebar: !state.showConversationSidebar,
+      };
 
     case LocalActionType.SetTitle:
       return { ...state, sessionTitle: action.title };

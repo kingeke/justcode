@@ -60,6 +60,7 @@ interface AnthropicMessageResponse {
     input_tokens?: number;
     output_tokens?: number;
     cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
   };
 }
 
@@ -126,7 +127,14 @@ export class AnthropicProvider implements ProviderClient {
     const toolCalls = parseAnthropicToolCalls(response.content ?? []);
     const usage = response.usage
       ? {
-          inputTokens: response.usage.input_tokens ?? 0,
+          // Anthropic reports only the *uncached* prompt in `input_tokens`, with
+          // the cached prefix broken out separately. Sum them so `inputTokens` is
+          // the full context size (matching the total `prompt_tokens` other
+          // providers report), while `cachedTokens` stays the cache-read subset.
+          inputTokens:
+            (response.usage.input_tokens ?? 0) +
+            (response.usage.cache_read_input_tokens ?? 0) +
+            (response.usage.cache_creation_input_tokens ?? 0),
           outputTokens: response.usage.output_tokens ?? 0,
           cachedTokens: response.usage.cache_read_input_tokens ?? 0,
         }
@@ -293,7 +301,7 @@ export class AnthropicProvider implements ProviderClient {
 }
 
 /** Accumulates Anthropic streaming events into a single {@link ChatResult}. */
-class AnthropicStreamAccumulator {
+export class AnthropicStreamAccumulator {
   private text = '';
   private thinking = '';
   private readonly toolsByIndex = new Map<
@@ -325,14 +333,23 @@ class AnthropicStreamAccumulator {
       thinking?: string;
     };
     message?: {
-      usage?: { input_tokens?: number; cache_read_input_tokens?: number };
+      usage?: {
+        input_tokens?: number;
+        cache_read_input_tokens?: number;
+        cache_creation_input_tokens?: number;
+      };
     };
     usage?: { output_tokens?: number };
   }): void {
     switch (event.type) {
       case 'message_start':
-        this.inputTokens = event.message?.usage?.input_tokens ?? 0;
+        // See the non-streaming path: `input_tokens` is only the uncached
+        // portion, so add the cached prefix back in to get the full context size.
         this.cachedTokens = event.message?.usage?.cache_read_input_tokens ?? 0;
+        this.inputTokens =
+          (event.message?.usage?.input_tokens ?? 0) +
+          this.cachedTokens +
+          (event.message?.usage?.cache_creation_input_tokens ?? 0);
         break;
       case 'content_block_start':
         if (event.content_block?.type === 'tool_use') {

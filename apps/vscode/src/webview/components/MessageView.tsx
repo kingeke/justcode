@@ -28,12 +28,15 @@ export function MessageView({
   expandTools = false,
   onOpenFile,
   onOpenImage,
+  domId,
 }: {
   message: WebviewMessage;
   expandTools?: boolean;
   onOpenFile?: (path: string) => void;
   /** Opens a full-size preview of a transcript image (data URL). */
   onOpenImage?: (src: string) => void;
+  /** DOM id for the message's root element, so the sidebar can scroll to it. */
+  domId?: string;
 }): React.JSX.Element {
   // Copy-to-clipboard feedback for the user/assistant copy buttons. Copies the
   // raw message text (assistant replies: the Markdown source, not rendered
@@ -49,7 +52,7 @@ export function MessageView({
   if (message.role === WebviewRole.Tool) {
     const isError = message.toolView?.isError === true;
     return (
-      <div className="tools tools-history">
+      <div id={domId} className="tools tools-history">
         <div className={`tool tool-done ${isError ? 'tool-error' : ''}`}>
           <div className="tool-head">
             <span className="tool-status">{isError ? '✗' : '✓'}</span>
@@ -99,7 +102,7 @@ export function MessageView({
       ? formatTime(message.llmReceivedAt)
       : '';
     return (
-      <div className="msg msg-assistant">
+      <div id={domId} className="msg msg-assistant">
         <div
           className="msg-content markdown-body"
           dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
@@ -129,7 +132,7 @@ export function MessageView({
       : '';
 
   return (
-    <div className={`msg msg-${message.role}`}>
+    <div id={domId} className={`msg msg-${message.role}`}>
       <div className="msg-body">
         {message.images?.length ? (
           <div className="msg-images">

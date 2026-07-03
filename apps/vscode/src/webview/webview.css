@@ -1177,6 +1177,160 @@ textarea:focus {
   }
 }
 
+/* --- Conversation sidebar (ChatGPT-style hover history) ------------------- */
+
+/* Pinned to the right edge of the chat viewport. Collapsed it's a slim hover
+   tab; hovering (or focusing into it) slides out a floating card of recent
+   conversations. `fixed` so it overlays the transcript without shifting layout,
+   and sits above the composer but below modals (image preview = 1000). */
+/* Anchored inside .transcript-wrap, stacked as the topmost button of the
+   jump-arrow group in the bottom-right corner. */
+.conversation-sidebar {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  z-index: 60;
+  transition: bottom 0.12s ease;
+}
+
+/* Raised one slot per visible jump arrow below it. */
+.conversation-sidebar-raised-1 {
+  bottom: 48px;
+}
+
+.conversation-sidebar-raised-2 {
+  bottom: 84px;
+}
+
+/* The trigger: a round button matching the jump arrows. */
+.conversation-sidebar-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.35));
+  background: var(
+    --vscode-editorWidget-background,
+    var(--vscode-editor-background)
+  );
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  opacity: 0.92;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transition:
+    opacity 0.1s ease,
+    background 0.1s ease;
+}
+
+.conversation-sidebar:hover .conversation-sidebar-tab {
+  opacity: 1;
+  background: var(
+    --vscode-toolbar-hoverBackground,
+    var(--vscode-list-hoverBackground)
+  );
+}
+
+/* The popup card, opening upward from the button. Hidden until hover. */
+.conversation-sidebar-panel {
+  position: absolute;
+  bottom: 36px;
+  right: 0;
+  width: 260px;
+  max-width: calc(100vw - 32px);
+  /* A compact dropdown: cap the height and let the list scroll inside. */
+  max-height: min(320px, calc(100vh - 120px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.3));
+  border-radius: 10px;
+  background: var(
+    --vscode-editorWidget-background,
+    var(--vscode-sideBar-background, var(--vscode-editor-background))
+  );
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(8px);
+  visibility: hidden;
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease,
+    visibility 0.14s ease;
+}
+
+.conversation-sidebar:hover .conversation-sidebar-panel {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+}
+
+.conversation-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 6px;
+}
+
+.conversation-sidebar-title {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.conversation-sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2px 6px 6px;
+}
+
+.conversation-sidebar-empty {
+  padding: 10px 6px;
+  opacity: 0.6;
+  font-style: italic;
+  font-size: 12px;
+}
+
+.conversation-sidebar-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.conversation-sidebar-item:hover {
+  background: var(--vscode-list-hoverBackground, rgba(127, 127, 127, 0.12));
+}
+
+/* The message preview: plain text on a single line, ellipsized. */
+.conversation-sidebar-item-title {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conversation-sidebar-item-meta {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+/* Breathing room above a message the sidebar scrolls to (scrollIntoView
+   honors scroll-margin), so it doesn't sit flush against the header. */
+.transcript [id^='msg-'] {
+  scroll-margin-top: 24px;
+}
+
 /* --- Chat header ---------------------------------------------------------- */
 
 .chat-header {

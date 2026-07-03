@@ -24,8 +24,10 @@ import { ToolActivityView } from '@ext/webview/components/ToolActivityView';
 import { ApprovalPrompt, InputPrompt } from '@ext/webview/components/Prompts';
 import { Composer } from '@ext/webview/components/Composer';
 import { SessionsView } from '@ext/webview/components/SessionsView';
+import { ConversationSidebar } from '@ext/webview/components/ConversationSidebar';
 import { ModelPickerView } from '@ext/webview/components/ModelPickerView';
 import {
+  ChatIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   CollapseIcon,
@@ -464,6 +466,18 @@ export function App(): React.JSX.Element {
     dispatch({ type: LocalActionType.ToggleCollapseResponses });
   };
 
+  const toggleConversationSidebar = (): void => {
+    dispatch({ type: LocalActionType.ToggleConversationSidebar });
+  };
+
+  // Jumps the transcript to a message picked in the conversation sidebar. The
+  // sidebar only lists committed messages, each anchored by MessageView's domId.
+  const scrollToMessage = (messageId: string): void => {
+    document
+      .getElementById(`msg-${messageId}`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   const closeModelPicker = (): void => {
     dispatch({ type: LocalActionType.SetView, view: 'chat' });
   };
@@ -747,6 +761,19 @@ export function App(): React.JSX.Element {
         </button>
         <button
           type="button"
+          className={`icon-btn ${state.showConversationSidebar ? 'icon-btn-active' : ''}`}
+          title={
+            state.showConversationSidebar
+              ? 'Hide message outline'
+              : 'Show message outline'
+          }
+          aria-pressed={state.showConversationSidebar}
+          onClick={toggleConversationSidebar}
+        >
+          <ChatIcon size={16} />
+        </button>
+        <button
+          type="button"
           className="icon-btn"
           title="View chat log (chat.json)"
           onClick={viewChatLog}
@@ -824,6 +851,7 @@ export function App(): React.JSX.Element {
                     expandTools={state.expandTools}
                     onOpenFile={openFile}
                     onOpenImage={setPreviewImage}
+                    domId={`msg-${message.id}`}
                   />
                 </React.Fragment>
               );
@@ -942,6 +970,15 @@ export function App(): React.JSX.Element {
           >
             <ChevronDownIcon size={16} />
           </button>
+        ) : null}
+        {state.showConversationSidebar ? (
+          <ConversationSidebar
+            messages={state.messages}
+            onSelect={scrollToMessage}
+            stackedButtons={
+              (showJumpToTop ? 1 : 0) + (showJumpToBottom ? 1 : 0)
+            }
+          />
         ) : null}
       </div>
 
