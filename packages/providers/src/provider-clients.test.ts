@@ -66,6 +66,61 @@ describe('provider clients', () => {
     ]);
   });
 
+  it('enriches models with context windows from Ollama /api/tags', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === 'http://127.0.0.1:11434/api/tags') {
+        return createJsonResponse({
+          models: [
+            {
+              name: 'qwen3:4b',
+              model: 'qwen3:4b',
+              details: { context_length: 262144 },
+            },
+            // No context_length reported — model stays without a window.
+            { name: 'gemma4:12b-mlx', model: 'gemma4:12b-mlx', details: {} },
+          ],
+        });
+      }
+      return createJsonResponse({
+        data: [{ id: 'qwen3:4b' }, { id: 'gemma4:12b-mlx' }],
+      });
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const models = await new OllamaProvider(
+      'http://127.0.0.1:11434'
+    ).listModels();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:11434/api/tags',
+      expect.anything()
+    );
+    expect(models.find((m) => m.id === 'qwen3:4b')?.contextWindow).toBe(262144);
+    expect(
+      models.find((m) => m.id === 'gemma4:12b-mlx')?.contextWindow
+    ).toBeUndefined();
+  });
+
+  it('lists models unchanged when /api/tags is unavailable', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/api/tags')) {
+        return new Response('not found', { status: 404 });
+      }
+      return createJsonResponse({ data: [{ id: 'llama3.1:8b' }] });
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const models = await new OllamaProvider(
+      'http://127.0.0.1:11434'
+    ).listModels();
+
+    expect(models).toEqual([
+      { id: 'llama3.1:8b', displayName: 'llama3.1:8b', providerId: 'ollama' },
+    ]);
+  });
+
   it('lists LM Studio models from the OpenAI-compatible endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       createJsonResponse({
@@ -260,10 +315,11 @@ describe('provider clients', () => {
     expect(responsesBody.tools?.length).toBe(1);
   });
 
-  it('falls back to the reasoning channel when an OpenRouter stream has no content', async () => {
+  it('keeps a reasoning-only OpenRouter stream as thinking with empty content', async () => {
     // Reasoning models (e.g. gpt-oss, GLM) sometimes emit their whole turn on
-    // the reasoning channel and finish with empty content — that must become
-    // the answer, not an "empty response" error.
+    // the reasoning channel and finish with empty content — the reasoning must
+    // stay thinking (not become the answer), and the turn must not fail as an
+    // "empty response".
     const sseBody = [
       'data: {"choices":[{"delta":{"reasoning":"thought-only answer"}}]}',
       '',
@@ -280,13 +336,16 @@ describe('provider clients', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
+    const thinking: string[] = [];
     const result = await new OpenRouterProvider('test-api-key').sendChat({
       model: 'z-ai/glm-5.2',
       messages: [userMessage('hey')],
       onToken: () => {},
+      onThinkingToken: (token) => thinking.push(token),
     });
 
-    expect(result.content).toBe('thought-only answer');
+    expect(result.content).toBe('');
+    expect(thinking.join('')).toBe('thought-only answer');
   });
 
   it('sanitizes harmony-mangled tool-call names in a streamed response', async () => {
@@ -317,7 +376,7 @@ describe('provider clients', () => {
     ]);
   });
 
-  it('falls back to message.reasoning when a non-streamed OpenRouter response has no content', async () => {
+  it('surfaces message.reasoning as thinking when a non-streamed OpenRouter response has no content', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       createJsonResponse({
         choices: [
@@ -328,12 +387,15 @@ describe('provider clients', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
+    const thinking: string[] = [];
     const result = await new OpenRouterProvider('test-api-key').sendChat({
       model: 'z-ai/glm-5.2',
       messages: [userMessage('hey')],
+      onThinkingToken: (token) => thinking.push(token),
     });
 
-    expect(result.content).toBe('thought-only answer');
+    expect(result.content).toBe('');
+    expect(thinking.join('')).toBe('thought-only answer');
   });
 
   it('writes request and response logs to debug.log', async () => {

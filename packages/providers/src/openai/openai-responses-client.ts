@@ -185,15 +185,12 @@ export async function consumeResponsesStream(
   }
 
   // Some reasoning models (e.g. gpt-oss) stream their whole turn on the
-  // reasoning channel and emit no separate output text; there we surface the
-  // reasoning as the answer. But that fallback must NOT apply on a tool-call
-  // step: the model legitimately produced only reasoning + a tool call, and the
-  // reasoning is *thinking*, not the reply. Promoting it to content there makes
-  // the thought process render as a response. So only fall back when there are
-  // no tool calls.
-  const finalContent =
-    content.trim() || toolCalls.length > 0 ? content : reasoning;
-  if (!finalContent.trim() && toolCalls.length === 0) {
+  // reasoning channel and emit no separate output text. That reasoning is
+  // *thinking*, not the reply — it already streamed via onThinkingToken and is
+  // persisted as thinking, so it is never promoted to content. A reasoning-only
+  // step is a valid, non-empty response with empty content.
+  const finalContent = content;
+  if (!finalContent.trim() && toolCalls.length === 0 && !reasoning.trim()) {
     throw new Error(`Provider '${providerId}' returned an empty response.`);
   }
 

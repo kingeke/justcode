@@ -153,6 +153,14 @@ export class EditFileTool implements Tool {
     if ('error' in plan) {
       return { content: plan.error, isError: true };
     }
+    if ('alreadyApplied' in plan) {
+      return {
+        content:
+          `No changes made to ${path}: "old_string" was not found, but ` +
+          '"new_string" is already present — this edit appears to have been ' +
+          'applied already. Re-read the file to verify its current state.',
+      };
+    }
 
     try {
       await this.workspace.writeFile(path, plan.updated);
@@ -192,14 +200,17 @@ export class EditFileTool implements Tool {
     }
 
     const plan = planEdit(parsed, original);
-    if ('error' in plan) {
+    if ('error' in plan || 'alreadyApplied' in plan) {
       return undefined;
     }
     return { path: parsed.path, oldText: original, newText: plan.updated };
   }
 }
 
-type EditPlan = { updated: string; count: number } | { error: string };
+type EditPlan =
+  | { updated: string; count: number }
+  | { error: string }
+  | { alreadyApplied: true };
 
 /** Pure core of an edit: resolve the window, find matches, build new content. */
 function planEdit(parsed: EditFileArguments, original: string): EditPlan {
@@ -219,10 +230,35 @@ function planEdit(parsed: EditFileArguments, original: string): EditPlan {
     return { error: `${window.error} (${path} has ${lineCount} lines).` };
   }
 
-  const matches = findMatches(original, oldString, window.from, window.to);
+  let matches = findMatches(original, oldString, window.from, window.to);
   const where = describeWindow(startLine, endLine);
   if (matches.length === 0) {
-    return { error: `No match for "old_string" in ${path}${where}.` };
+    const windowed = window.from > 0 || window.to < original.length;
+    // The line window is a disambiguator, not a hard wall: models pass line
+    // numbers that are slightly stale or that clip a multi-line match. A
+    // unique match elsewhere in the file is unambiguous — take it.
+    if (windowed) {
+      const global = findMatches(original, oldString, 0, original.length);
+      if (global.length === 1) {
+        matches = global;
+      } else if (global.length > 1) {
+        return {
+          error:
+            `No match for "old_string" in ${path}${where}, but it occurs ` +
+            `${global.length} times elsewhere in the file. Adjust the line ` +
+            'range to cover the intended occurrence.',
+        };
+      }
+    }
+    if (matches.length === 0) {
+      // A missing old_string alongside an already-present new_string usually
+      // means this exact edit was applied earlier in the turn; say so instead
+      // of a bare "no match", which sends the model into a retry loop.
+      if (newString.length > 0 && original.includes(newString)) {
+        return { alreadyApplied: true };
+      }
+      return { error: `No match for "old_string" in ${path}${where}.` };
+    }
   }
   if (matches.length > 1 && !replaceAll) {
     return {

@@ -1,4 +1,4 @@
-import { applyPatch, parsePatch, type StructuredPatch } from 'diff';
+import { applyPatch, parsePatch } from 'diff';
 
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 import type {
@@ -72,7 +72,7 @@ export class ApplyPatchTool implements Tool {
     if (!parsed) {
       return { title: 'apply_patch (unparseable arguments)' };
     }
-    const sections = parsePatch(parsed.patch);
+    const sections = splitPatchSections(normalizePatchFraming(parsed.patch));
     const paths = sections
       .map((section) => resolveTargetPath(section))
       .filter((path): path is string => path !== undefined);
@@ -158,7 +158,7 @@ export class ApplyPatchTool implements Tool {
   private async planPatch(
     patch: string
   ): Promise<{ changes: ResolvedChange[] } | { error: string }> {
-    const sections = parsePatch(patch);
+    const sections = splitPatchSections(normalizePatchFraming(patch));
     if (sections.length === 0) {
       return { error: 'No file sections found in the patch.' };
     }
@@ -180,7 +180,7 @@ export class ApplyPatchTool implements Tool {
             'deletion. Use the bash tool (e.g. `rm`) instead.',
         };
       }
-      if (section.hunks.length === 0) {
+      if (!section.body.some((line) => /^[+-]/.test(line))) {
         return {
           error: `Patch section for ${path} contains no hunks to apply.`,
         };
@@ -196,8 +196,8 @@ export class ApplyPatchTool implements Tool {
         }
       }
 
-      const applied = applyPatch(oldText, section);
-      if (applied === false) {
+      const applied = applySection(oldText, section);
+      if (applied === undefined) {
         return {
           error:
             `Patch did not apply to ${path}: the context lines around a hunk ` +
@@ -215,12 +215,207 @@ export class ApplyPatchTool implements Tool {
 /** `/dev/null` marks the absent side of a create or delete. */
 const DEV_NULL = '/dev/null';
 
-function isCreation(section: StructuredPatch): boolean {
-  return section.isCreate === true || isDevNull(section.oldFileName);
+/**
+ * One `---`/`+++` file section of a patch, kept as raw lines so hunks can be
+ * applied either strictly (numbered `@@ -l,c +l,c @@` headers, via the diff
+ * library) or by context matching (the bare `@@` dialect OpenAI-trained models
+ * emit, where hunks carry no line numbers at all).
+ */
+interface PatchSection {
+  oldName?: string;
+  newName?: string;
+  body: string[];
 }
 
-function isDeletion(section: StructuredPatch): boolean {
-  return section.isDelete === true || isDevNull(section.newFileName);
+/**
+ * Strips the framing of OpenAI's patch dialect so the rest parses as a unified
+ * diff: `*** Begin Patch` / `*** End Patch` wrapper lines are dropped, and
+ * `*** Update File: x` / `*** Add File: x` / `*** Delete File: x` headers are
+ * rewritten to `---`/`+++` pairs. Models trained on that dialect routinely mix
+ * it into otherwise-standard diffs; bouncing the call just makes them retry
+ * with the same format.
+ */
+function normalizePatchFraming(patch: string): string {
+  const out: string[] = [];
+  for (const line of patch.split('\n')) {
+    const trimmed = line.trim();
+    if (/^\*{3} (Begin|End) Patch$/i.test(trimmed)) continue;
+    const fileHeader = /^\*{3} (Update|Add|Delete) File: (.+)$/i.exec(trimmed);
+    if (fileHeader) {
+      const [, action, path] = fileHeader;
+      const target = (path as string).trim();
+      if (action?.toLowerCase() === 'add') {
+        out.push(`--- ${DEV_NULL}`, `+++ b/${target}`);
+      } else if (action?.toLowerCase() === 'delete') {
+        out.push(`--- a/${target}`, `+++ ${DEV_NULL}`);
+      } else {
+        out.push(`--- a/${target}`, `+++ b/${target}`);
+      }
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+/** Splits a patch into its `---`/`+++` file sections, keeping raw hunk lines. */
+function splitPatchSections(patch: string): PatchSection[] {
+  const lines = patch.split('\n');
+  const sections: PatchSection[] = [];
+  let current: PatchSection | undefined;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] as string;
+    if (line.startsWith('--- ')) {
+      current = { oldName: line.slice(4).trim(), body: [] };
+      const next = lines[i + 1];
+      if (next?.startsWith('+++ ')) {
+        current.newName = next.slice(4).trim();
+        i += 1;
+      }
+      sections.push(current);
+      continue;
+    }
+    if (!current) continue; // `diff --git` / `index` prologue lines
+    current.body.push(line);
+  }
+  return sections;
+}
+
+/** Whether every `@@` header in the section carries line numbers. */
+function hasNumberedHunks(section: PatchSection): boolean {
+  const headers = section.body.filter((line) => line.startsWith('@@'));
+  return (
+    headers.length > 0 &&
+    headers.every((line) => /^@@ -\d+(,\d+)? \+\d+(,\d+)? @@/.test(line))
+  );
+}
+
+/**
+ * Applies one file section to `oldText`. Numbered hunks go through the diff
+ * library (which already tolerates shifted line numbers); bare-`@@` hunks are
+ * located purely by their context lines. Returns undefined when a hunk's
+ * context can't be found.
+ */
+function applySection(
+  oldText: string,
+  section: PatchSection
+): string | undefined {
+  if (hasNumberedHunks(section)) {
+    const sectionText = [
+      `--- ${section.oldName ?? DEV_NULL}`,
+      `+++ ${section.newName ?? DEV_NULL}`,
+      ...section.body,
+    ].join('\n');
+    const [parsed] = parsePatch(sectionText);
+    if (!parsed) return undefined;
+    const applied = applyPatch(oldText, parsed);
+    return applied === false ? undefined : applied;
+  }
+  return applyContextHunks(oldText, section.body);
+}
+
+/**
+ * Applies bare-`@@` hunks by matching their context/deleted lines against the
+ * file, scanning forward from a cursor so hunks apply in order. An `@@ <text>`
+ * marker (e.g. a class or function name) advances the cursor past the matching
+ * line when found, mirroring how OpenAI's dialect scopes a hunk.
+ */
+function applyContextHunks(
+  oldText: string,
+  body: string[]
+): string | undefined {
+  interface Chunk {
+    marker?: string;
+    lines: string[];
+  }
+  const chunks: Chunk[] = [];
+  let current: Chunk | undefined;
+  for (const raw of body) {
+    if (raw.startsWith('@@')) {
+      const marker = raw.slice(2).trim();
+      current = { ...(marker ? { marker } : {}), lines: [] };
+      chunks.push(current);
+      continue;
+    }
+    if (raw.startsWith('\\')) continue; // "\ No newline at end of file"
+    if (!current) {
+      current = { lines: [] };
+      chunks.push(current);
+    }
+    current.lines.push(raw);
+  }
+
+  const fileLines = oldText.split('\n');
+  let cursor = 0;
+  for (const chunk of chunks) {
+    // Trailing blank lines are artifacts of the patch string, not context.
+    const lines = [...chunk.lines];
+    while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+    if (chunk.marker) {
+      const at = fileLines.findIndex(
+        (line, index) => index >= cursor && line.trim() === chunk.marker
+      );
+      if (at !== -1) cursor = at + 1;
+    }
+    const pattern: string[] = [];
+    const replacement: string[] = [];
+    for (const line of lines) {
+      if (line.startsWith('+')) {
+        replacement.push(line.slice(1));
+      } else if (line.startsWith('-')) {
+        pattern.push(line.slice(1));
+      } else {
+        // Context: usually ' '-prefixed; tolerate a missing prefix (and treat
+        // a fully blank line as a blank context line).
+        const content = line.startsWith(' ') ? line.slice(1) : line;
+        pattern.push(content);
+        replacement.push(content);
+      }
+    }
+    if (pattern.length === 0) {
+      if (replacement.length === 0) continue; // marker-only chunk
+      fileLines.splice(cursor, 0, ...replacement);
+      cursor += replacement.length;
+      continue;
+    }
+    const at = findSequence(fileLines, pattern, cursor);
+    if (at === -1) return undefined;
+    fileLines.splice(at, pattern.length, ...replacement);
+    cursor = at + replacement.length;
+  }
+  return fileLines.join('\n');
+}
+
+/**
+ * First occurrence of `needle` in `hay` at or after `from`, retrying from the
+ * top and then with trailing-whitespace-insensitive comparison, so a slightly
+ * out-of-order or whitespace-drifted hunk still lands.
+ */
+function findSequence(hay: string[], needle: string[], from: number): number {
+  const matchers: Array<(a: string, b: string) => boolean> = [
+    (a, b) => a === b,
+    (a, b) => a.trimEnd() === b.trimEnd(),
+  ];
+  for (const eq of matchers) {
+    for (const start of [from, 0]) {
+      outer: for (let i = start; i <= hay.length - needle.length; i++) {
+        for (let j = 0; j < needle.length; j++) {
+          if (!eq(hay[i + j] as string, needle[j] as string)) continue outer;
+        }
+        return i;
+      }
+      if (from === 0) break; // retry-from-top is the same search
+    }
+  }
+  return -1;
+}
+
+function isCreation(section: PatchSection): boolean {
+  return isDevNull(section.oldName);
+}
+
+function isDeletion(section: PatchSection): boolean {
+  return isDevNull(section.newName);
 }
 
 function isDevNull(name: string | undefined): boolean {
@@ -231,10 +426,10 @@ function isDevNull(name: string | undefined): boolean {
  * The path the section targets: the new file for a create/modify, falling back
  * to the old file. Git-style `a/` and `b/` prefixes are stripped.
  */
-function resolveTargetPath(section: StructuredPatch): string | undefined {
+function resolveTargetPath(section: PatchSection): string | undefined {
   const target = isDeletion(section)
-    ? section.oldFileName
-    : (section.newFileName ?? section.oldFileName);
+    ? section.oldName
+    : (section.newName ?? section.oldName);
   if (target === undefined) {
     return undefined;
   }

@@ -132,7 +132,7 @@ describe('ReadFileTool', () => {
     expect(result.content).toContain('empty');
   });
 
-  it('errors when the offset is past the end of the file', async () => {
+  it('clamps a past-the-end offset to the file tail with a note', async () => {
     await seed('a.txt', 'one\ntwo');
 
     const result = await tool.execute(
@@ -140,8 +140,11 @@ describe('ReadFileTool', () => {
       { workspaceRoot }
     );
 
-    expect(result.isError).toBe(true);
-    expect(result.content).toContain('past the end');
+    expect(result.isError).toBeFalsy();
+    expect(result.content).toContain('offset 999 is past the end');
+    expect(result.content).toContain('showing the end of the file');
+    expect(result.content).toContain('1 | one');
+    expect(result.content).toContain('2 | two');
   });
 
   it('rejects paths that escape the workspace root', async () => {
@@ -212,6 +215,41 @@ describe('ReadFileTool', () => {
 
       expect(result.content).toContain('repo.ts::findMany lines 7-7 of 6-9');
       expect(result.content).toContain('use offset=3 to continue');
+    });
+
+    it('accepts an absolute file line as the offset when it falls inside the method', async () => {
+      await seed('repo.ts', file);
+
+      // findMany spans file lines 6-9 (4 lines). Offset 7 is invalid as a
+      // method-relative line but is a file line inside the method — models
+      // reuse the absolute line numbers the tool itself displays.
+      const result = await tool.execute(
+        JSON.stringify({ path: 'repo.ts', method: 'findMany', offset: 7 }),
+        { workspaceRoot }
+      );
+
+      expect(result.isError).toBeFalsy();
+      expect(result.content).toContain('repo.ts::findMany lines 7-9 of 6-9');
+    });
+
+    it('clamps to the method tail when the offset is past it in both interpretations', async () => {
+      await seed('repo.ts', file);
+
+      const result = await tool.execute(
+        JSON.stringify({
+          path: 'repo.ts',
+          method: 'findMany',
+          offset: 40,
+          limit: 2,
+        }),
+        { workspaceRoot }
+      );
+
+      expect(result.isError).toBeFalsy();
+      expect(result.content).toContain('offset 40 is past repo.ts::findMany');
+      expect(result.content).toContain('showing the end of the method');
+      // The last `limit` lines of the method (file lines 8-9).
+      expect(result.content).toContain('repo.ts::findMany lines 8-9 of 6-9');
     });
 
     it('lists available symbols when the method is not found', async () => {

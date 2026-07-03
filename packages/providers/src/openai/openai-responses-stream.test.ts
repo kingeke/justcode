@@ -56,7 +56,7 @@ describe('consumeResponsesStream reasoning vs content', () => {
     expect(reasoning).toContain('I might need tools here.');
   });
 
-  it('still surfaces reasoning as the answer when there is no output text and no tools (gpt-oss)', async () => {
+  it('keeps a reasoning-only step as thinking with empty content (gpt-oss)', async () => {
     const stream = sseStream([
       {
         type: 'response.reasoning_summary_text.delta',
@@ -64,15 +64,15 @@ describe('consumeResponsesStream reasoning vs content', () => {
       },
     ]);
 
-    const { result } = await consumeResponsesStream(
+    const { result, reasoning } = await consumeResponsesStream(
       stream,
       baseRequest(),
       'oss'
     );
 
-    expect(result.content).toBe(
-      'the whole answer lives on the reasoning channel'
-    );
+    // Reasoning is never promoted to content; it stays on the thinking channel.
+    expect(result.content).toBe('');
+    expect(reasoning).toBe('the whole answer lives on the reasoning channel');
     expect(result.toolCalls).toBeUndefined();
   });
 

@@ -138,11 +138,16 @@ export class OpenRouterProvider implements ProviderClient {
       );
 
       // Reasoning models (e.g. gpt-oss, GLM) sometimes emit their whole turn on
-      // the reasoning channel and finish with empty content. Treat the reasoning
-      // as the answer rather than failing the turn (mirrors the OpenAI-compatible
-      // provider).
-      const content = accumulated.trim() ? accumulated : streamedReasoning;
-      if (!content.trim() && toolCalls.length === 0) {
+      // the reasoning channel and finish with empty content. Keep that reasoning
+      // on the thinking channel (it already streamed via onThinkingToken) rather
+      // than promoting it to the answer — a reasoning-only step is a valid,
+      // non-empty response with empty content.
+      const content = accumulated;
+      if (
+        !content.trim() &&
+        toolCalls.length === 0 &&
+        !streamedReasoning.trim()
+      ) {
         throw new Error(`Provider 'openrouter' returned an empty response.`);
       }
 
@@ -196,11 +201,12 @@ export class OpenRouterProvider implements ProviderClient {
       return { content: '', ...extraSpread };
     }
 
-    // Same reasoning-as-answer fallback as the streaming branch, for models
-    // that put their whole turn on the reasoning channel.
+    // A reasoning-only response is valid: surface the reasoning on the
+    // thinking channel (not as the answer) and return empty content.
     const reasoningContent = response.choices?.[0]?.message?.reasoning;
     if (typeof reasoningContent === 'string' && reasoningContent.trim()) {
-      return { content: reasoningContent, ...extraSpread };
+      request.onThinkingToken?.(reasoningContent);
+      return { content: '', ...extraSpread };
     }
 
     throw new Error(`Provider 'openrouter' returned an empty response.`);

@@ -68,6 +68,18 @@ interface OpenAiModelsResponse {
   }>;
 }
 
+/**
+ * Ollama's native `/api/tags` listing. Only the fields we consume: the model
+ * id and the context window some Ollama builds report per model.
+ */
+interface OllamaTagsResponse {
+  models?: Array<{
+    name?: string;
+    model?: string;
+    details?: { context_length?: number };
+  }>;
+}
+
 interface OpenAiChatResponse {
   choices?: Array<{
     message?: {
@@ -210,10 +222,12 @@ export class OpenAiCompatibleProvider implements ProviderClient {
       );
 
       // Reasoning models (e.g. gpt-oss) sometimes emit their whole turn on the
-      // reasoning channel and finish with empty content. Treat the reasoning as
-      // the answer rather than failing the turn.
-      const content = accumulated.trim() ? accumulated : reasoning;
-      if (!content.trim() && toolCalls.length === 0) {
+      // reasoning channel and finish with empty content. Keep that reasoning on
+      // the thinking channel (it already streamed via onThinkingToken) rather
+      // than promoting it to the answer — a reasoning-only step is a valid,
+      // non-empty response with empty content.
+      const content = accumulated;
+      if (!content.trim() && toolCalls.length === 0 && !reasoning.trim()) {
         throw new Error(
           `Provider '${this.providerId}' returned an empty response.`
         );
@@ -296,6 +310,11 @@ export class OpenAiCompatibleProvider implements ProviderClient {
 
     void logModelsResponse(String(this.providerId), response);
 
+    // The OpenAI-compatible /models listing carries no context sizes, so try
+    // Ollama's native /api/tags as a best-effort enrichment. Non-Ollama
+    // servers simply won't have the endpoint and the map stays empty.
+    const contextWindows = await this.fetchOllamaContextWindows();
+
     // Remember each model's reachable endpoints so sendChat can route to
     // /responses for models that don't accept /chat/completions.
     this.modelEndpoints.clear();
@@ -314,14 +333,50 @@ export class OpenAiCompatibleProvider implements ProviderClient {
           reasoningCapabilityFromEfforts(
             model.capabilities?.supports?.reasoning_effort ?? []
           ) ?? openAiReasoningCapability(model.id);
+        const contextWindow = contextWindows.get(model.id);
         return {
           id: model.id,
           displayName: model.id,
           providerId: this.providerId,
+          ...(contextWindow ? { contextWindow } : {}),
           ...(reasoning ? { reasoning } : {}),
         };
       })
       .sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  /**
+   * Best-effort lookup of per-model context windows from Ollama's native
+   * `/api/tags` endpoint, which lives at the server root (the configured base
+   * URL without its `/v1` suffix) and reports `details.context_length` for
+   * models whose manifest carries it. Any failure — the endpoint doesn't exist
+   * (non-Ollama servers), the server is down, or the shape is unexpected —
+   * returns an empty map so model listing is never affected.
+   */
+  private async fetchOllamaContextWindows(): Promise<Map<string, number>> {
+    const windows = new Map<string, number>();
+    try {
+      const rootUrl = this.options.baseUrl.replace(/\/v1\/?$/, '');
+      const response = await requestJson<OllamaTagsResponse>(
+        joinUrl(rootUrl, '/api/tags'),
+        {
+          headers: await this.createHeaders(),
+          // Keep the enrichment cheap: don't let a black-holed request delay
+          // model listing anywhere near the default 30s request timeout.
+          signal: AbortSignal.timeout(3_000),
+        }
+      );
+      for (const model of response.models ?? []) {
+        const id = model.model ?? model.name;
+        const contextLength = model.details?.context_length;
+        if (id && typeof contextLength === 'number' && contextLength > 0) {
+          windows.set(id, contextLength);
+        }
+      }
+    } catch {
+      // Optional enrichment only — list models without context windows.
+    }
+    return windows;
   }
 
   public getDefaultModel(): string | undefined {

@@ -124,9 +124,11 @@ describe('EditFileTool', () => {
     expect(after.match(/This is a serious file/g)?.length).toBe(2);
   });
 
-  it('errors when old_string is absent from the given line window', async () => {
+  it('falls back to a unique match outside a stale line window', async () => {
     await seed('a.txt', 'alpha\nbeta\ngamma\n');
 
+    // The window misses (models pass slightly stale line numbers), but the
+    // string is unique in the file — the edit still applies.
     const result = await tool.execute(
       JSON.stringify({
         path: 'a.txt',
@@ -138,8 +140,54 @@ describe('EditFileTool', () => {
       { workspaceRoot }
     );
 
+    expect(result.isError).toBeFalsy();
+    expect(await readFile(join(workspaceRoot, 'a.txt'), 'utf8')).toBe(
+      'alpha\nbeta\ndelta\n'
+    );
+  });
+
+  it('errors when the window misses and the string repeats elsewhere', async () => {
+    await seed('a.txt', 'alpha\nrepeat\ngamma\nrepeat\n');
+
+    const result = await tool.execute(
+      JSON.stringify({
+        path: 'a.txt',
+        old_string: 'repeat',
+        new_string: 'changed',
+        start_line: 1,
+        end_line: 1,
+      }),
+      { workspaceRoot }
+    );
+
     expect(result.isError).toBe(true);
-    expect(result.content).toContain('within lines 1-2');
+    expect(result.content).toContain('within lines 1-1');
+    expect(result.content).toContain('2 times elsewhere');
+    expect(await readFile(join(workspaceRoot, 'a.txt'), 'utf8')).toBe(
+      'alpha\nrepeat\ngamma\nrepeat\n'
+    );
+  });
+
+  it('reports an already-applied edit instead of a bare no-match', async () => {
+    await seed('a.txt', 'const x = 1;\nconst y = 2;\n');
+
+    // old_string is gone but new_string is already in the file — a retry of an
+    // edit that already went through.
+    const result = await tool.execute(
+      JSON.stringify({
+        path: 'a.txt',
+        old_string: 'const y = 3;',
+        new_string: 'const y = 2;',
+      }),
+      { workspaceRoot }
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content).toContain('already');
+    expect(result.content).toContain('No changes made');
+    expect(await readFile(join(workspaceRoot, 'a.txt'), 'utf8')).toBe(
+      'const x = 1;\nconst y = 2;\n'
+    );
   });
 
   it('rejects an inverted line window', async () => {

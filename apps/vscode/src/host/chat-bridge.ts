@@ -24,6 +24,7 @@ import type {
 import { ProviderId, PROVIDER_BY_ID } from '@core/ports/provider-catalog';
 import {
   describeTool,
+  getInterruptedConversation,
   type ToolApprovalRequest,
   type ToolActivityEvent,
 } from '@core/application/chat-session-service';
@@ -180,8 +181,8 @@ export class ChatBridge {
     Record<string, WebviewReasoningChoice | undefined> | undefined
   > = {};
   // Cumulative token usage across the session, mirroring the CLI's metrics
-  // footer (ctx / cached / new / out / cost). Reset whenever the conversation is.
-  private cumulativeUsage: Required<WebviewUsage> = {
+  // footer (ctx / in / cached / out / cost). Reset whenever the conversation is.
+  private cumulativeUsage: Required<Omit<WebviewUsage, 'lastInputTokens'>> = {
     inputTokens: 0,
     outputTokens: 0,
     cachedTokens: 0,
@@ -904,7 +905,7 @@ export class ChatBridge {
           this.accumulateUsage(stepUsage);
           this.post({
             type: HostMessageType.UsageUpdate,
-            usage: { ...this.cumulativeUsage },
+            usage: this.usageSnapshot(),
           });
         },
         onToolActivity: (event) => this.postToolActivity(event),
@@ -970,67 +971,83 @@ export class ChatBridge {
           services,
           this.toolViewsByCallId
         ),
-        ...(hasUsage ? { usage: { ...this.cumulativeUsage } } : {}),
+        ...(hasUsage ? { usage: this.usageSnapshot() } : {}),
         ...(stats ? { stats } : {}),
       });
     } catch (error) {
       const aborted = isAbortError(error);
       if (aborted && this.conversation) {
-        // The service threw mid-turn without returning `working`, so fold the
-        // user prompt and whatever the model streamed before the interrupt into
-        // the conversation, then push the rebuilt transcript to the webview as a
-        // committed turn. Without this the partial lives only in the webview's
-        // transient `liveTurnItems`, which the next submit clears — so the
-        // interrupted answer would vanish the moment a new message is sent.
-        const userMessage = createMessage(
-          'user',
-          content,
-          new Date(),
-          undefined,
-          images?.length
-            ? {
-                images: images.map((image) => ({
-                  mediaType: image.mediaType,
-                  data: image.data,
-                })),
-              }
-            : undefined
-        );
-        const trimmedThinking = streamedThinking.trim();
-        const partialAssistant =
-          streamedContent.trim() || trimmedThinking
-            ? createMessage(
-                'assistant',
-                streamedContent,
-                new Date(),
-                undefined,
-                {
-                  ...(trimmedThinking
-                    ? {
-                        thinking: {
-                          content: streamedThinking,
-                          durationMs:
-                            thinkingStartMs > 0
-                              ? Date.now() - thinkingStartMs
-                              : 0,
-                        },
-                      }
-                    : {}),
+        // The service persisted everything the interrupted turn produced — the
+        // user prompt, completed tool rounds, per-step thinking, and the
+        // partial streamed answer — and attached the saved conversation to the
+        // abort error. Adopt it and push the rebuilt transcript to the webview
+        // as a committed turn. Without this the partial lives only in the
+        // webview's transient `liveTurnItems`, which the next submit clears —
+        // so the interrupted answer would vanish the moment a new message is
+        // sent.
+        const interruptedConversation = getInterruptedConversation(error);
+        if (interruptedConversation) {
+          this.conversation =
+            interruptedConversation.title || !this.conversation.title
+              ? interruptedConversation
+              : {
+                  ...interruptedConversation,
+                  title: this.conversation.title,
+                };
+        } else {
+          // Fallback (e.g. the service's persist failed): rebuild the exchange
+          // from this bridge's streaming buffers and save it ourselves.
+          const userMessage = createMessage(
+            'user',
+            content,
+            new Date(),
+            undefined,
+            images?.length
+              ? {
+                  images: images.map((image) => ({
+                    mediaType: image.mediaType,
+                    data: image.data,
+                  })),
                 }
-              )
-            : undefined;
-        this.conversation = {
-          ...this.conversation,
-          messages: [
-            ...this.conversation.messages,
-            userMessage,
-            ...(partialAssistant ? [partialAssistant] : []),
-          ],
-          updatedAt: new Date().toISOString(),
-        };
-        // Persist now so the interrupted exchange survives a reload even if no
-        // further turn is taken (a later turn would otherwise be the first save).
-        await services.chatSessionService.saveConversation(this.conversation);
+              : undefined
+          );
+          const trimmedThinking = streamedThinking.trim();
+          const partialAssistant =
+            streamedContent.trim() || trimmedThinking
+              ? createMessage(
+                  'assistant',
+                  streamedContent,
+                  new Date(),
+                  undefined,
+                  {
+                    ...(trimmedThinking
+                      ? {
+                          thinking: {
+                            content: streamedThinking,
+                            durationMs:
+                              thinkingStartMs > 0
+                                ? Date.now() - thinkingStartMs
+                                : 0,
+                          },
+                        }
+                      : {}),
+                  }
+                )
+              : undefined;
+          this.conversation = {
+            ...this.conversation,
+            messages: [
+              ...this.conversation.messages,
+              userMessage,
+              ...(partialAssistant ? [partialAssistant] : []),
+            ],
+            updatedAt: new Date().toISOString(),
+          };
+          // Persist now so the interrupted exchange survives a reload even if
+          // no further turn is taken (a later turn would otherwise be the
+          // first save).
+          await services.chatSessionService.saveConversation(this.conversation);
+        }
         // Keep whatever usage the completed steps reported before the interrupt.
         this.persistSessionStats(services);
         this.post({
@@ -1042,7 +1059,7 @@ export class ChatBridge {
           ),
           ...(this.cumulativeUsage.inputTokens > 0 ||
           this.cumulativeUsage.outputTokens > 0
-            ? { usage: { ...this.cumulativeUsage } }
+            ? { usage: this.usageSnapshot() }
             : {}),
         });
       }
@@ -1132,6 +1149,14 @@ export class ChatBridge {
   }
 
   /**
+   * The usage payload posted to the webview: the session's cumulative totals
+   * plus the most recent request's input tokens (the "ctx" readout).
+   */
+  private usageSnapshot(): WebviewUsage {
+    return { ...this.cumulativeUsage, lastInputTokens: this.lastInputTokens };
+  }
+
+  /**
    * The usage/stats fields of a Ready snapshot, present only when there's
    * something to show — a fresh session's footer starts blank.
    */
@@ -1140,7 +1165,7 @@ export class ChatBridge {
       this.cumulativeUsage.inputTokens > 0 ||
       this.cumulativeUsage.outputTokens > 0;
     return {
-      ...(hasUsage ? { usage: { ...this.cumulativeUsage } } : {}),
+      ...(hasUsage ? { usage: this.usageSnapshot() } : {}),
       // Restore the timing readouts whenever any turn has completed, even if
       // the last turn's TTFT wasn't captured — the webview's live estimator
       // reads the average from here, so omitting it would zero the AVG mid-turn.
@@ -1930,13 +1955,23 @@ export class ChatBridge {
   private async resetSession(): Promise<void> {
     // Clicking "+" while the current session has no messages reuses it instead
     // of minting another — repeated clicks shouldn't scatter empty sessions.
-    const reuseEmptySession =
+    let reuseEmptySession =
       this.conversation !== undefined &&
       this.conversation.messages.length === 0;
     if (!reuseEmptySession) {
-      // Start a new session without touching the existing one — it's already
-      // persisted and should remain visible in the sessions list.
-      this.sessionId = randomUUID();
+      // Coming from a chat with messages: adopt the most recent already-empty
+      // session (a leftover "New chat") before minting another, so "+" never
+      // scatters empty sessions across the list.
+      const emptySessionId = await this.findEmptySessionId();
+      if (emptySessionId) {
+        this.sessionId = emptySessionId;
+        this.conversation = createConversation(emptySessionId);
+        reuseEmptySession = true;
+      } else {
+        // Start a new session without touching the existing one — it's already
+        // persisted and should remain visible in the sessions list.
+        this.sessionId = randomUUID();
+      }
     }
     this.resetMetrics();
 
@@ -1983,6 +2018,22 @@ export class ChatBridge {
     this.conversation = undefined;
     await this.sendReady();
     await this.persistEmptySession();
+  }
+
+  /**
+   * The most recently updated persisted session that still has no messages, if
+   * any. `listSessions` returns most-recent-first, so the first empty summary
+   * is the one "+" should adopt. Best-effort: a listing failure just means a
+   * fresh session gets minted instead.
+   */
+  private async findEmptySessionId(): Promise<string | undefined> {
+    try {
+      const services = await this.ensureServices();
+      const summaries = await services.chatSessionService.listSessions();
+      return summaries.find((summary) => summary.messageCount === 0)?.sessionId;
+    } catch {
+      return undefined;
+    }
   }
 
   /**

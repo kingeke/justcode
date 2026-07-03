@@ -69,7 +69,8 @@ export class ReadFileTool implements Tool {
             '1-based line number to start reading from. Defaults to 1 (the ' +
             'first line). Use the offset reported by a previous read to ' +
             'continue. When "method" is set, this is the 1-based line within ' +
-            'the method instead.',
+            "the method (an absolute file line inside the method's range is " +
+            'also accepted).',
         },
         limit: {
           type: 'number',
@@ -150,18 +151,20 @@ export class ReadFileTool implements Tool {
     if (totalLines === 0) {
       return { content: `${path} is empty.` };
     }
-    if (offset > totalLines) {
-      return {
-        content: `Offset ${offset} is past the end of ${path} (${totalLines} lines).`,
-        isError: true,
-      };
-    }
-
     const maxLines = Math.max(1, Math.floor(this.getMaxLines()));
     const requested =
       limit !== undefined ? Math.min(limit, maxLines) : maxLines;
-    const lineStart = offset;
-    const lineEnd = Math.min(offset + requested - 1, totalLines);
+    let clampNote = '';
+    let lineStart = offset;
+    if (offset > totalLines) {
+      // Clamp to the file's tail instead of erroring: returning data with a
+      // note saves the model a corrective round-trip.
+      lineStart = Math.max(1, totalLines - requested + 1);
+      clampNote =
+        `(note: offset ${offset} is past the end of ${path} — ` +
+        `${totalLines} lines; showing the end of the file instead)\n`;
+    }
+    const lineEnd = Math.min(lineStart + requested - 1, totalLines);
     const truncated = lineEnd < totalLines;
 
     const body = lines
@@ -169,7 +172,7 @@ export class ReadFileTool implements Tool {
       .map((line, index) => formatNumberedLine(lineStart + index, line))
       .join('\n');
 
-    const header = `${path} lines ${lineStart}-${lineEnd} of ${totalLines}`;
+    const header = `${clampNote}${path} lines ${lineStart}-${lineEnd} of ${totalLines}`;
     if (!truncated) {
       return { content: `${header}\n${body}` };
     }
@@ -206,17 +209,31 @@ export class ReadFileTool implements Tool {
     }
 
     const blockLength = block.lines.length;
-    if (offset > blockLength) {
-      return {
-        content: `Offset ${offset} is past the end of ${path}::${method} (${blockLength} lines).`,
-        isError: true,
-      };
-    }
-
+    const blockEndLine = block.startLine + blockLength - 1;
     const maxLines = Math.max(1, Math.floor(this.getMaxLines()));
     const requested =
       limit !== undefined ? Math.min(limit, maxLines) : maxLines;
-    const sliceStart = offset - 1;
+    let effectiveOffset = offset;
+    let clampNote = '';
+    if (offset > blockLength) {
+      // The tool displays absolute file line numbers, so models routinely pass
+      // one of those back as the offset even though it's documented as
+      // method-relative. When the offset can't be relative but lands inside
+      // the method's file-line range, honor it as an absolute line.
+      if (offset >= block.startLine && offset <= blockEndLine) {
+        effectiveOffset = offset - block.startLine + 1;
+      } else {
+        // Past the method in every interpretation: clamp to the method's tail
+        // and return data with a note, rather than erroring — a dead end just
+        // costs the model another round-trip to ask again.
+        effectiveOffset = Math.max(1, blockLength - requested + 1);
+        clampNote =
+          `(note: offset ${offset} is past ${path}::${method}, which is ` +
+          `${blockLength} lines at file lines ${block.startLine}-${blockEndLine}; ` +
+          `showing the end of the method instead)\n`;
+      }
+    }
+    const sliceStart = effectiveOffset - 1;
     const sliceEnd = Math.min(sliceStart + requested, blockLength);
     const firstFileLine = block.startLine + sliceStart;
     const truncated = sliceEnd < blockLength;
@@ -227,8 +244,7 @@ export class ReadFileTool implements Tool {
       .join('\n');
 
     const lastFileLine = block.startLine + sliceEnd - 1;
-    const blockEnd = block.startLine + blockLength - 1;
-    const header = `${path}::${method} lines ${firstFileLine}-${lastFileLine} of ${block.startLine}-${blockEnd}`;
+    const header = `${clampNote}${path}::${method} lines ${firstFileLine}-${lastFileLine} of ${block.startLine}-${blockEndLine}`;
     if (!truncated) {
       return { content: `${header}\n${body}` };
     }

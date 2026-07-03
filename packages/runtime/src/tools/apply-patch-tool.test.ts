@@ -199,4 +199,150 @@ describe('ApplyPatchTool', () => {
       newText: 'hello\nthere\n',
     });
   });
+
+  it('applies bare-@@ hunks (no line numbers) by context matching', async () => {
+    await seed(
+      'service.ts',
+      [
+        'class Service {',
+        '  async first() {',
+        '    return 1;',
+        '  }',
+        '',
+        '  async second() {',
+        '    return 2;',
+        '  }',
+        '}',
+        '',
+      ].join('\n')
+    );
+
+    // The dialect OpenAI-trained models emit: bare `@@` separators, a
+    // context-only locator chunk, and a `*** End Patch` trailer.
+    const patch = [
+      '--- a/service.ts',
+      '+++ b/service.ts',
+      '@@',
+      '   async first() {',
+      '@@',
+      '     return 2;',
+      '   }',
+      '+',
+      '+  async third() {',
+      '+    return 3;',
+      '+  }',
+      '*** End Patch',
+      '',
+    ].join('\n');
+
+    const result = await run(patch);
+
+    expect(result.isError).toBeFalsy();
+    expect(await readFile(join(workspaceRoot, 'service.ts'), 'utf8')).toBe(
+      [
+        'class Service {',
+        '  async first() {',
+        '    return 1;',
+        '  }',
+        '',
+        '  async second() {',
+        '    return 2;',
+        '  }',
+        '',
+        '  async third() {',
+        '    return 3;',
+        '  }',
+        '}',
+        '',
+      ].join('\n')
+    );
+  });
+
+  it('applies an @@ marker hunk scoped by its locator text', async () => {
+    await seed(
+      'pair.ts',
+      [
+        'function a() {',
+        '  return 0;',
+        '}',
+        'function b() {',
+        '  return 0;',
+        '}',
+        '',
+      ].join('\n')
+    );
+
+    const patch = [
+      '--- a/pair.ts',
+      '+++ b/pair.ts',
+      '@@ function b() {',
+      '-  return 0;',
+      '+  return 1;',
+      '',
+    ].join('\n');
+
+    const result = await run(patch);
+
+    expect(result.isError).toBeFalsy();
+    expect(await readFile(join(workspaceRoot, 'pair.ts'), 'utf8')).toBe(
+      [
+        'function a() {',
+        '  return 0;',
+        '}',
+        'function b() {',
+        '  return 1;',
+        '}',
+        '',
+      ].join('\n')
+    );
+  });
+
+  it('supports the *** Update/Add File header dialect', async () => {
+    await seed('old.txt', 'keep\ndrop\n');
+
+    const patch = [
+      '*** Begin Patch',
+      '*** Update File: old.txt',
+      '@@',
+      ' keep',
+      '-drop',
+      '+kept',
+      '*** Add File: fresh.txt',
+      '@@',
+      '+brand new',
+      '*** End Patch',
+      '',
+    ].join('\n');
+
+    const result = await run(patch);
+
+    expect(result.isError).toBeFalsy();
+    expect(await readFile(join(workspaceRoot, 'old.txt'), 'utf8')).toBe(
+      'keep\nkept\n'
+    );
+    expect(await readFile(join(workspaceRoot, 'fresh.txt'), 'utf8')).toBe(
+      'brand new\n'
+    );
+  });
+
+  it('errors when a bare-@@ hunk context does not match', async () => {
+    await seed('x.txt', 'alpha\nbeta\n');
+
+    const patch = [
+      '--- a/x.txt',
+      '+++ b/x.txt',
+      '@@',
+      ' gamma',
+      '+delta',
+      '',
+    ].join('\n');
+
+    const result = await run(patch);
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('did not apply');
+    expect(await readFile(join(workspaceRoot, 'x.txt'), 'utf8')).toBe(
+      'alpha\nbeta\n'
+    );
+  });
 });

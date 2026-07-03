@@ -252,9 +252,15 @@ export interface WebviewMessage {
 }
 
 export interface WebviewUsage {
+  /** Cumulative input tokens across the session (the "in" readout). */
   inputTokens: number;
   outputTokens: number;
   cachedTokens: number;
+  /**
+   * Input tokens of the most recent request — the size of the context the
+   * model currently sees. Drives the "ctx" readout and the context gauge.
+   */
+  lastInputTokens?: number;
   cost?: number;
 }
 

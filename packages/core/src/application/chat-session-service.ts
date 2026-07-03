@@ -503,187 +503,263 @@ export class ChatSessionService {
       }
     }
 
-    // The agent keeps taking tool-call turns until the model stops asking for
-    // tools (or the request is aborted). There's no round-trip cap: the work is
-    // done when the model says it's done, not after an arbitrary N steps.
-    for (;;) {
-      throwIfAborted(input.signal);
+    // Streamed output of the *current* model response, accumulated here (not
+    // just forwarded to the host) so an abort mid-stream can still persist the
+    // partial answer/thinking. Reset at the top of every step — completed
+    // steps' output already lives on the assistant messages in `working`.
+    let stepContent = '';
+    let stepThinking = '';
+    let stepThinkingStartedAt = 0;
 
-      // Steer the in-flight turn: fold any messages the user queued since the
-      // last step into a user message before this model call. Consecutive
-      // same-role messages are merged by the provider adapters, so this sits
-      // cleanly after the preceding tool results.
-      const steering = input.drainSteering?.();
-      if (steering && steering.trim()) {
-        working.push(createMessage('user', steering.trim()));
-      }
+    try {
+      // The agent keeps taking tool-call turns until the model stops asking for
+      // tools (or the request is aborted). There's no round-trip cap: the work
+      // is done when the model says it's done, not after an arbitrary N steps.
+      for (;;) {
+        throwIfAborted(input.signal);
 
-      // Cap how much prior history travels to the model to save tokens. We trim
-      // only the request — `working` (and thus what we persist below) keeps the
-      // full conversation. The system prompt is always sent in full.
-      // A limit of 0 (or less) disables trimming — the whole conversation is
-      // sent. `selectRecentMessages` treats a non-positive limit as "all".
-      const history = selectRecentMessages(
-        working,
-        Math.floor(this.getMaxHistoryMessages())
-      );
-      const omittedCount = working.length - history.length;
-
-      const systemPrompt = buildSystemPrompt(
-        this.getSystemPrompt(),
-        this.workspaceRoot,
-        toolsEnabled && this.describeToolsInSystemPrompt ? toolDefinitions : [],
-        projectInstructions
-      );
-      // Tell the model that older turns were trimmed and how to recover them, so
-      // it can page back via `view_history` instead of assuming they're gone.
-      // Only point the model at `view_history` when it's actually advertised:
-      // the user may have turned it off, in which case the recovery hint would
-      // just steer it toward a tool that gets refused.
-      const canRecoverHistory =
-        omittedCount > 0 &&
-        toolsEnabled &&
-        !disabledToolNames.has(ToolName.ViewHistory);
-      const systemMessage = createMessage(
-        'system',
-        canRecoverHistory
-          ? `${systemPrompt}\n\nNote: the ${omittedCount} oldest message(s) of this ${working.length}-message conversation were omitted from this request to save tokens. They are still available — call the \`view_history\` tool with a "start" (and optional "end") index to read any of them (index 0 = oldest message).`
-          : systemPrompt
-      );
-
-      let response;
-      let thinkingContent = '';
-      let thinkingStartedAt = 0;
-      const onThinkingToken = (token: string): void => {
-        if (thinkingStartedAt === 0) thinkingStartedAt = Date.now();
-        thinkingContent += token;
-        input.onThinkingToken?.(token);
-      };
-
-      // Record when each not-yet-dispatched user message actually reaches the
-      // model. `history` shares message objects with `working`, so the stamp
-      // rides on the conversation that gets persisted below. The same instant
-      // is stamped onto this step's assistant message so the UI can show when
-      // the LLM received the request that produced the reply.
-      const llmReceivedAt = new Date().toISOString();
-      markLlmReceived(history, new Date(llmReceivedAt));
-
-      try {
-        response = await this.provider.sendChat({
-          model: input.model,
-          sessionId: input.conversation.sessionId,
-          messages: [systemMessage, ...history],
-          ...(input.reasoningEffort
-            ? { reasoningEffort: input.reasoningEffort }
-            : {}),
-          ...(toolsEnabled ? { tools: toolDefinitions } : {}),
-          ...(input.onToken ? { onToken: input.onToken } : {}),
-          onThinkingToken,
-          ...(input.signal ? { signal: input.signal } : {}),
-        });
-      } catch (error) {
-        // The model doesn't support tools: remember it, drop tools, and retry
-        // this step in chat-only mode.
-        if (toolsEnabled && error instanceof ToolsUnsupportedError) {
-          this.toolUnsupportedModels.add(input.model);
-          toolsEnabled = false;
-          continue;
+        // Steer the in-flight turn: fold any messages the user queued since the
+        // last step into a user message before this model call. Consecutive
+        // same-role messages are merged by the provider adapters, so this sits
+        // cleanly after the preceding tool results.
+        const steering = input.drainSteering?.();
+        if (steering && steering.trim()) {
+          working.push(createMessage('user', steering.trim()));
         }
-        throw error;
-      }
 
-      throwIfAborted(input.signal);
+        // Cap how much prior history travels to the model to save tokens. We trim
+        // only the request — `working` (and thus what we persist below) keeps the
+        // full conversation. The system prompt is always sent in full.
+        // A limit of 0 (or less) disables trimming — the whole conversation is
+        // sent. `selectRecentMessages` treats a non-positive limit as "all".
+        const history = selectRecentMessages(
+          working,
+          Math.floor(this.getMaxHistoryMessages())
+        );
+        const omittedCount = working.length - history.length;
 
-      const capturedThinking = thinkingContent.trim()
-        ? {
-            content: thinkingContent,
-            durationMs:
-              thinkingStartedAt > 0 ? Date.now() - thinkingStartedAt : 0,
+        const systemPrompt = buildSystemPrompt(
+          this.getSystemPrompt(),
+          this.workspaceRoot,
+          toolsEnabled && this.describeToolsInSystemPrompt
+            ? toolDefinitions
+            : [],
+          projectInstructions
+        );
+        // Tell the model that older turns were trimmed and how to recover them, so
+        // it can page back via `view_history` instead of assuming they're gone.
+        // Only point the model at `view_history` when it's actually advertised:
+        // the user may have turned it off, in which case the recovery hint would
+        // just steer it toward a tool that gets refused.
+        const canRecoverHistory =
+          omittedCount > 0 &&
+          toolsEnabled &&
+          !disabledToolNames.has(ToolName.ViewHistory);
+        const systemMessage = createMessage(
+          'system',
+          canRecoverHistory
+            ? `${systemPrompt}\n\nNote: the ${omittedCount} oldest message(s) of this ${working.length}-message conversation were omitted from this request to save tokens. They are still available — call the \`view_history\` tool with a "start" (and optional "end") index to read any of them (index 0 = oldest message).`
+            : systemPrompt
+        );
+
+        let response;
+        const onThinkingToken = (token: string): void => {
+          if (stepThinkingStartedAt === 0) stepThinkingStartedAt = Date.now();
+          stepThinking += token;
+          input.onThinkingToken?.(token);
+        };
+        // Mirror streamed answer tokens into the step buffer (not just the
+        // host callback) so an abort mid-stream can still persist the partial
+        // answer below.
+        const onToken = (token: string): void => {
+          stepContent += token;
+          input.onToken?.(token);
+        };
+
+        // Record when each not-yet-dispatched user message actually reaches the
+        // model. `history` shares message objects with `working`, so the stamp
+        // rides on the conversation that gets persisted below. The same instant
+        // is stamped onto this step's assistant message so the UI can show when
+        // the LLM received the request that produced the reply.
+        const llmReceivedAt = new Date().toISOString();
+        markLlmReceived(history, new Date(llmReceivedAt));
+
+        try {
+          response = await this.provider.sendChat({
+            model: input.model,
+            sessionId: input.conversation.sessionId,
+            messages: [systemMessage, ...history],
+            ...(input.reasoningEffort
+              ? { reasoningEffort: input.reasoningEffort }
+              : {}),
+            ...(toolsEnabled ? { tools: toolDefinitions } : {}),
+            onToken,
+            onThinkingToken,
+            ...(input.signal ? { signal: input.signal } : {}),
+          });
+        } catch (error) {
+          // The model doesn't support tools: remember it, drop tools, and retry
+          // this step in chat-only mode.
+          if (toolsEnabled && error instanceof ToolsUnsupportedError) {
+            this.toolUnsupportedModels.add(input.model);
+            toolsEnabled = false;
+            continue;
           }
-        : undefined;
-      // Some reasoning models (e.g. gpt-oss) stream their whole turn on the
-      // reasoning channel and finish with empty content; the provider then falls
-      // back to using that reasoning as the answer. In that case the content and
-      // the thinking are the same text — keep only the response so it isn't
-      // rendered twice (once as a "Thought" block, once as the reply).
-      const thinking =
-        capturedThinking &&
-        response.content.trim().length > 0 &&
-        response.content.trim() === capturedThinking.content.trim()
-          ? undefined
-          : capturedThinking;
+          throw error;
+        }
 
-      if (response.usage) {
-        usage = usage ? sumUsage(usage, response.usage) : response.usage;
-        // Surface this step's usage immediately so the UI's token/cost metrics
-        // track the turn live rather than jumping only when it finishes.
-        input.onUsage?.(response.usage);
-      }
+        throwIfAborted(input.signal);
 
-      const toolCalls = response.toolCalls ?? [];
-      if (response.content) {
-        reply = response.content;
-      }
+        // Thinking always stays on the thinking channel — providers never
+        // promote reasoning to content, so no dedupe against the reply is
+        // needed here.
+        const thinking = stepThinking.trim()
+          ? {
+              content: stepThinking,
+              durationMs:
+                stepThinkingStartedAt > 0
+                  ? Date.now() - stepThinkingStartedAt
+                  : 0,
+            }
+          : undefined;
 
-      if (toolCalls.length === 0) {
+        if (response.usage) {
+          usage = usage ? sumUsage(usage, response.usage) : response.usage;
+          // Surface this step's usage immediately so the UI's token/cost metrics
+          // track the turn live rather than jumping only when it finishes.
+          input.onUsage?.(response.usage);
+        }
+
+        const toolCalls = response.toolCalls ?? [];
+        if (response.content) {
+          reply = response.content;
+        }
+
+        if (toolCalls.length === 0) {
+          working.push(
+            createMessage(
+              'assistant',
+              response.content,
+              new Date(),
+              undefined,
+              {
+                llmReceivedAt,
+                ...(thinking ? { thinking } : {}),
+              }
+            )
+          );
+          break;
+        }
+
         working.push(
           createMessage('assistant', response.content, new Date(), undefined, {
+            toolCalls,
             llmReceivedAt,
             ...(thinking ? { thinking } : {}),
           })
         );
-        break;
-      }
+        // This step's output is now committed to `working`; clear the buffers
+        // so an abort during the tool calls below doesn't persist it twice.
+        stepContent = '';
+        stepThinking = '';
+        stepThinkingStartedAt = 0;
 
-      working.push(
-        createMessage('assistant', response.content, new Date(), undefined, {
-          toolCalls,
-          llmReceivedAt,
-          ...(thinking ? { thinking } : {}),
-        })
-      );
+        for (const call of toolCalls) {
+          const toolResult = await this.runToolCall(
+            call,
+            input,
+            working,
+            activeToolNames
+          );
+          working.push(
+            createMessage('tool', toolResult.content, new Date(), undefined, {
+              toolCallId: call.id,
+              name: call.name,
+            })
+          );
 
-      for (const call of toolCalls) {
-        const toolResult = await this.runToolCall(
-          call,
-          input,
-          working,
-          activeToolNames
-        );
-        working.push(
-          createMessage('tool', toolResult.content, new Date(), undefined, {
-            toolCallId: call.id,
-            name: call.name,
-          })
-        );
-
-        if (call.name === ToolName.LazyLoadTools) {
-          gatewayCalledThisTurn = true;
+          if (call.name === ToolName.LazyLoadTools) {
+            gatewayCalledThisTurn = true;
+          }
+          if (lazyToolLoadingEnabled) {
+            // The active set may have changed — a gateway toggle, or an implicit
+            // enable from calling a catalog tool directly. Re-derive the
+            // advertised set (minus any tool the user has turned off) so the
+            // change reaches the very next model request of this same turn. The
+            // gateway itself stays in the set so the model can keep toggling.
+            // (With lazy loading off everything is already advertised — nothing
+            // here may shrink the set to just the toggled tools.)
+            toolDefinitions = withoutDisabledTools(lazyAdvertisedDefinitions());
+            toolsEnabled =
+              toolDefinitions.length > 0 &&
+              !this.toolUnsupportedModels.has(input.model);
+          }
         }
-        if (lazyToolLoadingEnabled) {
-          // The active set may have changed — a gateway toggle, or an implicit
-          // enable from calling a catalog tool directly. Re-derive the
-          // advertised set (minus any tool the user has turned off) so the
-          // change reaches the very next model request of this same turn. The
-          // gateway itself stays in the set so the model can keep toggling.
-          // (With lazy loading off everything is already advertised — nothing
-          // here may shrink the set to just the toggled tools.)
-          toolDefinitions = withoutDisabledTools(lazyAdvertisedDefinitions());
-          toolsEnabled =
-            toolDefinitions.length > 0 &&
-            !this.toolUnsupportedModels.has(input.model);
+
+        // present_plan is terminal: the model has delivered the plan and is meant
+        // to stop and wait for the user. Re-invoking it would make it produce an
+        // empty follow-up (nothing left to say), which the provider rejects as an
+        // "empty response" — so end the turn here instead of looping again.
+        if (toolCalls.some((call) => call.name === ToolName.PresentPlan)) {
+          break;
         }
       }
-
-      // present_plan is terminal: the model has delivered the plan and is meant
-      // to stop and wait for the user. Re-invoking it would make it produce an
-      // empty follow-up (nothing left to say), which the provider rejects as an
-      // "empty response" — so end the turn here instead of looping again.
-      if (toolCalls.some((call) => call.name === ToolName.PresentPlan)) {
-        break;
+    } catch (error) {
+      // The turn was interrupted: persist everything it produced before the
+      // abort — completed tool rounds (already in `working`), plus the partial
+      // answer/thinking the in-flight step had streamed — so a cancel never
+      // discards work. The saved conversation is attached to the rethrown
+      // error (see getInterruptedConversation) so hosts can render it without
+      // reconstructing the turn from their own streaming buffers.
+      if (isAbortError(error) || input.signal?.aborted) {
+        appendInterruptedStepArtifacts(working, {
+          content: stepContent,
+          thinking: stepThinking,
+          thinkingStartedAt: stepThinkingStartedAt,
+        });
+        try {
+          const interrupted = await this.persistTurn(
+            input,
+            working,
+            generatedTitle,
+            activeToolNames,
+            gatewayCalledThisTurn
+          );
+          rememberInterruptedConversation(error, interrupted);
+        } catch {
+          // Best-effort: failing to save the partial must not mask the abort.
+        }
       }
+      throw error;
     }
 
+    const updatedConversation = await this.persistTurn(
+      input,
+      working,
+      generatedTitle,
+      activeToolNames,
+      gatewayCalledThisTurn
+    );
+
+    return {
+      conversation: updatedConversation,
+      reply,
+      ...(usage ? { usage } : {}),
+    };
+  }
+
+  /**
+   * Builds the updated conversation for this turn's working messages and saves
+   * it. Shared by the success path and the abort path, so an interrupted turn
+   * is persisted exactly like a completed one (title carry-forward included).
+   */
+  private async persistTurn(
+    input: SubmitMessageInput,
+    working: ChatMessage[],
+    generatedTitle: string | undefined,
+    activeToolNames: Set<string>,
+    gatewayCalledThisTurn: boolean
+  ): Promise<Conversation> {
     const updatedConversation: Conversation = {
       ...input.conversation,
       ...(generatedTitle && !input.conversation.title
@@ -721,12 +797,7 @@ export class ChatSessionService {
     }
 
     await this.repository.save(updatedConversation);
-
-    return {
-      conversation: updatedConversation,
-      reply,
-      ...(usage ? { usage } : {}),
-    };
+    return updatedConversation;
   }
 
   private async runToolCall(
@@ -1099,6 +1170,94 @@ function sumUsage(left: TokenUsage, right: TokenUsage): TokenUsage {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Interrupted-turn conversations, keyed by the abort error that ended the turn.
+ * A WeakMap side-channel (rather than a custom error class) keeps the original
+ * error — often a provider-thrown DOMException — intact for hosts that switch
+ * on `error.name === 'AbortError'`.
+ */
+const interruptedConversations = new WeakMap<object, Conversation>();
+
+function rememberInterruptedConversation(
+  error: unknown,
+  conversation: Conversation
+): void {
+  if (typeof error === 'object' && error !== null) {
+    interruptedConversations.set(error, conversation);
+  }
+}
+
+/**
+ * The conversation `submitMessage` persisted for an interrupted turn, if the
+ * caught abort error carries one. It holds everything produced before the
+ * cancel — the user message, completed tool rounds, per-step thinking, and the
+ * partial answer that was streaming — already saved to the repository. Hosts
+ * should adopt it as their current conversation instead of reconstructing the
+ * turn from their own streaming buffers.
+ */
+export function getInterruptedConversation(
+  error: unknown
+): Conversation | undefined {
+  return typeof error === 'object' && error !== null
+    ? interruptedConversations.get(error)
+    : undefined;
+}
+
+/**
+ * Folds what the in-flight step had produced when the turn was aborted into
+ * `working`: synthetic results for tool calls that never finished (a persisted
+ * assistant `toolCalls` message with no matching tool result is malformed
+ * history most providers reject on the next request), then the partially
+ * streamed answer/thinking as a final assistant message.
+ */
+function appendInterruptedStepArtifacts(
+  working: ChatMessage[],
+  step: { content: string; thinking: string; thinkingStartedAt: number }
+): void {
+  const answeredCallIds = new Set(
+    working
+      .filter((message) => message.role === 'tool' && message.toolCallId)
+      .map((message) => message.toolCallId as string)
+  );
+  for (const message of working) {
+    if (message.role !== 'assistant' || !message.toolCalls) continue;
+    for (const call of message.toolCalls) {
+      if (answeredCallIds.has(call.id)) continue;
+      working.push(
+        createMessage(
+          'tool',
+          '[Interrupted by user — this tool call was cancelled before it produced a result.]',
+          new Date(),
+          undefined,
+          { toolCallId: call.id, name: call.name }
+        )
+      );
+    }
+  }
+
+  const trimmedThinking = step.thinking.trim();
+  if (!step.content.trim() && !trimmedThinking) return;
+  working.push(
+    createMessage(
+      'assistant',
+      step.content,
+      new Date(),
+      undefined,
+      trimmedThinking
+        ? {
+            thinking: {
+              content: step.thinking,
+              durationMs:
+                step.thinkingStartedAt > 0
+                  ? Date.now() - step.thinkingStartedAt
+                  : 0,
+            },
+          }
+        : undefined
+    )
+  );
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

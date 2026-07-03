@@ -59,14 +59,9 @@
     "menus": {
       "view/title": [
         {
-          "command": "justcode.newSession",
-          "when": "view == justcode.chatView",
-          "group": "navigation@1"
-        },
-        {
           "command": "justcode.openSettings",
           "when": "view == justcode.chatView",
-          "group": "navigation@2"
+          "group": "navigation@1"
         }
       ]
     }

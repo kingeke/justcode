@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ChatSessionService,
   describeTool,
+  getInterruptedConversation,
 } from '@core/application/chat-session-service';
 import { ToolRegistry } from '@core/application/tool-registry';
 import { createConversation } from '@core/domain/conversation';
@@ -812,8 +813,126 @@ describe('ChatSessionService', () => {
 
     controller.abort();
 
+    let caught: unknown;
+    await submitPromise.catch((error: unknown) => {
+      caught = error;
+    });
+    expect(caught).toMatchObject({ name: 'AbortError' });
+    // An interrupted turn is persisted (here: just the user message — nothing
+    // had streamed yet), and the saved conversation rides on the abort error
+    // so hosts can adopt it.
+    expect(repository.conversation.messages.map((m) => m.role)).toEqual([
+      'user',
+    ]);
+    expect(getInterruptedConversation(caught)).toEqual(repository.conversation);
+  });
+
+  it('persists partially streamed answer and thinking when a turn is interrupted', async () => {
+    const repository = new InMemoryConversationRepository();
+    const controller = new AbortController();
+    const provider: ProviderClient = {
+      providerId: ProviderId.Ollama,
+      async sendChat({
+        signal,
+        onToken,
+        onThinkingToken,
+      }): Promise<ChatResult> {
+        onThinkingToken?.('pondering deeply');
+        onToken?.('partial answer');
+        return await new Promise<ChatResult>((_resolve, reject) => {
+          signal?.addEventListener(
+            'abort',
+            () =>
+              reject(
+                new DOMException('The operation was aborted.', 'AbortError')
+              ),
+            { once: true }
+          );
+        });
+      },
+      async listModels() {
+        return [
+          {
+            id: 'llama3.1',
+            displayName: 'llama3.1',
+            providerId: ProviderId.Ollama,
+          },
+        ];
+      },
+      getDefaultModel() {
+        return undefined;
+      },
+    };
+    const service = new ChatSessionService(repository, provider);
+
+    const submitPromise = service.submitMessage({
+      conversation: titledConversation('session-1'),
+      model: 'llama3.1',
+      content: 'Hello',
+      signal: controller.signal,
+    });
+    // Let sendChat emit its tokens before cancelling.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    controller.abort();
     await expect(submitPromise).rejects.toMatchObject({ name: 'AbortError' });
-    expect(repository.conversation.messages).toHaveLength(0);
+
+    const messages = repository.conversation.messages;
+    expect(messages.map((m) => m.role)).toEqual(['user', 'assistant']);
+    expect(messages[1]?.content).toBe('partial answer');
+    expect(messages[1]?.thinking?.content).toBe('pondering deeply');
+  });
+
+  it('closes dangling tool calls with a synthetic result when interrupted mid-tool', async () => {
+    const repository = new InMemoryConversationRepository();
+    const controller = new AbortController();
+    const hangingTool: Tool = {
+      requiresApproval: false,
+      definition: {
+        name: 'write_file',
+        description: 'writes a file',
+        parameters: { type: 'object' },
+      },
+      describe: () => ({ title: 'write' }),
+      execute: (_rawArguments, context) =>
+        new Promise((_resolve, reject) => {
+          // The tool only ends when the turn is cancelled.
+          controller.abort();
+          context.signal?.addEventListener(
+            'abort',
+            () =>
+              reject(
+                new DOMException('The operation was aborted.', 'AbortError')
+              ),
+            { once: true }
+          );
+          if (context.signal?.aborted) {
+            reject(
+              new DOMException('The operation was aborted.', 'AbortError')
+            );
+          }
+        }),
+    };
+    const service = new ChatSessionService(
+      repository,
+      createToolCallingProvider(),
+      { toolRegistry: new ToolRegistry([hangingTool]) }
+    );
+
+    await expect(
+      service.submitMessage({
+        conversation: titledConversation('session-1'),
+        model: 'gpt',
+        content: 'create a.txt',
+        signal: controller.signal,
+        allowUnattended: true,
+      })
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    const messages = repository.conversation.messages;
+    expect(messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool']);
+    const toolMessage = messages[2];
+    expect(toolMessage?.toolCallId).toBe('call-1');
+    expect(toolMessage?.content).toContain('Interrupted by user');
   });
 
   it('executes a requested tool and feeds the result back to the model', async () => {

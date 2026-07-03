@@ -375,19 +375,18 @@ export function Composer(props: ComposerProps): React.JSX.Element {
       (m) =>
         m.id === props.activeModel && m.providerId === props.activeProviderId
     ) ?? props.models.find((m) => m.id === props.activeModel);
-  // Context usage shown as a ring gauge before the tools icon: the session's
-  // input-token total (the status bar's "ctx" readout) against the model's
-  // window. Only models that report a context window get it.
+  // Context usage shown as a ring gauge before the tools icon: the most recent
+  // request's input tokens (the status bar's "ctx" readout — what the model
+  // currently sees) against the model's window. Only models that report a
+  // context window get it.
   const contextWindow = activeModelObj?.contextWindow;
+  const contextUsed = props.usage?.lastInputTokens ?? 0;
   const contextInfo =
     contextWindow != null && contextWindow > 0
       ? {
-          used: props.usage?.inputTokens ?? 0,
+          used: contextUsed,
           window: contextWindow,
-          pct: Math.min(
-            100,
-            Math.round(((props.usage?.inputTokens ?? 0) / contextWindow) * 100)
-          ),
+          pct: Math.min(100, Math.round((contextUsed / contextWindow) * 100)),
         }
       : undefined;
 
@@ -982,8 +981,8 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                       <div className="context-popup-title">Context Window</div>
                       <div className="context-popup-row">
                         <span>
-                          {fmtTokenCount(contextInfo.used)} /{' '}
-                          {fmtTokenCount(contextInfo.window)} tokens
+                          {contextInfo.used.toLocaleString()} /{' '}
+                          {contextInfo.window.toLocaleString()} tokens
                         </span>
                         <span className="context-popup-pct">
                           {contextInfo.pct}%
@@ -994,6 +993,38 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                           className={`context-popup-bar-fill ${contextPressureClass(contextInfo.pct)}`}
                           style={{ width: `${contextInfo.pct}%` }}
                         />
+                      </div>
+                    </div>
+                    <div className="settings-popup-section">
+                      <div className="context-popup-row">
+                        <span className="settings-popup-label">
+                          Total Input Tokens
+                        </span>
+                        <span>
+                          {(props.usage?.inputTokens ?? 0).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="context-popup-row">
+                        <span className="settings-popup-label">
+                          Total Cached Tokens
+                        </span>
+                        <span>
+                          {(props.usage?.cachedTokens ?? 0).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="context-popup-row">
+                        <span className="settings-popup-label">
+                          Total Output Tokens
+                        </span>
+                        <span>
+                          {(props.usage?.outputTokens ?? 0).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="context-popup-row">
+                        <span className="settings-popup-label">
+                          Total Session Cost
+                        </span>
+                        <span>${(props.usage?.cost ?? 0).toFixed(4)}</span>
                       </div>
                     </div>
                   </div>
@@ -1363,21 +1394,15 @@ export function Composer(props: ComposerProps): React.JSX.Element {
           <span className="status-usage" title="Token usage this session">
             <span className="metric-label">ctx </span>
             <span className="metric-value">
+              {formatTokens(props?.usage?.lastInputTokens || 0)}
+            </span>
+            <span className="metric-label"> in </span>
+            <span className="metric-value">
               {formatTokens(props?.usage?.inputTokens || 0)}
             </span>
             <span className="metric-label"> cached </span>
             <span className="metric-value">
               {formatTokens(props?.usage?.cachedTokens || 0)}
-            </span>
-            <span className="metric-label"> in </span>
-            <span className="metric-value">
-              {formatTokens(
-                Math.max(
-                  (props?.usage?.inputTokens || 0) -
-                    (props?.usage?.cachedTokens || 0),
-                  0
-                )
-              )}
             </span>
             <span className="metric-label"> out </span>
             <span className="metric-value">

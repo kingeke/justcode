@@ -41,11 +41,12 @@ import {
   hasActiveMentionTrigger,
   type PromptAttachmentService,
 } from '@core/application/prompt-attachment-service';
-import type {
-  ChatSessionService,
-  StartSessionResult,
-  ToolActivityEvent,
-  ToolApprovalRequest,
+import {
+  getInterruptedConversation,
+  type ChatSessionService,
+  type StartSessionResult,
+  type ToolActivityEvent,
+  type ToolApprovalRequest,
 } from '@core/application/chat-session-service';
 import type { UserQuestionRequest } from '@core/ports/tool';
 import {
@@ -420,22 +421,22 @@ function metricsLineContent(
   metrics: ReturnType<typeof getInitialMetrics>,
   activeModelInfo: ModelInfo | null
 ): StyledText {
-  const cachedTokens = metrics.cachedTokens;
-  const newTokens = Math.max(metrics.inputTokens - cachedTokens, 0);
-  // ctx(%) tracks the same number as the "ctx" readout beside it (the
-  // session's input-token total), so the two can never disagree.
+  // "ctx" is the size of the *current* context — the input tokens of the most
+  // recent request — while "in" is the session's cumulative input-token total.
+  // ctx(%) tracks the same number as the "ctx" readout beside it, so the two
+  // can never disagree.
   const pct =
     activeModelInfo?.contextWindow == null
       ? null
-      : contextPct(metrics.inputTokens, activeModelInfo.contextWindow);
+      : contextPct(metrics.lastInputTokens, activeModelInfo.contextWindow);
 
   const chunks: TextChunk[] = [
     tc('ctx ', { fg: MUTED }),
+    tc(metrics.lastInputTokens.toLocaleString(), { fg: 'white' }),
+    tc(' in ', { fg: MUTED }),
     tc(metrics.inputTokens.toLocaleString(), { fg: 'white' }),
     tc(' cached ', { fg: MUTED }),
-    tc(cachedTokens.toLocaleString(), { fg: 'white' }),
-    tc(' in ', { fg: MUTED }),
-    tc(newTokens.toLocaleString(), { fg: 'white' }),
+    tc(metrics.cachedTokens.toLocaleString(), { fg: 'white' }),
     tc(' out ', { fg: MUTED }),
     tc(metrics.outputTokens.toLocaleString(), { fg: 'white' }),
   ];
@@ -1923,14 +1924,16 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           );
           return;
         }
-        const pct = contextPct(metrics.inputTokens, windowSize);
+        // Context usage is the size of the most recent request (what the model
+        // currently sees), not the session's cumulative input-token total.
+        const pct = contextPct(metrics.lastInputTokens, windowSize);
         flashCommandNotice(
           new StyledText([
             tc('Context ', { fg: MUTED }),
             tc(`${contextBar(pct)} ${pct}%`, { fg: contextUsageColor(pct) }),
             tc(' · ', { fg: MUTED }),
             tc(
-              `${metrics.inputTokens.toLocaleString()} / ${windowSize.toLocaleString()} tokens`,
+              `${metrics.lastInputTokens.toLocaleString()} / ${windowSize.toLocaleString()} tokens`,
               { fg: 'white' }
             ),
           ])
@@ -2588,12 +2591,6 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             const target =
               assistantMessages[Math.min(index, assistantMessages.length - 1)];
             if (!target) return;
-            // Some reasoning models (e.g. gpt-oss) emit their whole turn on the
-            // reasoning channel with empty content; the provider then promotes
-            // that reasoning to the answer. The segment then equals the message
-            // content, so anchoring it would render the same text twice (as a
-            // thought and as the reply) — skip it and keep just the reply.
-            if (target.content.trim() === segment.content.trim()) return;
             const existing = anchored[target.id];
             anchored[target.id] = existing
               ? {
@@ -2643,50 +2640,66 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       setPendingQuestion(null);
 
       if (isAbortError(caughtError)) {
-        const capturedThinking = thinkingRef.current.buffer;
-        const capturedContent = streamingBufferRef.current;
-        const capturedDuration =
-          thinkingRef.current.durationMs ??
-          (thinkingRef.current.startMs
-            ? Date.now() - thinkingRef.current.startMs
-            : 0);
-
-        const interruptedMessage =
-          capturedThinking || capturedContent
-            ? createMessage(
-                'assistant',
-                capturedContent,
-                new Date(),
-                undefined,
-                capturedThinking
-                  ? {
-                      thinking: {
-                        content: capturedThinking,
-                        durationMs: capturedDuration,
-                      },
-                    }
-                  : undefined
-              )
-            : null;
-
-        setConversation((current) => {
-          if (!current) return current;
-          // Settle any optimistic bash placeholder still marked running, then
-          // append whatever partial assistant response was captured.
-          const messages = current.messages.map((message) =>
-            message.role === 'tool' &&
-            message.name === 'bash' &&
-            message.content === ''
-              ? { ...message, content: 'Command was cancelled.' }
-              : message
+        // The service persists everything an interrupted turn produced — the
+        // user message, completed tool rounds, per-step thinking, and the
+        // partial answer that was streaming — and attaches the saved
+        // conversation to the abort error. Adopt it so the transcript matches
+        // what's on disk and the interrupted work survives a restart.
+        const interruptedConversation = getInterruptedConversation(caughtError);
+        if (interruptedConversation) {
+          setConversation((current) =>
+            current?.title && !interruptedConversation.title
+              ? { ...interruptedConversation, title: current.title }
+              : interruptedConversation
           );
-          return {
-            ...current,
-            messages: interruptedMessage
-              ? [...messages, interruptedMessage]
-              : messages,
-          };
-        });
+        } else {
+          // Fallback (e.g. the persist itself failed): keep the partial in
+          // memory from the streaming buffers, as before.
+          const capturedThinking = thinkingRef.current.buffer;
+          const capturedContent = streamingBufferRef.current;
+          const capturedDuration =
+            thinkingRef.current.durationMs ??
+            (thinkingRef.current.startMs
+              ? Date.now() - thinkingRef.current.startMs
+              : 0);
+
+          const interruptedMessage =
+            capturedThinking || capturedContent
+              ? createMessage(
+                  'assistant',
+                  capturedContent,
+                  new Date(),
+                  undefined,
+                  capturedThinking
+                    ? {
+                        thinking: {
+                          content: capturedThinking,
+                          durationMs: capturedDuration,
+                        },
+                      }
+                    : undefined
+                )
+              : null;
+
+          setConversation((current) => {
+            if (!current) return current;
+            // Settle any optimistic bash placeholder still marked running, then
+            // append whatever partial assistant response was captured.
+            const messages = current.messages.map((message) =>
+              message.role === 'tool' &&
+              message.name === 'bash' &&
+              message.content === ''
+                ? { ...message, content: 'Command was cancelled.' }
+                : message
+            );
+            return {
+              ...current,
+              messages: interruptedMessage
+                ? [...messages, interruptedMessage]
+                : messages,
+            };
+          });
+        }
 
         streamingBufferRef.current = '';
         thinkingRef.current = { buffer: '', startMs: 0, durationMs: null };
