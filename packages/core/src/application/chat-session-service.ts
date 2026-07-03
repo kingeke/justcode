@@ -312,6 +312,29 @@ export class ChatSessionService {
   }
 
   /**
+   * Renames a session by persisting a new title over its stored conversation.
+   * Loads the latest and rewrites only the title so a concurrent save can't lose
+   * messages. A blank title clears it (the session falls back to its default
+   * label). Returns the updated conversation so callers can reflect the new
+   * title in memory without a reload.
+   */
+  public async renameSession(
+    sessionId: string,
+    title: string
+  ): Promise<Conversation> {
+    const trimmed = title.trim();
+    const latest = await this.repository.load(sessionId);
+    const updated: Conversation = { ...latest };
+    if (trimmed) {
+      updated.title = trimmed;
+    } else {
+      delete updated.title;
+    }
+    await this.repository.save(updated);
+    return updated;
+  }
+
+  /**
    * Persists the host-computed footer metrics (ctx/cost/tok-s) for a session so
    * resuming it restores them. Re-loads the latest conversation and writes only
    * the stats over it, so a save racing this (e.g. background title generation)
@@ -501,6 +524,25 @@ export class ChatSessionService {
         // Let a later turn retry rather than leaving the session untitled.
         this.titledSessions.delete(input.conversation.sessionId);
       }
+    }
+
+    // Persist the user's message before the (possibly long) provider call, so it
+    // survives navigating back to the session list mid-turn. Without this the
+    // message lives only in memory until `persistTurn` runs at the end of the
+    // turn, so reopening the session shows it as empty and the message appears
+    // lost. Best-effort — the turn's final save is authoritative and overwrites
+    // this snapshot with the full exchange.
+    try {
+      await this.repository.save({
+        ...input.conversation,
+        ...(generatedTitle && !input.conversation.title
+          ? { title: generatedTitle }
+          : {}),
+        messages: working,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch {
+      // Non-fatal: the turn's final persist will write the message.
     }
 
     // Streamed output of the *current* model response, accumulated here (not

@@ -3,6 +3,7 @@ export enum CommandName {
   Models = 'models',
   RefreshModels = 'refresh-models',
   Sessions = 'sessions',
+  Rename = 'rename-session',
   NewSession = 'new-session',
   Clear = 'clear',
   ClearSessions = 'clear-sessions',
@@ -46,6 +47,10 @@ export const COMMANDS: Command[] = [
   {
     name: CommandName.Sessions,
     description: 'Browse saved sessions and resume one',
+  },
+  {
+    name: CommandName.Rename,
+    description: 'Rename the current session (/rename-session <title>)',
   },
   {
     name: CommandName.NewSession,

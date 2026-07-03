@@ -27,6 +27,7 @@ import type {
   WebviewUsage,
 } from '@ext/shared/protocol';
 import {
+  CogIcon,
   ModeIcon,
   PlusIcon,
   SendIcon,
@@ -125,6 +126,8 @@ export interface ComposerProps {
   onSetDisabledTools: (names: string[]) => void;
   /** Open `mcp.json` to add or edit MCP servers. */
   onOpenMcpConfig: () => void;
+  /** Open Settings focused on the System Prompts tab. */
+  onOpenPromptSettings: () => void;
   /** Whether MCP servers are still connecting (shows a spinner on the tools button). */
   mcpLoading: boolean;
   /** Available chat modes (built-in + custom) for the mode picker. */
@@ -680,6 +683,13 @@ export function Composer(props: ComposerProps): React.JSX.Element {
         ) : null}
         {mentionOpen ? (
           <ul className="composer-mentions" role="listbox">
+            {/* Every symbol comes from the same file, so name the location once
+                as a header instead of repeating the path on every method. */}
+            {symbolMention ? (
+              <li className="composer-mention-heading" aria-hidden="true">
+                Methods in <span>{symbolMention.path}</span>
+              </li>
+            ) : null}
             {mentionSuggestions.map((suggestion, index) => (
               <li
                 key={suggestion}
@@ -697,14 +707,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                 onMouseEnter={() => setMentionIndex(index)}
               >
                 {symbolMention ? (
-                  <>
-                    <span className="composer-mention-symbol">
-                      {suggestion}
-                    </span>
-                    <span className="composer-mention-path">
-                      {symbolMention.path}
-                    </span>
-                  </>
+                  <span className="composer-mention-symbol">{suggestion}</span>
                 ) : (
                   suggestion
                 )}
@@ -868,14 +871,28 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         </button>
                       </div>
                     ) : (
-                      <button
-                        type="button"
-                        className="tools-mcp-link"
-                        onClick={() => setCreatingMode(true)}
-                        title="Create a custom mode"
-                      >
-                        + Create mode
-                      </button>
+                      <div className="modes-footer-row">
+                        <button
+                          type="button"
+                          className="tools-mcp-link"
+                          onClick={() => setCreatingMode(true)}
+                          title="Create a custom mode"
+                        >
+                          + Create mode
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn modes-settings-btn"
+                          title="Edit system prompts in Settings"
+                          aria-label="Edit system prompts in Settings"
+                          onClick={() => {
+                            setShowModes(false);
+                            props.onOpenPromptSettings();
+                          }}
+                        >
+                          <CogIcon size={14} />
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1020,12 +1037,14 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                           {(props.usage?.outputTokens ?? 0).toLocaleString()}
                         </span>
                       </div>
-                      <div className="context-popup-row">
-                        <span className="settings-popup-label">
-                          Total Session Cost
-                        </span>
-                        <span>${(props.usage?.cost ?? 0).toFixed(4)}</span>
-                      </div>
+                      {props.usage?.cost !== undefined ? (
+                        <div className="context-popup-row">
+                          <span className="settings-popup-label">
+                            Total Session Cost
+                          </span>
+                          <span>${props.usage.cost.toFixed(4)}</span>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ) : null}

@@ -17,6 +17,10 @@ import { writeSecureFile } from '@runtime/persistence/secure-file';
  *   }
  * }
  * ```
+ *
+ * For compatibility with configs written for other tools (e.g. opencode), a
+ * local `command` may also be an array of strings — its head is the executable
+ * and the tail feeds into `args` — and `enabled: false` is read as `disabled`.
  */
 export interface McpServerConfig {
   /** Executable to launch a local server (e.g. `npx`, `uvx`, an absolute path). */
@@ -107,26 +111,58 @@ function normalizeServers(parsed: unknown): Record<string, McpServerConfig> {
   const result: Record<string, McpServerConfig> = {};
   for (const [name, value] of Object.entries(servers)) {
     if (!isRecord(value)) continue;
-    const hasCommand = typeof value.command === 'string';
+    // Some ecosystems (e.g. opencode) write the local launch as a single
+    // `command` array — ["/path/to/bin", "--flag"] — rather than command +
+    // args. Accept that shape by splitting it, so entries paste unchanged.
+    const { command, commandArgs } = normalizeCommand(value.command);
+    const hasCommand = command !== undefined;
     const hasUrl = typeof value.url === 'string';
     // Each server must declare exactly one transport: a local command or a
     // remote url. An entry with neither is malformed and skipped.
     if (!hasCommand && !hasUrl) continue;
-    const args = Array.isArray(value.args)
+    const ownArgs = Array.isArray(value.args)
       ? value.args.filter((arg): arg is string => typeof arg === 'string')
       : undefined;
+    // Array-command tail first, then any explicit args (rare to have both).
+    const args =
+      commandArgs || ownArgs
+        ? [...(commandArgs ?? []), ...(ownArgs ?? [])]
+        : undefined;
     const env = stringRecord(value.env);
     const headers = stringRecord(value.headers);
+    // `disabled: true` is ours; `enabled: false` is the same intent expressed by
+    // configs from tools that use an enabled flag instead.
+    const disabled = value.disabled === true || value.enabled === false;
     result[name] = {
-      ...(hasCommand ? { command: value.command as string } : {}),
+      ...(hasCommand ? { command } : {}),
       ...(hasUrl ? { url: value.url as string } : {}),
-      ...(args ? { args } : {}),
+      ...(args && args.length > 0 ? { args } : {}),
       ...(env ? { env } : {}),
       ...(headers ? { headers } : {}),
-      ...(value.disabled === true ? { disabled: true } : {}),
+      ...(disabled ? { disabled: true } : {}),
     };
   }
   return result;
+}
+
+/**
+ * Accepts a local server's `command` as either a string or an array of strings
+ * (["/path/bin", "--flag"]); the array's head becomes the command and its tail
+ * feeds into `args`.
+ */
+function normalizeCommand(value: unknown): {
+  command?: string;
+  commandArgs?: string[];
+} {
+  if (typeof value === 'string') return { command: value };
+  if (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((part): part is string => typeof part === 'string')
+  ) {
+    return { command: value[0] as string, commandArgs: value.slice(1) };
+  }
+  return {};
 }
 
 /** Keeps only the string-valued entries of a record, or undefined if not one. */

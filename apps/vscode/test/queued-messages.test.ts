@@ -68,6 +68,7 @@ describe('queued messages', () => {
 
     state = reducer(state, {
       type: HostMessageType.Ready,
+      sessionId: 's1',
       providerId: 'p',
       activeModel: 'm',
       models: [],

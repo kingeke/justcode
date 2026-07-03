@@ -47,7 +47,10 @@ import {
   createRuntimeServices,
   type RuntimeServices,
 } from '@runtime/bootstrap/create-services';
-import { sessionFilePath } from '@runtime/persistence/file-conversation-repository';
+import {
+  sessionFilePath,
+  sessionMessagesFilePath,
+} from '@runtime/persistence/file-conversation-repository';
 import type { McpServerLoadInfo } from '@runtime/mcp/load-mcp-tools';
 import { clearModelsCache } from '@providers/http/models-cache';
 
@@ -84,6 +87,9 @@ import {
   type WebviewToolView,
   type WebviewUsage,
   type WebviewMode,
+  type TokenMessage,
+  type ThinkingMessage,
+  type ToolActivityMessage,
 } from '@ext/shared/protocol';
 import {
   addCustomMode,
@@ -117,6 +123,22 @@ export class ChatBridge {
   // loop via `drainSteering`; reset when a fresh turn starts.
   private steeringQueue: { id: string; content: string }[] = [];
   private abortController: AbortController | undefined;
+  // Session id of the turn currently in flight, if any. Lets the sessions list
+  // flag that session as loading and a reopened session restore its busy state,
+  // since a turn keeps running in the host after the user navigates away.
+  private activeTurnSessionId: string | undefined;
+  // The in-flight turn's output as an ordered, coalesced stream of the webview
+  // messages that produced it (token/thinking runs + tool activity). Reopening
+  // the session mid-turn replays these through the same reducer, rebuilding the
+  // live thinking, tool cards, and streaming answer exactly — with their
+  // original ordering, which the host otherwise can't reconstruct. Reset per turn.
+  private liveTurnEvents: Array<
+    TokenMessage | ThinkingMessage | ToolActivityMessage
+  > = [];
+  // Epoch ms of the in-flight turn's start and first token, sent on resume so
+  // the webview's live tok/s keeps its original time base. Undefined off-turn.
+  private turnStartedAtMs: number | undefined;
+  private turnFirstTokenAtMs: number | undefined;
   private readonly pendingApprovals = new Map<
     string,
     (approved: boolean) => void
@@ -189,6 +211,10 @@ export class ChatBridge {
     cachedTokens: 0,
     cost: 0,
   };
+  // Whether the accumulated cost reflects real pricing. Stays false while the
+  // active model has no pricing and the provider reports no cost, so the footer
+  // hides the readout instead of showing a misleading $0.0000.
+  private costKnown = false;
   // The session tok/s average, maintained incrementally per completed turn:
   // avg += (sample − avg) / count. Equal weight per turn, no re-averaging.
   private avgTokensPerSecond = 0;
@@ -304,6 +330,9 @@ export class ChatBridge {
         return;
       case WebviewMessageType.OpenSession:
         await this.openSession(message.sessionId);
+        return;
+      case WebviewMessageType.RenameSession:
+        await this.renameSession(message.sessionId, message.title);
         return;
       case WebviewMessageType.DeleteSession:
         await this.deleteSession(message.sessionId);
@@ -485,6 +514,7 @@ export class ChatBridge {
     } catch (error) {
       this.post({
         type: HostMessageType.Ready,
+        sessionId: this.sessionId,
         providerId: undefined,
         activeModel: undefined,
         models: [],
@@ -544,6 +574,7 @@ export class ChatBridge {
     if (!services.providerId) {
       this.post({
         type: HostMessageType.Ready,
+        sessionId: this.sessionId,
         providerId: undefined,
         activeModel: undefined,
         models: [],
@@ -603,6 +634,7 @@ export class ChatBridge {
 
       this.post({
         type: HostMessageType.Ready,
+        sessionId: this.sessionId,
         providerId: services.providerId,
         activeModel: session.activeModel,
         models: this.models.map(toWebviewModel),
@@ -663,6 +695,7 @@ export class ChatBridge {
 
       this.post({
         type: HostMessageType.Ready,
+        sessionId: this.sessionId,
         providerId: services.providerId,
         activeModel: this.activeModel,
         models: [],
@@ -722,8 +755,22 @@ export class ChatBridge {
    */
   private async viewChatLog(): Promise<void> {
     const services = await this.ensureServices();
-    const path = sessionFilePath(services.sessionsDirectory, this.sessionId);
-    if (!existsSync(path)) {
+    // The full history lives in the messages file; older sessions still hold it
+    // in the summary file, so fall back to that before giving up.
+    const messagesPath = sessionMessagesFilePath(
+      services.sessionsDirectory,
+      this.sessionId
+    );
+    const summaryPath = sessionFilePath(
+      services.sessionsDirectory,
+      this.sessionId
+    );
+    const path = existsSync(messagesPath)
+      ? messagesPath
+      : existsSync(summaryPath)
+        ? summaryPath
+        : undefined;
+    if (!path) {
       this.post({
         type: HostMessageType.Error,
         message: 'No chat log yet — send a message first.',
@@ -829,6 +876,8 @@ export class ChatBridge {
 
     const abortController = new AbortController();
     this.abortController = abortController;
+    this.activeTurnSessionId = this.conversation.sessionId;
+    this.liveTurnEvents = [];
 
     // A fresh turn starts with an empty steering queue; follow-ups the user adds
     // while this turn runs are mirrored in via `SyncSteeringQueue`.
@@ -837,9 +886,14 @@ export class ChatBridge {
     // Timing for the TTFT / tok-s footer. `firstTokenMs` is stamped by the first
     // streamed token (visible or thinking), matching the CLI's measurement.
     const startMs = Date.now();
+    this.turnStartedAtMs = startMs;
+    this.turnFirstTokenAtMs = undefined;
     let firstTokenMs: number | null = null;
     const markFirstToken = (): void => {
-      if (firstTokenMs === null) firstTokenMs = Date.now();
+      if (firstTokenMs === null) {
+        firstTokenMs = Date.now();
+        this.turnFirstTokenAtMs = firstTokenMs;
+      }
     };
 
     // Accumulate the streamed answer/thinking so an interrupted turn can keep the
@@ -892,12 +946,14 @@ export class ChatBridge {
         onToken: (token) => {
           markFirstToken();
           streamedContent += token;
+          this.recordLiveTurnToken(token);
           this.post({ type: HostMessageType.Token, token });
         },
         onThinkingToken: (token) => {
           markFirstToken();
           if (thinkingStartMs === 0) thinkingStartMs = Date.now();
           streamedThinking += token;
+          this.recordLiveTurnThinking(token);
           this.post({ type: HostMessageType.Thinking, token });
         },
         onUsage: (stepUsage) => {
@@ -1071,10 +1127,17 @@ export class ChatBridge {
       });
     } finally {
       this.abortController = undefined;
+      this.activeTurnSessionId = undefined;
+      this.liveTurnEvents = [];
+      this.turnStartedAtMs = undefined;
+      this.turnFirstTokenAtMs = undefined;
       // Any approval/input prompts still open belong to the turn that just
       // ended; drop them so a late webview reply can't resolve a stale promise.
       this.pendingApprovals.clear();
       this.pendingInputs.clear();
+      // Refresh the sessions list (if it's showing) so the loading indicator
+      // clears once the turn finishes.
+      void this.sendSessionsList(false);
     }
   }
 
@@ -1085,6 +1148,12 @@ export class ChatBridge {
    */
   private accumulateUsage(usage: TokenUsage): void {
     const cost = usage.cost ?? this.estimateCost(usage);
+    // Cost is only meaningful when the provider reported it or we have the
+    // active model's pricing to derive it. Otherwise it stays a misleading $0,
+    // so track known-ness and hide the readout entirely (see usageSnapshot).
+    if (usage.cost !== undefined || this.activeModelHasPricing()) {
+      this.costKnown = true;
+    }
     this.lastInputTokens = usage.inputTokens;
     this.cumulativeUsage = {
       inputTokens: this.cumulativeUsage.inputTokens + usage.inputTokens,
@@ -1092,6 +1161,10 @@ export class ChatBridge {
       cachedTokens: this.cumulativeUsage.cachedTokens + usage.cachedTokens,
       cost: this.cumulativeUsage.cost + cost,
     };
+  }
+
+  private activeModelHasPricing(): boolean {
+    return !!this.models.find((m) => m.id === this.activeModel)?.pricing;
   }
 
   private estimateCost(usage: TokenUsage): number {
@@ -1112,6 +1185,7 @@ export class ChatBridge {
       cachedTokens: 0,
       cost: 0,
     };
+    this.costKnown = false;
     this.avgTokensPerSecond = 0;
     this.completedTurnCount = 0;
     this.lastInputTokens = 0;
@@ -1140,6 +1214,9 @@ export class ChatBridge {
       cachedTokens: stats.cachedTokens,
       cost: stats.cost,
     };
+    // A persisted nonzero cost means pricing was known at the time; a zero cost
+    // is re-derived on the next turn, so don't surface it until then.
+    this.costKnown = stats.cost > 0;
     this.lastInputTokens = stats.lastInputTokens;
     this.avgTokensPerSecond = stats.avgTokensPerSecond ?? 0;
     this.completedTurnCount = stats.completedTurnCount ?? 0;
@@ -1154,7 +1231,14 @@ export class ChatBridge {
    * plus the most recent request's input tokens (the "ctx" readout).
    */
   private usageSnapshot(): WebviewUsage {
-    return { ...this.cumulativeUsage, lastInputTokens: this.lastInputTokens };
+    const { cost, ...rest } = this.cumulativeUsage;
+    return {
+      ...rest,
+      lastInputTokens: this.lastInputTokens,
+      // Omit cost when pricing is unknown so the footer hides it rather than
+      // showing $0.0000.
+      ...(this.costKnown ? { cost } : {}),
+    };
   }
 
   /**
@@ -1249,7 +1333,7 @@ export class ChatBridge {
         this.toolViewsByCallId
       );
     }
-    this.post({
+    const message: ToolActivityMessage = {
       type: HostMessageType.ToolActivity,
       phase: event.phase === 'start' ? ToolPhase.Start : ToolPhase.End,
       toolName: event.toolName,
@@ -1261,7 +1345,43 @@ export class ChatBridge {
             resultPreview: truncate(event.result.content, RESULT_PREVIEW_LIMIT),
           }
         : {}),
-    });
+    };
+    this.liveTurnEvents.push(message);
+    this.post(message);
+  }
+
+  // Coalesce consecutive answer/thinking tokens into a single recorded event so a
+  // resume replays a handful of messages, not one per token. The reducer treats
+  // a Token/Thinking message's payload as opaque text to append, so a merged run
+  // rebuilds identically.
+  private recordLiveTurnToken(token: string): void {
+    const last = this.liveTurnEvents.at(-1);
+    if (last?.type === HostMessageType.Token) {
+      last.token += token;
+    } else {
+      this.liveTurnEvents.push({ type: HostMessageType.Token, token });
+    }
+  }
+
+  private recordLiveTurnThinking(token: string): void {
+    const last = this.liveTurnEvents.at(-1);
+    if (last?.type === HostMessageType.Thinking) {
+      last.token += token;
+    } else {
+      this.liveTurnEvents.push({ type: HostMessageType.Thinking, token });
+    }
+  }
+
+  /**
+   * Replays the in-flight turn's recorded events to the webview, in order, so a
+   * freshly reopened session rebuilds the live thinking/tool/answer state through
+   * the normal reducer path. Posted right after the resume `Ready` (which clears
+   * the transient live state); subsequent live events append as usual.
+   */
+  private replayLiveTurn(): void {
+    for (const event of this.liveTurnEvents) {
+      this.post(event);
+    }
   }
 
   /**
@@ -1366,6 +1486,9 @@ export class ChatBridge {
         })),
         hasConnectedProvider: services.allProviders.length > 0,
         focus,
+        ...(this.activeTurnSessionId
+          ? { activeSessionId: this.activeTurnSessionId }
+          : {}),
       });
     } catch (error) {
       this.post({
@@ -1408,6 +1531,7 @@ export class ChatBridge {
         const resolvedFiles = await readResolvedFiles(configDir, sessionId);
         this.post({
           type: HostMessageType.Ready,
+          sessionId: this.sessionId,
           providerId: this.services.providerId,
           activeModel: this.activeModel,
           models: this.models.map(toWebviewModel),
@@ -1435,7 +1559,22 @@ export class ChatBridge {
             ? { sessionTitle: conversation.title }
             : {}),
           ...this.statsSnapshot(),
+          // Reopening the session whose turn is still running: restore its busy
+          // state and timing; the recorded live-turn events (replayed just below)
+          // rebuild the thinking/tool/answer state.
+          ...(this.activeTurnSessionId === sessionId
+            ? {
+                busy: true,
+                ...(this.turnStartedAtMs !== undefined
+                  ? { turnStartedAt: this.turnStartedAtMs }
+                  : {}),
+                ...(this.turnFirstTokenAtMs !== undefined
+                  ? { turnFirstTokenAt: this.turnFirstTokenAtMs }
+                  : {}),
+              }
+            : {}),
         });
+        if (this.activeTurnSessionId === sessionId) this.replayLiveTurn();
         return;
       } catch {
         // Any failure (e.g. the conversation couldn't be read) falls through to
@@ -1482,6 +1621,36 @@ export class ChatBridge {
     }
 
     await this.sendSessionsList();
+  }
+
+  private async renameSession(sessionId: string, title: string): Promise<void> {
+    const services = await this.ensureServices();
+    let updated;
+    try {
+      updated = await services.chatSessionService.renameSession(
+        sessionId,
+        title
+      );
+    } catch (error) {
+      this.post({ type: HostMessageType.Error, message: errorMessage(error) });
+      return;
+    }
+
+    // Keep the in-memory copy (and the chat header) in step when the renamed
+    // session is the one currently loaded.
+    if (sessionId === this.sessionId && this.conversation) {
+      const next = { ...this.conversation };
+      if (updated.title) next.title = updated.title;
+      else delete next.title;
+      this.conversation = next;
+      this.post({
+        type: HostMessageType.TitleUpdate,
+        title: updated.title ?? '',
+      });
+    }
+
+    // Refresh the list in place so the new title shows without leaving the view.
+    await this.sendSessionsList(false);
   }
 
   private async clearAllSessions(): Promise<void> {
@@ -1818,6 +1987,24 @@ export class ChatBridge {
   }
 
   /**
+   * Re-reads the mode system prompts from config (after an edit in the Settings
+   * tab) and re-applies the active mode, so the next turn runs under the new
+   * prompt — without rebuilding the runtime or resetting the transcript.
+   */
+  public async refreshPrompts(): Promise<void> {
+    const config = await readGlobalConfig(cacheDirectory());
+    this.agentPrompt = config.systemPrompt;
+    this.askPrompt = config.askSystemPrompt;
+    this.planPrompt = config.planSystemPrompt;
+    this.customModesConfig = config.customModes ?? {};
+    this.modes = listModes(this.customModesConfig);
+    if (!isKnownMode(this.activeModeId, this.customModesConfig)) {
+      this.activeModeId = BUILD_MODE_ID;
+    }
+    this.applyMode(this.activeModeId);
+  }
+
+  /**
    * Reloads MCP servers after the user edits `mcp.json` (from the Settings tab),
    * so newly added tools appear without a manual reload. Rebuilds the runtime —
    * which reconnects every server and recomputes the tool catalog — then pushes a
@@ -1993,6 +2180,7 @@ export class ChatBridge {
       await this.persistEmptySession();
       this.post({
         type: HostMessageType.Ready,
+        sessionId: this.sessionId,
         providerId: this.services.providerId,
         activeModel: this.activeModel,
         models: this.models.map(toWebviewModel),

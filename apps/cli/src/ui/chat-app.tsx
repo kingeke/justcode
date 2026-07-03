@@ -1506,6 +1506,20 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     }
   }, [conversation?.messages.length, scrollToBottom]);
 
+  // A freshly loaded session always starts at its latest message, regardless
+  // of where the user had scrolled before (isAtBottomRef survives session
+  // switches, so the effect above alone would leave a resumed session at the
+  // top). Scroll again on the next tick: the transcript's real height (markdown
+  // layout, wrapped lines) lands after this commit, and a single synchronous
+  // scrollTo would target the stale, shorter height.
+  useEffect(() => {
+    if (!session) return;
+    isAtBottomRef.current = true;
+    scrollToBottom();
+    const timer = setTimeout(scrollToBottom, 0);
+    return () => clearTimeout(timer);
+  }, [session, scrollToBottom]);
+
   // Leave browse mode if there are no rows to point at, and clamp the cursor if
   // the list shrank (e.g. a new session cleared the conversation).
   useEffect(() => {
@@ -1829,6 +1843,32 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       case CommandName.Sessions:
         setShowSessionPicker(true);
         return;
+
+      case CommandName.Rename: {
+        const title = (arg ?? '').trim();
+        if (!title) {
+          setStatus(
+            `This session is "${currentSessionLabel}" (use /rename-session <title> to change it)`
+          );
+          return;
+        }
+        setStatus('Renaming session…');
+        void props.chatSessionService
+          .renameSession(currentSessionId, title)
+          .then(() => {
+            // Reflect the new title in the header without a reload.
+            setConversation((prev) =>
+              prev && prev.sessionId === currentSessionId
+                ? { ...prev, title }
+                : prev
+            );
+            setStatus(`Renamed session to "${title}"`);
+          })
+          .catch((caughtError: unknown) => {
+            setError(getErrorMessage(caughtError));
+          });
+        return;
+      }
 
       case CommandName.Connect:
         setStatus('Select a provider to connect');
@@ -3175,11 +3215,16 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           <box flexDirection="column">
             {streamingThinking ? (
               <box flexDirection="column">
-                <text fg="yellow">
-                  {thinkingDuration !== null
-                    ? `${thinkingCollapsed ? '+ ' : ''}Thought: ${formatDuration(thinkingDuration)}`
-                    : 'thinking...'}
-                </text>
+                {thinkingDuration !== null ? (
+                  <text fg="yellow">
+                    {`${thinkingCollapsed ? '+ ' : ''}Thought: ${formatDuration(thinkingDuration)}`}
+                  </text>
+                ) : (
+                  <box flexDirection="row">
+                    <text fg="yellow">thinking </text>
+                    <Spinner fg="yellow" />
+                  </box>
+                )}
                 {thinkingCollapsed ? null : (
                   <MarkdownView content={streamingThinking} live muted />
                 )}

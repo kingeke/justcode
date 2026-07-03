@@ -22,9 +22,9 @@ describe('commands', () => {
         .slice(0, 4)
     ).toEqual([
       CommandName.RefreshModels,
+      CommandName.Rename,
       CommandName.Reasoning,
       CommandName.ReadLimit,
-      CommandName.Reset,
     ]);
   });
 

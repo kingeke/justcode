@@ -12,11 +12,19 @@ import type { MessageAttachment } from '@core/domain/message';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 
 /**
- * The reserved `@currentfile` mention: a stand-in for the file open in the
+ * The reserved `@currentFile` mention: a stand-in for the file open in the
  * host's editor. It's offered in completions whenever a current file is known
  * and resolved to that file's real path when attachments are gathered.
  */
-export const CURRENT_FILE_MENTION = 'currentfile';
+export const CURRENT_FILE_MENTION = 'currentFile';
+
+/**
+ * Whether a mention path is the `@currentFile` stand-in. Case-insensitive so the
+ * older lowercase `@currentfile` still resolves.
+ */
+export function isCurrentFileMention(path: string): boolean {
+  return path.toLowerCase() === CURRENT_FILE_MENTION.toLowerCase();
+}
 
 const ACTIVE_MENTION_PATTERN = /(?:^|\s)@([^\s@]*)$/;
 const MENTION_PATTERN = /(?:^|\s)@([^\s@]+)/g;
@@ -50,8 +58,19 @@ export class PromptAttachmentService {
    * autocomplete. Returns an empty list when the file can't be read.
    */
   public async listSymbols(path: string): Promise<string[]> {
+    // `@currentFile::` names the editor's open file, so resolve it to the real
+    // path before reading — otherwise there's no file literally named
+    // "currentFile" and the method list comes back empty.
+    let resolvedPath = path;
+    if (isCurrentFileMention(path)) {
+      const currentFile = this.getCurrentFile();
+      if (!currentFile) {
+        return [];
+      }
+      resolvedPath = currentFile;
+    }
     try {
-      const text = await this.workspaceFiles.readFile(path);
+      const text = await this.workspaceFiles.readFile(resolvedPath);
       return listFileSymbols(text);
     } catch {
       return [];
@@ -76,7 +95,7 @@ export class PromptAttachmentService {
       // path before reading. When nothing is open, drop the mention rather than
       // trying to read a file literally named "currentfile".
       let path = parsed.path;
-      if (path === CURRENT_FILE_MENTION) {
+      if (isCurrentFileMention(path)) {
         const currentFile = this.getCurrentFile();
         if (!currentFile) {
           resolved.push(undefined);

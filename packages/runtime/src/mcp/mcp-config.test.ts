@@ -129,6 +129,46 @@ describe('readMcpConfig', () => {
       s: { command: 'a', disabled: true },
     });
   });
+
+  it('accepts an array command (opencode style), splitting it into command + args', async () => {
+    const dir = await tempDir();
+    await writeFile(
+      mcpConfigPath(dir),
+      JSON.stringify({
+        mcpServers: {
+          memory: {
+            enabled: true,
+            type: 'local',
+            command: ['/Users/me/.local/bin/codebase-memory-mcp', '--verbose'],
+          },
+        },
+      }),
+      'utf8'
+    );
+    expect(await readMcpConfig(dir)).toEqual({
+      memory: {
+        command: '/Users/me/.local/bin/codebase-memory-mcp',
+        args: ['--verbose'],
+      },
+    });
+  });
+
+  it('reads enabled:false as disabled and skips an empty array command', async () => {
+    const dir = await tempDir();
+    await writeFile(
+      mcpConfigPath(dir),
+      JSON.stringify({
+        mcpServers: {
+          off: { command: 'a', enabled: false },
+          empty: { command: [] },
+        },
+      }),
+      'utf8'
+    );
+    expect(await readMcpConfig(dir)).toEqual({
+      off: { command: 'a', disabled: true },
+    });
+  });
 });
 
 describe('ensureMcpConfigFile', () => {

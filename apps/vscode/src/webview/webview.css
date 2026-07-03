@@ -385,6 +385,22 @@ body {
   opacity: 0.6;
 }
 
+/* While thinking streams, the label carries a small spinner instead of "…". */
+.thinking-label-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.thinking-spinner {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
 .thinking-done > summary {
   cursor: pointer;
   list-style: none;
@@ -407,6 +423,9 @@ body {
 }
 
 .working {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   opacity: 0.6;
   font-style: italic;
   margin-bottom: 12px;
@@ -1058,21 +1077,59 @@ textarea:focus {
   border-radius: 0;
 }
 
-.session-delete-btn {
+.session-delete-btn,
+.session-rename-btn {
   flex: 0 0 auto;
-  margin: 4px 6px 4px 0;
+  margin: 4px 0;
   opacity: 0;
   color: var(--vscode-descriptionForeground, inherit);
 }
 
+.session-delete-btn {
+  margin-right: 6px;
+}
+
 .session-row:hover .session-delete-btn,
-.session-delete-btn:focus {
+.session-row:hover .session-rename-btn,
+.session-delete-btn:focus,
+.session-rename-btn:focus {
   opacity: 0.75;
+}
+
+/* Shown in place of the rename/delete actions while a session is opening. */
+.session-opening-spinner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  margin-right: 12px;
+  color: var(--vscode-descriptionForeground, inherit);
+}
+
+.session-rename-btn:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--vscode-foreground);
 }
 
 .session-delete-btn:hover:not(:disabled) {
   opacity: 1;
   color: var(--vscode-errorForeground, var(--vscode-foreground));
+}
+
+.session-rename-input {
+  flex: 1;
+  min-width: 0;
+  margin: 4px 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-focusBorder, var(--vscode-input-border));
+  border-radius: 4px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.session-rename-input:focus {
+  outline: none;
 }
 
 .session-item:focus {
@@ -1090,6 +1147,34 @@ textarea:focus {
 .session-item-meta {
   font-size: 11px;
   opacity: 0.6;
+}
+
+/* A pulsing dot before the title marks the session whose turn is still running
+   in the host after the user navigated back to the list. */
+.session-loading-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--vscode-descriptionForeground);
+  animation: session-loading-pulse 1.2s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+.session-loading-label {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+}
+
+@keyframes session-loading-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 /* --- Chat header ---------------------------------------------------------- */
@@ -1649,7 +1734,6 @@ textarea:focus {
 .composer-mention {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
   gap: 10px;
   padding: 4px 8px;
   border-radius: 5px;
@@ -1657,7 +1741,6 @@ textarea:focus {
   font-family: var(--vscode-editor-font-family, monospace);
   color: var(--vscode-foreground);
   cursor: pointer;
-  white-space: nowrap;
 }
 
 .composer-mention-active {
@@ -1665,15 +1748,32 @@ textarea:focus {
   color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
 }
 
-.composer-mention-symbol {
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* A non-selectable header naming the file whose methods are listed below. Sticks
+   to the top so it stays visible while the list scrolls. */
+.composer-mention-heading {
+  position: sticky;
+  top: -4px;
+  margin: -4px -4px 2px;
+  padding: 6px 8px;
+  font-size: 11px;
+  opacity: 0.7;
+  background: var(
+    --vscode-editorWidget-background,
+    var(--vscode-input-background)
+  );
+  border-bottom: 1px solid
+    var(--vscode-input-border, var(--vscode-panel-border, #555));
 }
 
-.composer-mention-path {
-  flex-shrink: 0;
-  opacity: 0.6;
-  font-size: 11px;
+.composer-mention-heading span {
+  font-family: var(--vscode-editor-font-family, monospace);
+  overflow-wrap: anywhere;
+}
+
+/* Show the full symbol name, wrapping rather than truncating with an ellipsis —
+   long method names stay fully readable. */
+.composer-mention-symbol {
+  overflow-wrap: anywhere;
 }
 
 /* While a turn is in flight, a bright blue arc travels around the composer's
@@ -2391,6 +2491,53 @@ textarea:focus {
 
 .mcp-result {
   margin-top: 14px;
+}
+
+/* Mode picker footer: "+ Create mode" on the left, prompt settings gear right. */
+.modes-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.modes-settings-btn {
+  opacity: 0.7;
+}
+
+.modes-settings-btn:hover {
+  opacity: 1;
+}
+
+/* System Prompts tab: the expanded editor inside a mode's card. */
+.prompt-editor-wrap {
+  padding: 12px;
+  border-top: 1px solid
+    var(--vscode-widget-border, var(--vscode-panel-border, transparent));
+}
+
+.prompt-editor {
+  display: block;
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+  padding: 8px 10px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--vscode-input-background, rgba(0, 0, 0, 0.2));
+  color: var(--vscode-input-foreground, inherit);
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 4px;
+}
+
+.prompt-editor:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder, #3b82f6);
+}
+
+.prompt-save-ok {
+  margin-top: 10px;
 }
 
 .mcp-result-ok {
@@ -3190,6 +3337,20 @@ textarea:focus {
   width: 16px;
   height: 16px;
   border-radius: 4px;
+}
+
+/* An .about-link rendered as a <button> (host actions, not hyperlinks). */
+.about-link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.about-link-button:hover {
+  text-decoration: underline;
 }
 
 .about-crypto {

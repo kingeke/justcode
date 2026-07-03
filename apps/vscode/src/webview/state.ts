@@ -99,6 +99,10 @@ export interface ChatState {
   collapseResponses: boolean;
   sessions: WebviewSessionSummary[];
   hasConnectedProvider: boolean;
+  /** The session currently open in the chat view. */
+  sessionId?: string | undefined;
+  /** The session with a turn running in the host, shown as loading in the list. */
+  activeSessionId?: string | undefined;
   // The fields below are cleared back to `undefined` on session resets, so they
   // carry an explicit `| undefined` (required under exactOptionalPropertyTypes).
   providerId?: string | undefined;
@@ -115,6 +119,13 @@ export interface ChatState {
   /** Timestamp (Date.now()) when the first thinking token arrived this turn. */
   thinkingStartedAt: number;
   streaming: string;
+  /**
+   * Epoch ms the current turn started, 0 when idle. Drives the live tok/s time
+   * base; seeded from the host on a mid-turn resume so it survives reopening.
+   */
+  turnStartedAt: number;
+  /** Epoch ms of the current turn's first token, 0 until one arrives. */
+  turnFirstTokenAt: number;
   tools: ToolActivity[];
   approval?: ApprovalRequestMessage | undefined;
   input?: UserInputRequestMessage | undefined;
@@ -183,6 +194,8 @@ export const initialState: ChatState = {
   collapseResponses: false,
   sessions: [],
   hasConnectedProvider: false,
+  sessionId: undefined,
+  activeSessionId: undefined,
   models: [],
   providerErrors: [],
   messages: [],
@@ -191,6 +204,8 @@ export const initialState: ChatState = {
   thinkingDurationMs: 0,
   thinkingStartedAt: 0,
   streaming: '',
+  turnStartedAt: 0,
+  turnFirstTokenAt: 0,
   tools: [],
   liveTurnItems: [],
   completedThinkingItems: [],
@@ -295,20 +310,30 @@ export function reducer(state: ChatState, action: Action): ChatState {
         ...state,
         status: ChatStatus.Ready,
         view: 'chat',
+        sessionId: action.sessionId,
         providerId: action.providerId,
         activeModel: action.activeModel,
         models: action.models,
         providerErrors: action.providerErrors ?? [],
         messages: action.messages,
         notice: action.notice,
-        busy: false,
+        // Reset the transient live-turn state. When resuming a still-running
+        // session (busy), the host replays the recorded turn events right after
+        // this Ready, rebuilding the thinking/tools/answer through the reducer.
+        busy: action.busy ?? false,
         thinking: '',
+        thinkingDurationMs: 0,
+        thinkingStartedAt: 0,
         streaming: '',
+        // Seed the live tok/s clock from the host's real timings on resume, so
+        // it keeps its original time base instead of restarting from ~0 elapsed.
+        turnStartedAt: action.busy ? (action.turnStartedAt ?? Date.now()) : 0,
+        turnFirstTokenAt: action.busy ? (action.turnFirstTokenAt ?? 0) : 0,
         tools: [],
-        approval: undefined,
-        input: undefined,
         liveTurnItems: [],
         completedThinkingItems: [],
+        approval: undefined,
+        input: undefined,
         error: undefined,
         // View-only toggle: every session snapshot starts with responses visible
         // so a collapse from a previous session doesn't hide the new one.
@@ -399,6 +424,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
           ...state,
           sessions: action.sessions,
           hasConnectedProvider: action.hasConnectedProvider,
+          activeSessionId: action.activeSessionId,
         };
       }
       return {
@@ -407,6 +433,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         view: 'sessions',
         sessions: action.sessions,
         hasConnectedProvider: action.hasConnectedProvider,
+        activeSessionId: action.activeSessionId,
         busy: false,
         approval: undefined,
         input: undefined,
@@ -441,6 +468,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
         thinkingDurationMs: 0,
         thinkingStartedAt: 0,
         streaming: '',
+        turnStartedAt: Date.now(),
+        turnFirstTokenAt: 0,
         tools: [],
         liveTurnItems: [],
         completedThinkingItems: [],
@@ -454,6 +483,10 @@ export function reducer(state: ChatState, action: Action): ChatState {
       return {
         ...nextState,
         streaming: nextState.streaming + action.token,
+        turnFirstTokenAt:
+          nextState.turnFirstTokenAt === 0
+            ? Date.now()
+            : nextState.turnFirstTokenAt,
       };
     }
 
@@ -463,6 +496,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
         thinking: state.thinking + action.token,
         thinkingStartedAt:
           state.thinkingStartedAt === 0 ? Date.now() : state.thinkingStartedAt,
+        turnFirstTokenAt:
+          state.turnFirstTokenAt === 0 ? Date.now() : state.turnFirstTokenAt,
       };
 
     case HostMessageType.ToolActivity: {
@@ -514,6 +549,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
         thinkingDurationMs: 0,
         thinkingStartedAt: 0,
         streaming: '',
+        turnStartedAt: 0,
+        turnFirstTokenAt: 0,
         tools: [],
         liveTurnItems: [],
         approval: undefined,
@@ -543,6 +580,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
         ...committed,
         busy: false,
         error: action.message,
+        turnStartedAt: 0,
+        turnFirstTokenAt: 0,
         approval: undefined,
         input: undefined,
       };

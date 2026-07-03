@@ -63,36 +63,23 @@ export function App(): React.JSX.Element {
   );
   // Live tok/s while a turn streams, mirroring the CLI: the host only sends the
   // real stats at turn-end, so estimate throughput here from the streamed text
-  // length and the time since the first token, refreshed on a timer.
-  const turnStartRef = React.useRef<number | null>(null);
-  const firstTokenRef = React.useRef<number | null>(null);
+  // length and the time since the first token, refreshed on a timer. The turn's
+  // start/first-token timestamps live in reducer state so a mid-turn resume can
+  // seed them from the host — restarting a local clock on reopen would divide
+  // the whole replayed buffer by ~0 elapsed and spike the rate.
   const [statsTick, setStatsTick] = React.useState(0);
 
   React.useEffect(() => {
-    if (!state.busy) {
-      turnStartRef.current = null;
-      firstTokenRef.current = null;
-      return undefined;
-    }
-    if (turnStartRef.current === null) turnStartRef.current = Date.now();
+    if (!state.busy) return undefined;
     const id = setInterval(() => setStatsTick((t) => t + 1), 150);
     return () => clearInterval(id);
   }, [state.busy]);
 
-  // Stamp the first-token time as soon as any output (thinking or answer) lands.
-  if (
-    state.busy &&
-    firstTokenRef.current === null &&
-    (state.streaming || state.thinking)
-  ) {
-    firstTokenRef.current = Date.now();
-  }
-
   const liveStats = React.useMemo<WebviewStats | undefined>(() => {
-    if (!state.busy || turnStartRef.current === null) return undefined;
+    if (!state.busy || state.turnStartedAt === 0) return undefined;
     const now = Date.now();
-    const firstToken = firstTokenRef.current ?? now;
-    const ttftMs = Math.max(firstToken - turnStartRef.current, 0);
+    const firstToken = state.turnFirstTokenAt || now;
+    const ttftMs = Math.max(firstToken - state.turnStartedAt, 0);
     const genElapsedMs = Math.max(now - firstToken, 1);
     // Count the whole turn's output, not just the visible buffers: once the
     // first answer token lands, thinking is flushed out of `state.thinking` into
@@ -120,14 +107,15 @@ export function App(): React.JSX.Element {
       // The running average only folds in completed turns; reuse the last known.
       avgTokensPerSecond: state.stats?.avgTokensPerSecond ?? 0,
     };
-    // statsTick drives the periodic refresh; the ref reads are intentional.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // statsTick drives the periodic refresh.
   }, [
     state.busy,
     state.streaming,
     state.thinking,
     state.liveTurnItems,
     state.stats,
+    state.turnStartedAt,
+    state.turnFirstTokenAt,
     statsTick,
   ]);
 
@@ -280,6 +268,12 @@ export function App(): React.JSX.Element {
     // scrolled up while reading the previous turn.
     stickToBottomRef.current = true;
     dispatch({ type: LocalActionType.OptimisticSubmit, content, images });
+    // Pin explicitly on the next frame rather than leaning only on the content
+    // ResizeObserver. When the changes panel is open it sits outside the scroll
+    // container and can absorb the layout change, so the observer may not fire
+    // and the optimistic message wouldn't be scrolled into view. Post-paint so
+    // the just-committed message is measured at its real height.
+    requestAnimationFrame(pinToBottom);
     postToHost({
       type: WebviewMessageType.Submit,
       content,
@@ -422,6 +416,9 @@ export function App(): React.JSX.Element {
   };
 
   const newSession = (): void => {
+    // Same as openSession: a new chat starts pinned to the (empty) bottom so
+    // the first streamed reply auto-scrolls.
+    stickToBottomRef.current = true;
     postToHost({ type: WebviewMessageType.NewSession });
   };
 
@@ -430,12 +427,20 @@ export function App(): React.JSX.Element {
   };
 
   const openSession = (sessionId: string): void => {
+    // A freshly opened session should always start at its latest message, even
+    // if the user had scrolled up in the previous chat (the ref survives the
+    // transcript unmounting, so it would otherwise stay unpinned).
+    stickToBottomRef.current = true;
     postToHost({ type: WebviewMessageType.OpenSession, sessionId });
   };
 
   const deleteSession = (sessionId: string): void => {
     // The host shows a native confirmation dialog before removing anything.
     postToHost({ type: WebviewMessageType.DeleteSession, sessionId });
+  };
+
+  const renameSession = (sessionId: string, title: string): void => {
+    postToHost({ type: WebviewMessageType.RenameSession, sessionId, title });
   };
 
   const clearAllSessions = (): void => {
@@ -596,6 +601,15 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.OpenMcpConfig });
   };
 
+  const openPromptSettings = (): void => {
+    // Reveal the Settings tab focused on System Prompts, where every mode's
+    // prompt (including the built-in defaults) can be edited.
+    postToHost({
+      type: WebviewMessageType.OpenSettings,
+      section: SettingsSection.Prompts,
+    });
+  };
+
   const selectMode = (modeId: string): void => {
     // Optimistically reflect the choice; the host echoes a ModeUpdate too.
     dispatch({
@@ -655,7 +669,9 @@ export function App(): React.JSX.Element {
       <SessionsView
         loading={state.status === ChatStatus.Loading}
         sessions={state.sessions}
+        activeSessionId={state.activeSessionId}
         onOpen={openSession}
+        onRename={renameSession}
         onDelete={deleteSession}
         onClearAll={clearAllSessions}
         onNewSession={newSession}
@@ -879,7 +895,10 @@ export function App(): React.JSX.Element {
             !state.streaming &&
             !state.thinking &&
             !state.approval ? (
-              <div className="working">Tinkering…</div>
+              <div className="working">
+                Tinkering
+                <span className="thinking-spinner" aria-hidden="true" />
+              </div>
             ) : null}
 
             {state.approval ? (
@@ -1045,6 +1064,7 @@ export function App(): React.JSX.Element {
         disabledTools={state.disabledTools}
         onSetDisabledTools={setDisabledTools}
         onOpenMcpConfig={openMcpConfig}
+        onOpenPromptSettings={openPromptSettings}
         mcpLoading={state.mcpLoading}
         modes={state.modes}
         activeModeId={state.activeModeId}
@@ -1143,7 +1163,7 @@ function ThinkingBlock({
   busy: boolean;
 }): React.JSX.Element {
   const label = busy
-    ? 'Thinking…'
+    ? 'Thinking'
     : durationMs > 0
       ? `Thought for ${formatDuration(durationMs)}`
       : 'Thought';
@@ -1151,7 +1171,10 @@ function ThinkingBlock({
   if (busy) {
     return (
       <div className="thinking">
-        <div className="thinking-label">{label}</div>
+        <div className="thinking-label thinking-label-busy">
+          {label}
+          <span className="thinking-spinner" aria-hidden="true" />
+        </div>
         <div
           className="thinking-content markdown-body"
           dangerouslySetInnerHTML={{ __html: renderMarkdown(thinking) }}

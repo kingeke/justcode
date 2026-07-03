@@ -11,6 +11,7 @@ import {
   SettingsWebviewMessageType,
   type SettingsAppInfo,
   type SettingsMcpServerStatus,
+  type SettingsPromptInfo,
 } from '@ext/shared/settings-protocol';
 import {
   logoUri,
@@ -51,14 +52,23 @@ interface OAuthControls {
 enum Tab {
   Providers = 'providers',
   Mcp = 'mcp',
+  Prompts = 'prompts',
   About = 'about',
 }
 
 const TABS: { id: Tab; label: string }[] = [
   { id: Tab.Providers, label: 'Providers' },
   { id: Tab.Mcp, label: 'MCP Servers' },
+  { id: Tab.Prompts, label: 'System Prompts' },
   { id: Tab.About, label: `About ${APP_NAME}` },
 ];
+
+/** Result of the most recent prompt save, keyed to the mode it was for. */
+interface PromptSaveState {
+  modeId: string;
+  success: boolean;
+  error?: string | undefined;
+}
 
 /** Result of the most recent MCP save, shown beneath the editor. */
 interface McpSaveState {
@@ -86,6 +96,15 @@ export function SettingsApp(): React.JSX.Element {
   const [mcpSaving, setMcpSaving] = React.useState(false);
   const [mcpSaveState, setMcpSaveState] = React.useState<
     McpSaveState | undefined
+  >();
+  // System Prompts tab state: the host's latest list, whether a save is in
+  // flight, and the most recent save outcome.
+  const [prompts, setPrompts] = React.useState<
+    SettingsPromptInfo[] | undefined
+  >();
+  const [promptSaving, setPromptSaving] = React.useState(false);
+  const [promptSaveState, setPromptSaveState] = React.useState<
+    PromptSaveState | undefined
   >();
 
   // Callback ref: set by ConnectWizard when it fires TestConnectProvider so
@@ -135,17 +154,51 @@ export function SettingsApp(): React.JSX.Element {
               : {}),
           });
           break;
+        case SettingsHostMessageType.Prompts:
+          setPrompts(message.prompts);
+          break;
+        case SettingsHostMessageType.PromptSaveResult:
+          setPromptSaving(false);
+          setPromptSaveState({
+            modeId: message.modeId,
+            success: message.success,
+            ...(message.error !== undefined ? { error: message.error } : {}),
+          });
+          break;
         case SettingsHostMessageType.FocusSection:
           if (message.section === SettingsSection.Mcp) setTab(Tab.Mcp);
           else if (message.section === SettingsSection.Providers)
             setTab(Tab.Providers);
+          else if (message.section === SettingsSection.Prompts)
+            setTab(Tab.Prompts);
           break;
       }
     });
     postSettingsToHost({ type: SettingsWebviewMessageType.Init });
     postSettingsToHost({ type: SettingsWebviewMessageType.GetMcpConfig });
+    postSettingsToHost({ type: SettingsWebviewMessageType.GetPrompts });
     return unsubscribe;
   }, []);
+
+  const savePrompt = (modeId: string, prompt: string): void => {
+    setPromptSaving(true);
+    setPromptSaveState(undefined);
+    postSettingsToHost({
+      type: SettingsWebviewMessageType.SavePrompt,
+      modeId,
+      prompt,
+    });
+  };
+
+  const createMode = (name: string, prompt: string): void => {
+    setPromptSaving(true);
+    setPromptSaveState(undefined);
+    postSettingsToHost({
+      type: SettingsWebviewMessageType.CreateMode,
+      name,
+      prompt,
+    });
+  };
 
   const saveMcpConfig = (content: string): void => {
     setMcpSaving(true);
@@ -254,6 +307,14 @@ export function SettingsApp(): React.JSX.Element {
               saving={mcpSaving}
               saveState={mcpSaveState}
               onSave={saveMcpConfig}
+            />
+          ) : tab === Tab.Prompts ? (
+            <PromptsTab
+              prompts={prompts}
+              saving={promptSaving}
+              saveState={promptSaveState}
+              onSave={savePrompt}
+              onCreate={createMode}
             />
           ) : (
             <AboutTab appInfo={appInfo} />
@@ -1284,6 +1345,289 @@ function McpSaveSummary({
   );
 }
 
+// ---------------------------------------------------------------------------
+// System Prompts tab — view and edit every mode's system prompt
+// ---------------------------------------------------------------------------
+
+function PromptsTab({
+  prompts,
+  saving,
+  saveState,
+  onSave,
+  onCreate,
+}: {
+  prompts: SettingsPromptInfo[] | undefined;
+  saving: boolean;
+  saveState: PromptSaveState | undefined;
+  onSave: (modeId: string, prompt: string) => void;
+  onCreate: (name: string, prompt: string) => void;
+}): React.JSX.Element {
+  const [expandedId, setExpandedId] = React.useState<string | null>(null);
+  const [showCreateForm, setShowCreateForm] = React.useState(false);
+
+  if (!prompts) {
+    return (
+      <div className="settings-section">
+        <h2 className="settings-section-title">System Prompts</h2>
+        <p className="settings-hint">Loading…</p>
+      </div>
+    );
+  }
+
+  const builtIns = prompts.filter((p) => !p.custom);
+  const custom = prompts.filter((p) => p.custom);
+
+  return (
+    <div className="settings-section">
+      <h2 className="settings-section-title">System Prompts</h2>
+      <p className="settings-hint">
+        Each chat mode sends its own system prompt. Edit any of them here —
+        including the built-in defaults. Changes apply to the next message.
+      </p>
+
+      <div className="settings-subhead">Default modes</div>
+      <div className="provider-list">
+        {builtIns.map((prompt) => (
+          <PromptCard
+            key={prompt.id}
+            prompt={prompt}
+            expanded={expandedId === prompt.id}
+            onToggle={() =>
+              setExpandedId(expandedId === prompt.id ? null : prompt.id)
+            }
+            saving={saving}
+            saveState={saveState?.modeId === prompt.id ? saveState : undefined}
+            onSave={onSave}
+          />
+        ))}
+      </div>
+
+      <div className="settings-subhead">Custom modes</div>
+      <div className="provider-list">
+        {custom.map((prompt) => (
+          <PromptCard
+            key={prompt.id}
+            prompt={prompt}
+            expanded={expandedId === prompt.id}
+            onToggle={() =>
+              setExpandedId(expandedId === prompt.id ? null : prompt.id)
+            }
+            saving={saving}
+            saveState={saveState?.modeId === prompt.id ? saveState : undefined}
+            onSave={onSave}
+          />
+        ))}
+        <div className="provider-row-wrap">
+          <div className="provider-row">
+            <div className="provider-row-main">
+              <span className="provider-name">Add custom mode</span>
+              <span className="provider-desc">
+                A new chat mode with its own system prompt
+              </span>
+            </div>
+            <button
+              type="button"
+              className="provider-action"
+              onClick={() => setShowCreateForm((prev) => !prev)}
+            >
+              {showCreateForm ? (
+                'Cancel'
+              ) : (
+                <>
+                  <PlusIcon size={13} /> Add
+                </>
+              )}
+            </button>
+          </div>
+          {showCreateForm ? (
+            <CreateModeForm
+              saving={saving}
+              saveState={saveState}
+              onCreate={onCreate}
+              onDone={() => setShowCreateForm(false)}
+            />
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CreateModeForm({
+  saving,
+  saveState,
+  onCreate,
+  onDone,
+}: {
+  saving: boolean;
+  saveState: PromptSaveState | undefined;
+  onCreate: (name: string, prompt: string) => void;
+  onDone: () => void;
+}): React.JSX.Element {
+  const [name, setName] = React.useState('');
+  const [prompt, setPrompt] = React.useState('');
+  const [error, setError] = React.useState<string | null>(null);
+  // Only react to save results for a create this form submitted, not to a
+  // PromptCard save that happens to land while the form is open.
+  const submittedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!submittedRef.current || saving || !saveState) return;
+    submittedRef.current = false;
+    if (saveState.success) onDone();
+    else setError(saveState.error ?? 'Failed to create the mode.');
+  }, [saving, saveState, onDone]);
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>): void => {
+    e.preventDefault();
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError('A mode name is required.');
+      return;
+    }
+    setError(null);
+    submittedRef.current = true;
+    onCreate(trimmedName, prompt);
+  };
+
+  return (
+    <form className="prompt-editor-wrap" onSubmit={handleSubmit}>
+      <div className="provider-connect-field">
+        <label className="provider-connect-label" htmlFor="create-mode-name">
+          Name
+        </label>
+        <input
+          id="create-mode-name"
+          className="provider-connect-input"
+          type="text"
+          placeholder="My Mode"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            setError(null);
+          }}
+          // eslint-disable-next-line jsx-a11y/no-autofocus
+          autoFocus
+          autoComplete="off"
+          spellCheck={false}
+        />
+      </div>
+      <textarea
+        className="prompt-editor"
+        value={prompt}
+        spellCheck={false}
+        placeholder="System prompt — leave empty to use the Build prompt…"
+        onChange={(e) => setPrompt(e.target.value)}
+        aria-label="New mode system prompt"
+      />
+      {error ? <p className="provider-connect-error">{error}</p> : null}
+      <div className="mcp-actions">
+        <button
+          type="submit"
+          className="provider-action provider-action-primary"
+          disabled={saving}
+        >
+          {saving ? 'Creating…' : 'Create mode'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function PromptCard({
+  prompt,
+  expanded,
+  onToggle,
+  saving,
+  saveState,
+  onSave,
+}: {
+  prompt: SettingsPromptInfo;
+  expanded: boolean;
+  onToggle: () => void;
+  saving: boolean;
+  saveState: PromptSaveState | undefined;
+  onSave: (modeId: string, prompt: string) => void;
+}): React.JSX.Element {
+  const [draft, setDraft] = React.useState(prompt.prompt);
+  // The host re-sends the list after each save (the source of truth on disk);
+  // sync the editor to it then. Between pushes `prompt.prompt` is stable, so
+  // typing is preserved.
+  React.useEffect(() => {
+    setDraft(prompt.prompt);
+  }, [prompt.prompt]);
+
+  const dirty = draft !== prompt.prompt;
+
+  return (
+    <div className="provider-row-wrap">
+      <div className="provider-row">
+        <div className="provider-row-main">
+          <span className="provider-name">{prompt.name}</span>
+          <span className="provider-desc">
+            {prompt.custom && !prompt.prompt
+              ? 'Uses the Build prompt (no prompt of its own yet)'
+              : `${prompt.prompt.length.toLocaleString()} characters`}
+          </span>
+        </div>
+        <button type="button" className="provider-action" onClick={onToggle}>
+          {expanded ? 'Close' : 'Edit'}
+        </button>
+      </div>
+
+      {expanded ? (
+        <div className="prompt-editor-wrap">
+          <textarea
+            className="prompt-editor"
+            value={draft}
+            spellCheck={false}
+            placeholder={
+              prompt.custom
+                ? 'Leave empty to use the Build prompt…'
+                : 'Leave empty to restore the built-in default…'
+            }
+            onChange={(e) => setDraft(e.target.value)}
+            aria-label={`${prompt.name} system prompt`}
+          />
+          <div className="mcp-actions">
+            <button
+              type="button"
+              className="provider-action provider-action-primary"
+              disabled={saving || !dirty}
+              onClick={() => onSave(prompt.id, draft)}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            {!prompt.custom && prompt.overridden ? (
+              <button
+                type="button"
+                className="provider-action"
+                disabled={saving}
+                title="Discard the customization and restore the built-in prompt"
+                onClick={() => onSave(prompt.id, '')}
+              >
+                Reset to default
+              </button>
+            ) : null}
+            {dirty ? (
+              <span className="mcp-dirty-hint">Unsaved changes</span>
+            ) : null}
+          </div>
+          {saveState ? (
+            saveState.success ? (
+              <p className="mcp-result-ok prompt-save-ok">Saved.</p>
+            ) : (
+              <p className="provider-connect-error">
+                {saveState.error ?? 'Save failed.'}
+              </p>
+            )
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function AboutTab({
   appInfo,
 }: {
@@ -1389,6 +1733,29 @@ function AboutTab({
               </code>
             </div>
           ))}
+        </div>
+      </section>
+
+      <section className="about-card">
+        <h3 className="about-card-title">Configuration</h3>
+        <p className="about-card-text">
+          All settings — providers, prompts, modes, and tunables — live in a
+          single <code>config.json</code>. Open it to inspect or hand-edit
+          anything not exposed in this UI. It contains your API keys, so treat
+          it as a secret.
+        </p>
+        <div className="about-links">
+          <button
+            type="button"
+            className="about-link about-link-button"
+            onClick={() =>
+              postSettingsToHost({
+                type: SettingsWebviewMessageType.OpenConfigFile,
+              })
+            }
+          >
+            Open config.json in editor
+          </button>
         </div>
       </section>
 

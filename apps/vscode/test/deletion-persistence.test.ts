@@ -21,6 +21,7 @@ describe('deletion persistence through a turn', () => {
   it('keeps a bash deletion in the panel after the turn completes', () => {
     let state = reducer(initialState, {
       type: HostMessageType.Ready,
+      sessionId: 's1',
       providerId: 'p',
       activeModel: 'm',
       models: [],

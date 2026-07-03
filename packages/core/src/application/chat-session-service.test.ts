@@ -680,6 +680,30 @@ describe('ChatSessionService', () => {
     await expect(service.listSessions()).resolves.toEqual(repository.sessions);
   });
 
+  it('renames a session, persisting the trimmed title', async () => {
+    const repository = new InMemoryConversationRepository();
+    repository.conversation.messages.push(createMessage('user', 'hi'));
+    const service = new ChatSessionService(repository, createProviderStub());
+
+    const updated = await service.renameSession('session-1', '  My chat  ');
+
+    expect(updated.title).toBe('My chat');
+    expect(repository.conversation.title).toBe('My chat');
+    // Messages are preserved — only the title changed.
+    expect(repository.conversation.messages).toHaveLength(1);
+  });
+
+  it('clears the title when renamed to a blank string', async () => {
+    const repository = new InMemoryConversationRepository();
+    repository.conversation.title = 'Old title';
+    const service = new ChatSessionService(repository, createProviderStub());
+
+    const updated = await service.renameSession('session-1', '   ');
+
+    expect(updated.title).toBeUndefined();
+    expect(repository.conversation.title).toBeUndefined();
+  });
+
   it('injects root AGENTS.md into the system prompt when available', async () => {
     const repository = new InMemoryConversationRepository();
     const seenMessages: Array<{ role: string; content: string }> = [];

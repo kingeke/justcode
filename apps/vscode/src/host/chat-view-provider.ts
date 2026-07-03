@@ -28,7 +28,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       // Saving mcp.json reconnects MCP in the live session; return each server's
       // outcome so the Settings page can report what loaded (undefined when no
       // chat session is open to reload).
-      () => this.bridge?.reloadMcp() ?? Promise.resolve(undefined)
+      () => this.bridge?.reloadMcp() ?? Promise.resolve(undefined),
+      // A system-prompt edit in the Settings tab re-applies to the live session
+      // so the next turn runs under the new prompt.
+      () => void this.bridge?.refreshPrompts()
     );
   }
 

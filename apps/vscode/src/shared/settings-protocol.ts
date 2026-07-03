@@ -28,6 +28,10 @@ export enum SettingsHostMessageType {
   McpSaveResult = 'mcpSaveResult',
   /** Asks the settings UI to focus a specific section/tab (e.g. MCP). */
   FocusSection = 'focusSection',
+  /** The full system-prompt list (built-in + custom modes). */
+  Prompts = 'prompts',
+  /** Outcome of a SavePrompt attempt. */
+  PromptSaveResult = 'promptSaveResult',
 }
 
 /** Discriminator for messages sent from the settings webview to the host. */
@@ -49,6 +53,14 @@ export enum SettingsWebviewMessageType {
   GetMcpConfig = 'getMcpConfig',
   /** Persist new `mcp.json` text and reconnect MCP servers. */
   SaveMcpConfig = 'saveMcpConfig',
+  /** Ask the host for the system prompts of every mode. */
+  GetPrompts = 'getPrompts',
+  /** Persist a mode's system prompt (empty resets a built-in to its default). */
+  SavePrompt = 'savePrompt',
+  /** Create a new custom mode (name + optional prompt). */
+  CreateMode = 'createMode',
+  /** Open the raw `config.json` in a VS Code editor tab. */
+  OpenConfigFile = 'openConfigFile',
 }
 
 /** Per-server outcome of loading MCP, shown after a save. */
@@ -57,6 +69,24 @@ export interface SettingsMcpServerStatus {
   ok: boolean;
   toolCount: number;
   error?: string | undefined;
+}
+
+/** A mode's system prompt as shown/edited on the System Prompts tab. */
+export interface SettingsPromptInfo {
+  /** Mode id (`build`/`ask`/`plan` or a custom mode's config key). */
+  id: string;
+  /** Human label shown as the card title. */
+  name: string;
+  /** Whether the user created this mode (vs. a built-in). */
+  custom: boolean;
+  /**
+   * The effective prompt text. For built-ins this is the config override or
+   * the built-in default; for custom modes it may be empty, meaning the mode
+   * falls back to the Build prompt.
+   */
+  prompt: string;
+  /** True when a built-in's prompt is overridden in config (reset available). */
+  overridden: boolean;
 }
 
 /** Static product details rendered on the About tab. */
@@ -129,6 +159,20 @@ export interface SettingsFocusSectionMessage {
   section: SettingsSection;
 }
 
+/** The system prompts of every mode, sent on request and after each save. */
+export interface SettingsPromptsMessage {
+  type: SettingsHostMessageType.Prompts;
+  prompts: SettingsPromptInfo[];
+}
+
+/** Outcome of a SavePrompt attempt. */
+export interface SettingsPromptSaveResultMessage {
+  type: SettingsHostMessageType.PromptSaveResult;
+  modeId: string;
+  success: boolean;
+  error?: string | undefined;
+}
+
 export type SettingsHostToWebview =
   | SettingsSnapshotMessage
   | SettingsProvidersUpdateMessage
@@ -138,7 +182,9 @@ export type SettingsHostToWebview =
   | SettingsOAuthResultMessage
   | SettingsMcpConfigMessage
   | SettingsMcpSaveResultMessage
-  | SettingsFocusSectionMessage;
+  | SettingsFocusSectionMessage
+  | SettingsPromptsMessage
+  | SettingsPromptSaveResultMessage;
 
 // --- Webview -> Host -------------------------------------------------------
 
@@ -212,6 +258,39 @@ export interface SettingsSaveMcpConfigMessage {
   content: string;
 }
 
+export interface SettingsGetPromptsMessage {
+  type: SettingsWebviewMessageType.GetPrompts;
+}
+
+/**
+ * Persist a mode's system prompt. For a built-in mode an empty prompt (or one
+ * identical to the built-in default) clears the config override, restoring the
+ * default. For a custom mode an empty prompt makes it fall back to the Build
+ * prompt. The host replies with PromptSaveResult and a fresh Prompts list.
+ */
+export interface SettingsSavePromptMessage {
+  type: SettingsWebviewMessageType.SavePrompt;
+  modeId: string;
+  prompt: string;
+}
+
+/**
+ * Create a new custom mode from the System Prompts tab. The id is derived from
+ * the name (deduped against built-ins and existing modes). An empty prompt
+ * means the mode falls back to the Build prompt. The host replies with
+ * PromptSaveResult (modeId = the new mode's id) and a fresh Prompts list.
+ */
+export interface SettingsCreateModeMessage {
+  type: SettingsWebviewMessageType.CreateMode;
+  name: string;
+  prompt: string;
+}
+
+/** Ask the host to open `config.json` in a VS Code editor tab. */
+export interface SettingsOpenConfigFileMessage {
+  type: SettingsWebviewMessageType.OpenConfigFile;
+}
+
 export type SettingsWebviewToHost =
   | SettingsInitMessage
   | SettingsListProvidersMessage
@@ -224,4 +303,8 @@ export type SettingsWebviewToHost =
   | SettingsResetAppMessage
   | SettingsAddCustomProviderMessage
   | SettingsGetMcpConfigMessage
-  | SettingsSaveMcpConfigMessage;
+  | SettingsSaveMcpConfigMessage
+  | SettingsGetPromptsMessage
+  | SettingsSavePromptMessage
+  | SettingsCreateModeMessage
+  | SettingsOpenConfigFileMessage;

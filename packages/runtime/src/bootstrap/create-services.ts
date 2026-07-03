@@ -40,6 +40,7 @@ import { ProviderRegistry } from '@runtime/bootstrap/provider-registry';
 import { NullProvider } from '@runtime/bootstrap/null-provider';
 import { loadAppConfig } from '@runtime/config/app-config';
 import { FileConversationRepository } from '@runtime/persistence/file-conversation-repository';
+import { runSplitSessionBackfillOnce } from '@runtime/persistence/migrate-session-files';
 import { LocalWorkspaceFileService } from '@runtime/workspace/local-workspace-file-service';
 import type { AppConfig } from '@runtime/config/app-config';
 
@@ -176,6 +177,14 @@ export async function createRuntimeServices(
     ? registry.create(providerId)
     : new NullProvider();
   const repository = new FileConversationRepository(config.sessionsDirectory);
+  // One-time backfill of the split session layout (messages moved out of the
+  // summary file). Gated by a config flag so it runs once; kicked off in the
+  // background so bootstrap never waits on it, and best-effort since the
+  // repository also migrates each session lazily on its next save.
+  void runSplitSessionBackfillOnce(
+    config.configDirectory,
+    config.sessionsDirectory
+  );
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const workspaceFiles = new LocalWorkspaceFileService(workspaceRoot);
   // Mutable so the host (the VSCode extension) can update which file

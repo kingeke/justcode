@@ -60,6 +60,7 @@ export enum WebviewMessageType {
   EditPlan = 'editPlan',
   ListSessions = 'listSessions',
   OpenSession = 'openSession',
+  RenameSession = 'renameSession',
   DeleteSession = 'deleteSession',
   ClearSessions = 'clearSessions',
   ConnectProvider = 'connectProvider',
@@ -309,6 +310,9 @@ export interface WebviewMode {
 /** Full snapshot of session state; sent on init and after a session reset. */
 export interface ReadyMessage {
   type: HostMessageType.Ready;
+  /** The session this snapshot is for; lets the webview tell a same-session
+   * mid-turn resume (preserve live tool/stream state) from a fresh open. */
+  sessionId: string;
   providerId: string | undefined;
   activeModel: string | undefined;
   models: WebviewModel[];
@@ -370,6 +374,21 @@ export interface ReadyMessage {
   usage?: WebviewUsage;
   /** Restored timing stats (TTFT / tok/s) for a resumed session's footer. */
   stats?: WebviewStats;
+  /**
+   * True when this session has a turn still running in the host (the user
+   * reopened it mid-turn). The composer shows its busy/stop state; the recorded
+   * live-turn events are replayed right after to rebuild the in-flight response.
+   */
+  busy?: boolean;
+  /**
+   * Epoch ms when the in-flight turn started, sent on a mid-turn resume so the
+   * live tok/s estimate keeps its original time base instead of restarting the
+   * clock (which would divide the whole replayed buffer by a near-zero elapsed
+   * and spike the rate).
+   */
+  turnStartedAt?: number;
+  /** Epoch ms of the in-flight turn's first token, for the same resume estimate. */
+  turnFirstTokenAt?: number;
 }
 
 /** The sessions-list screen; sent on init or when the user navigates back. */
@@ -384,6 +403,12 @@ export interface SessionsListMessage {
    * an in-progress chat isn't yanked back to the sessions list.
    */
   focus?: boolean;
+  /**
+   * The session whose turn is currently running, if any. A turn keeps running in
+   * the host after the user navigates back here, so the list marks this one as
+   * loading.
+   */
+  activeSessionId?: string;
 }
 
 /** The session title was generated; updates the chat header live. */
@@ -658,6 +683,13 @@ export interface OpenSessionMessage {
   sessionId: string;
 }
 
+/** The user renamed a session; a blank title clears it back to the default. */
+export interface RenameSessionMessage {
+  type: WebviewMessageType.RenameSession;
+  sessionId: string;
+  title: string;
+}
+
 /** The user asked to delete a session; the host confirms before removing it. */
 export interface DeleteSessionMessage {
   type: WebviewMessageType.DeleteSession;
@@ -678,6 +710,7 @@ export interface ConnectProviderMessage {
 export enum SettingsSection {
   Providers = 'providers',
   Mcp = 'mcp',
+  Prompts = 'prompts',
 }
 
 /** The user opened Settings; the host reveals the settings editor tab. */
@@ -849,6 +882,7 @@ export type WebviewToHost =
   | NewSessionMessage
   | ListSessionsMessage
   | OpenSessionMessage
+  | RenameSessionMessage
   | DeleteSessionMessage
   | ClearSessionsMessage
   | ConnectProviderMessage

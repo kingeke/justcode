@@ -204,8 +204,33 @@ describe('PromptAttachmentService', () => {
       () => undefined
     );
 
-    expect(await withFile.listFiles()).toEqual(['currentfile', 'src/app.ts']);
+    expect(await withFile.listFiles()).toEqual(['currentFile', 'src/app.ts']);
     expect(await withoutFile.listFiles()).toEqual(['src/app.ts']);
+  });
+
+  it('lists @currentFile:: symbols by resolving to the open editor file', async () => {
+    const file = ['export function alpha() {}', 'export function beta() {}'].join(
+      '\n'
+    );
+    const service = new PromptAttachmentService(
+      new InMemoryWorkspaceFiles({ 'src/app.ts': file }),
+      undefined,
+      () => 'src/app.ts'
+    );
+
+    // Both the new casing and the legacy lowercase resolve to the open file.
+    expect(await service.listSymbols('currentFile')).toEqual(['alpha', 'beta']);
+    expect(await service.listSymbols('currentfile')).toEqual(['alpha', 'beta']);
+  });
+
+  it('lists no symbols for @currentFile:: when no file is open', async () => {
+    const service = new PromptAttachmentService(
+      new InMemoryWorkspaceFiles({ 'src/app.ts': 'export function a() {}' }),
+      undefined,
+      () => undefined
+    );
+
+    expect(await service.listSymbols('currentFile')).toEqual([]);
   });
 });
 

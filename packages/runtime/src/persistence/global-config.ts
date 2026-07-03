@@ -65,6 +65,14 @@ export interface GlobalConfig {
     /** Max recent messages forwarded to the model per request (older trimmed). */
     maxHistoryMessages?: number;
   };
+  /**
+   * One-time data migrations already applied, keyed by id, so they never re-run.
+   * `splitSessionMessages`: moved each session's message history out of its
+   * `<id>.json` summary into a sibling `<id>.messages.json`.
+   */
+  migrations?: {
+    splitSessionMessages?: boolean;
+  };
 }
 
 export async function readGlobalConfig(

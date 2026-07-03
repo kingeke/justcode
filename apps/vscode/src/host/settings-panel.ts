@@ -3,8 +3,21 @@ import * as vscode from 'vscode';
 import { APP_NAME, APP_ISSUES_URL, APP_REPO_URL } from '@core/branding';
 import { APP_VERSION } from '@core/version';
 import { cacheDirectory } from '@core/application/cache-dir';
+import {
+  ASK_SYSTEM_PROMPT,
+  DEFAULT_SYSTEM_PROMPT,
+  PLAN_SYSTEM_PROMPT,
+} from '@core/application/system-prompt';
+import { BUILT_IN_MODES, addCustomMode } from '@core/domain/chat-mode';
+import {
+  readGlobalConfig,
+  writeGlobalConfig,
+  type GlobalConfig,
+} from '@runtime/persistence/global-config';
 
 import { readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   SettingsHostMessageType,
@@ -12,6 +25,7 @@ import {
   type SettingsAppInfo,
   type SettingsHostToWebview,
   type SettingsMcpServerStatus,
+  type SettingsPromptInfo,
   type SettingsWebviewToHost,
 } from '@ext/shared/settings-protocol';
 import type { SettingsSection } from '@ext/shared/protocol';
@@ -62,7 +76,12 @@ export class SettingsPanel {
      */
     private readonly onMcpChanged: () => Promise<
       SettingsMcpServerStatus[] | undefined
-    >
+    >,
+    /**
+     * Notifies the host that a system prompt changed, so the live chat session
+     * re-reads the mode prompts from config and re-applies the active one.
+     */
+    private readonly onPromptsChanged: () => void
   ) {}
 
   /**
@@ -191,6 +210,8 @@ export class SettingsPanel {
         // Reset wiped mcp.json — push the fresh (empty) config so the editor
         // stops showing the old servers, and reconnect so their live tools drop.
         await this.sendMcpConfig();
+        // Reset also rewrote the prompts; refresh the System Prompts tab.
+        await this.sendPrompts();
         try {
           await this.onMcpChanged();
         } catch {
@@ -218,7 +239,126 @@ export class SettingsPanel {
       case SettingsWebviewMessageType.SaveMcpConfig:
         await this.saveMcpConfig(message.content);
         return;
+      case SettingsWebviewMessageType.GetPrompts:
+        await this.sendPrompts();
+        return;
+      case SettingsWebviewMessageType.SavePrompt:
+        await this.savePrompt(message.modeId, message.prompt);
+        return;
+      case SettingsWebviewMessageType.CreateMode:
+        await this.createMode(message.name, message.prompt);
+        return;
+      case SettingsWebviewMessageType.OpenConfigFile:
+        await this.openConfigFile();
+        return;
     }
+  }
+
+  /** Reads config and sends every mode's (effective) system prompt. */
+  private async sendPrompts(): Promise<void> {
+    const config = await readGlobalConfig(cacheDirectory());
+    this.post({
+      type: SettingsHostMessageType.Prompts,
+      prompts: listPromptInfos(config),
+    });
+  }
+
+  /**
+   * Persists a mode's system prompt. A built-in's prompt is stored as a config
+   * override — cleared again when saved empty or identical to the built-in
+   * default, so config only carries real customizations. A custom mode keeps
+   * the prompt on its own entry; empty means "fall back to the Build prompt".
+   */
+  private async savePrompt(modeId: string, prompt: string): Promise<void> {
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    const trimmed = prompt.trim();
+
+    const builtIn = BUILT_IN_PROMPTS[modeId];
+    if (builtIn) {
+      const override = trimmed && trimmed !== builtIn.default ? trimmed : undefined;
+      const next = { ...config };
+      if (override) next[builtIn.configKey] = override;
+      else delete next[builtIn.configKey];
+      await writeGlobalConfig(configDir, next);
+    } else {
+      const existing = config.customModes?.[modeId];
+      if (!existing) {
+        this.post({
+          type: SettingsHostMessageType.PromptSaveResult,
+          modeId,
+          success: false,
+          error: 'This mode no longer exists.',
+        });
+        return;
+      }
+      await writeGlobalConfig(configDir, {
+        ...config,
+        customModes: {
+          ...config.customModes,
+          [modeId]: {
+            name: existing.name,
+            ...(trimmed ? { systemPrompt: trimmed } : {}),
+          },
+        },
+      });
+    }
+
+    // Let the live chat session pick the change up for its next turn.
+    this.onPromptsChanged();
+    this.post({
+      type: SettingsHostMessageType.PromptSaveResult,
+      modeId,
+      success: true,
+    });
+    await this.sendPrompts();
+  }
+
+  /**
+   * Creates a new custom mode (name + optional prompt) from the System Prompts
+   * tab, mirroring the chat mode picker's create flow. The mode appears in the
+   * chat picker immediately via onPromptsChanged, but is not made active — the
+   * user is editing settings, not switching modes.
+   */
+  private async createMode(name: string, prompt: string): Promise<void> {
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    const created = addCustomMode(name, prompt, config.customModes ?? {});
+    if (!created) {
+      this.post({
+        type: SettingsHostMessageType.PromptSaveResult,
+        modeId: '',
+        success: false,
+        error: 'A mode name is required.',
+      });
+      return;
+    }
+    await writeGlobalConfig(configDir, {
+      ...config,
+      customModes: created.customModes,
+    });
+    this.onPromptsChanged();
+    this.post({
+      type: SettingsHostMessageType.PromptSaveResult,
+      modeId: created.id,
+      success: true,
+    });
+    await this.sendPrompts();
+  }
+
+  /**
+   * Opens the raw `config.json` in a VS Code editor tab, seeding the file first
+   * if it doesn't exist yet so the editor doesn't open on a missing path.
+   */
+  private async openConfigFile(): Promise<void> {
+    const configDir = cacheDirectory();
+    const path = join(configDir, 'config.json');
+    if (!existsSync(path)) {
+      await writeGlobalConfig(configDir, await readGlobalConfig(configDir));
+    }
+    await vscode.window.showTextDocument(vscode.Uri.file(path), {
+      preview: false,
+    });
   }
 
   /** Reads `mcp.json` (seeding an empty template if absent) and sends its text. */
@@ -383,10 +523,56 @@ export class SettingsPanel {
   }
 }
 
+/** Each built-in mode's default prompt text and its config override key. */
+const BUILT_IN_PROMPTS: Record<
+  string,
+  {
+    default: string;
+    configKey: 'systemPrompt' | 'askSystemPrompt' | 'planSystemPrompt';
+  }
+> = {
+  build: { default: DEFAULT_SYSTEM_PROMPT, configKey: 'systemPrompt' },
+  ask: { default: ASK_SYSTEM_PROMPT, configKey: 'askSystemPrompt' },
+  plan: { default: PLAN_SYSTEM_PROMPT, configKey: 'planSystemPrompt' },
+};
+
+/**
+ * Flattens config into the prompt list the System Prompts tab renders:
+ * built-ins first (their override, or the built-in default), then the user's
+ * custom modes (whose prompt may be empty = "uses the Build prompt").
+ */
+function listPromptInfos(config: GlobalConfig): SettingsPromptInfo[] {
+  const builtIns = BUILT_IN_MODES.map((mode) => {
+    const entry = BUILT_IN_PROMPTS[mode.id];
+    const override = entry ? config[entry.configKey] : undefined;
+    return {
+      id: mode.id,
+      name: mode.name,
+      custom: false,
+      prompt: override ?? entry?.default ?? '',
+      // A stored prompt identical to the built-in default doesn't count as a
+      // customization — resetAppState seeds config with the defaults spelled
+      // out, and that must not read as "overridden".
+      overridden: override !== undefined && override !== entry?.default,
+    };
+  });
+  const custom = Object.entries(config.customModes ?? {}).map(
+    ([id, modeConfig]) => ({
+      id,
+      name: modeConfig.name,
+      custom: true,
+      prompt: modeConfig.systemPrompt ?? '',
+      overridden: false,
+    })
+  );
+  return [...builtIns, ...custom];
+}
+
 /**
  * Validates MCP config text before it's written: it must be a JSON object whose
- * `mcpServers` (if present) maps names to entries that each carry a string
- * `command`. Returns a human-readable error, or undefined when the text is fine.
+ * `mcpServers` (if present) maps names to entries that each carry a `command`
+ * (a string, or an array of strings as some ecosystems write it) or a string
+ * `url`. Returns a human-readable error, or undefined when the text is fine.
  */
 function validateMcpJson(content: string): string | undefined {
   let parsed: unknown;
@@ -414,8 +600,13 @@ function validateMcpJson(content: string): string | undefined {
       return `Server "${name}" must be an object.`;
     }
     const entry = value as { command?: unknown; url?: unknown };
-    if (typeof entry.command !== 'string' && typeof entry.url !== 'string') {
-      return `Server "${name}" must have a string "command" (local) or "url" (remote).`;
+    const validCommand =
+      typeof entry.command === 'string' ||
+      (Array.isArray(entry.command) &&
+        entry.command.length > 0 &&
+        entry.command.every((part) => typeof part === 'string'));
+    if (!validCommand && typeof entry.url !== 'string') {
+      return `Server "${name}" must have a "command" (local: a string or array of strings) or "url" (remote).`;
     }
   }
   return undefined;
