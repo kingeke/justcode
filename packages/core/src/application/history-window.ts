@@ -9,11 +9,12 @@
 import type { ChatMessage } from '@core/domain/message';
 
 /**
- * Default number of most-recent messages forwarded to the model per request. A
- * default only: the runtime overrides it from user config (see
- * `create-services`/`create-cli` and the `/history-limit` command).
+ * Default number of most-recent messages forwarded to the model per request.
+ * 0 means trimming is off — the whole conversation is sent. A default only:
+ * the runtime overrides it from user config (see `create-services`/
+ * `create-cli` and the `/context-window` command).
  */
-export const DEFAULT_MAX_HISTORY_MESSAGES = 50;
+export const DEFAULT_MAX_HISTORY_MESSAGES = 0;
 
 /**
  * Return the most recent `limit` messages, never starting the window on an

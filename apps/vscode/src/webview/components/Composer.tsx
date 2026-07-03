@@ -188,6 +188,11 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   const [historyLimitDraft, setHistoryLimitDraft] = React.useState('');
   const [editingHistoryLimit, setEditingHistoryLimit] = React.useState(false);
   const settingsRef = React.useRef<HTMLDivElement>(null);
+  // Commits any in-progress settings edits before the popup closes. Closing
+  // unmounts the inputs without firing their onBlur, so the drafts would be
+  // lost. Routed through a ref because the outside-click listener registers
+  // once per popup open and would otherwise call a stale closure.
+  const commitPendingSettingsEditsRef = React.useRef<() => void>(() => {});
 
   // Close the settings popup when clicking outside it.
   React.useEffect(() => {
@@ -197,6 +202,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
         settingsRef.current &&
         !settingsRef.current.contains(e.target as Node)
       ) {
+        commitPendingSettingsEditsRef.current();
         setShowSettings(false);
       }
     };
@@ -592,6 +598,11 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   ): void => {
     if (event.key === 'Enter') commitHistoryLimit();
     if (event.key === 'Escape') setEditingHistoryLimit(false);
+  };
+
+  commitPendingSettingsEditsRef.current = (): void => {
+    if (editingReadLimit) commitReadLimit();
+    if (editingHistoryLimit) commitHistoryLimit();
   };
 
   return (
@@ -1238,7 +1249,10 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                 type="button"
                 className={`icon-btn ${showSettings ? 'icon-btn-active' : ''}`}
                 title="Chat settings"
-                onClick={() => setShowSettings((s) => !s)}
+                onClick={() => {
+                  if (showSettings) commitPendingSettingsEditsRef.current();
+                  setShowSettings((s) => !s);
+                }}
               >
                 <SlidersIcon size={14} />
               </button>

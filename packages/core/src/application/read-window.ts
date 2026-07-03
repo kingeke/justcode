@@ -9,7 +9,7 @@
  * paged. A default only: the runtime overrides it from user config (see
  * `create-services`/`create-cli` and the `/read-limit` command).
  */
-export const DEFAULT_MAX_READ_LINES = 200;
+export const DEFAULT_MAX_READ_LINES = 20;
 
 /**
  * Maximum characters kept for a single line. Guards against one pathological
