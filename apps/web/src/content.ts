@@ -14,7 +14,7 @@ export const highlights: Item[] = [
   {
     name: '~550 tokens per request',
     description:
-      'Most tools quietly inflate every request — Copilot can spend ~27k tokens on a single "hey," others routinely send ~7k. JustCode sends roughly 550, so you don\'t pay for hidden bloat.',
+      'Most tools quietly inflate every request — Copilot can spend ~27k tokens on a single "hey," others routinely send ~7k. JustCode sends roughly ~550, so you don\'t pay for hidden bloat.',
   },
   {
     name: 'A system prompt you can read and edit',

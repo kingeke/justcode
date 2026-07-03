@@ -134,7 +134,7 @@ export function App() {
             <br /> where <em>you</em> control every token.
           </h1>
           <p className="hero-lead">
-            {APP_NAME} sends roughly <strong>550 tokens per request</strong> —
+            {APP_NAME} sends roughly <strong>~550 tokens per request</strong> —
             most of it a system prompt you can read and edit. No hidden bloat,
             no wasted spend. Bring your own provider and your own rules.
           </p>

@@ -29,7 +29,7 @@
 
 Most AI coding tools quietly inflate every request with huge hidden prompts you
 can't see or change — GitHub Copilot can spend ~27k tokens on a single "hey,"
-and other tools routinely send ~7k. JustCode sends roughly **550 tokens per
+and other tools routinely send ~7k. JustCode sends roughly **~550 tokens per
 request**, and most of that is a **system prompt you can read and edit** to be
 exactly what you want. No hidden bloat, no wasted spend — your context, your
 rules.

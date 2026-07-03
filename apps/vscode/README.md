@@ -10,7 +10,7 @@ every single token.**
 
 Most AI coding tools quietly inflate every request with huge hidden prompts you
 can't see or change — some spend tens of thousands of tokens on a single "hey."
-JustCode sends roughly **550 tokens per request**, and most of that is a
+JustCode sends roughly **~550 tokens per request**, and most of that is a
 **system prompt you can read and edit**. No hidden bloat, no wasted spend — your
 context, your rules.
 
