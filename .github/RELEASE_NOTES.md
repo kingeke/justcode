@@ -54,12 +54,10 @@ One or two sentences on the theme of the release, if it has one.
 ## Publishing
 
 The tag-push release workflow (`.github/workflows/release.yml`) creates the
-GitHub release with auto-generated commit notes. Replace or prepend them with
-the written summary:
+GitHub release with auto-generated commit notes. Replace them entirely with
+the written summary — do not keep or append the auto-generated changelog or
+"Full Changelog" link:
 
 ```bash
 gh release edit vX.Y.Z --notes-file notes.md
 ```
-
-or paste the summary above the auto-generated "What's Changed" list when
-editing the release on GitHub.
