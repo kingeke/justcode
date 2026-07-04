@@ -367,6 +367,16 @@ export function App(): React.JSX.Element {
     setQueuedDraft('');
   };
 
+  // Re-sends a committed user message: scraps it and everything after it, then
+  // the host re-submits the same content as a fresh turn. Optimistic like
+  // sendNow — the retried message stays visible as the echo of the re-submit.
+  const retry = (messageId: string): void => {
+    stickToBottomRef.current = true;
+    dispatch({ type: LocalActionType.OptimisticRetry, messageId });
+    requestAnimationFrame(pinToBottom);
+    postToHost({ type: WebviewMessageType.Retry, messageId });
+  };
+
   const cancel = (): void => {
     postToHost({ type: WebviewMessageType.Cancel });
   };
@@ -743,6 +753,17 @@ export function App(): React.JSX.Element {
     }
   }
 
+  // Messages before the last compaction summary were compacted away — they're
+  // no longer real model context, so they can't be retried. (No summary means
+  // everything is current.)
+  let lastCompactIndex = -1;
+  for (let i = state.messages.length - 1; i >= 0; i -= 1) {
+    if (state.messages[i]?.isCompactSummary) {
+      lastCompactIndex = i;
+      break;
+    }
+  }
+
   // The committed transcript carries thinking per assistant step, so each
   // "Thought" block renders inline before its own step (correctly interleaved
   // with the tool cards). `completedThinkingItems` is a fallback for providers
@@ -876,6 +897,15 @@ export function App(): React.JSX.Element {
                 committedMessagesHaveThinking,
                 completedThinkingItems: state.completedThinkingItems,
               });
+              // Retry is offered on committed user messages in the current
+              // epoch while idle. Optimistic `local-` echoes aren't retryable:
+              // the host doesn't know their ids (e.g. a submit that errored).
+              const retryable =
+                !state.busy &&
+                message.role === WebviewRole.User &&
+                !message.isCompactSummary &&
+                index > lastCompactIndex &&
+                !message.id.startsWith('local-');
               return (
                 <React.Fragment key={message.id}>
                   {thinkingItems.map((item) => (
@@ -892,6 +922,7 @@ export function App(): React.JSX.Element {
                     expandTools={state.expandTools}
                     onOpenFile={openFile}
                     onOpenImage={setPreviewImage}
+                    {...(retryable ? { onRetry: () => retry(message.id) } : {})}
                     domId={`msg-${message.id}`}
                   />
                 </React.Fragment>

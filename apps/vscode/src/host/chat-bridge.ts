@@ -296,6 +296,9 @@ export class ChatBridge {
       case WebviewMessageType.Submit:
         await this.submit(message.content, message.images);
         return;
+      case WebviewMessageType.Retry:
+        await this.retry(message.messageId);
+        return;
       case WebviewMessageType.Cancel:
         this.abortController?.abort();
         return;
@@ -889,6 +892,78 @@ export class ChatBridge {
     if (!content.trim()) return null;
     this.post({ type: HostMessageType.SteeringConsumed, ids, content });
     return content;
+  }
+
+  /**
+   * Re-sends a previous user message: drops that message and everything after
+   * it from the conversation, persists the truncation, and submits the same
+   * content (and images) as a fresh turn. Only messages in the current epoch
+   * can be retried — compacted-away history is no longer real model context.
+   */
+  private async retry(messageId: string): Promise<void> {
+    if (this.abortController || this.compacting) {
+      this.post({
+        type: HostMessageType.Error,
+        message: this.compacting
+          ? 'Compaction is in progress — try again when it finishes.'
+          : 'A turn is already in progress.',
+      });
+      return;
+    }
+    const services = await this.ensureServices();
+    const conversation = this.conversation;
+    if (!conversation) {
+      this.post({
+        type: HostMessageType.Error,
+        message: 'No active session. Configure a provider and reload.',
+      });
+      return;
+    }
+    const index = conversation.messages.findIndex(
+      (m) => m.id === messageId && m.role === 'user'
+    );
+    if (index === -1) {
+      this.post({
+        type: HostMessageType.Error,
+        message: 'Only messages in the current context can be retried.',
+      });
+      return;
+    }
+    const target = conversation.messages[index]!;
+    // Drop the retried message too — the submit below appends a fresh copy.
+    this.conversation = {
+      ...conversation,
+      messages: conversation.messages.slice(0, index),
+      updatedAt: new Date().toISOString(),
+    };
+    // Persist the truncation now, so a retry whose turn fails before the
+    // service's own save doesn't resurrect the scrapped tail on reload.
+    await services.chatSessionService.saveConversation(this.conversation);
+    await this.submit(
+      target.content,
+      target.images?.map((image, i) => ({
+        id: `retry-${i}`,
+        mediaType: image.mediaType,
+        data: image.data,
+      }))
+    );
+    // A turn that produced anything (success, or an abort whose partial was
+    // adopted) grew the conversation past the truncation point. If it's still
+    // at that point, the turn failed hard (e.g. a provider timeout) before the
+    // re-submitted copy was persisted — put the original message back so it
+    // matches what the webview still shows and stays retryable.
+    if (
+      this.conversation &&
+      this.conversation.sessionId === conversation.sessionId &&
+      this.conversation.messages.length <= index
+    ) {
+      this.conversation = {
+        ...this.conversation,
+        messages: [...this.conversation.messages, target],
+        updatedAt: new Date().toISOString(),
+      };
+      await services.chatSessionService.saveConversation(this.conversation);
+    }
   }
 
   /** Runs one agent turn, streaming tokens, tool activity, and approvals. */

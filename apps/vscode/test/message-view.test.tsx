@@ -174,6 +174,36 @@ new`);
     expect(markup).not.toContain('msg-time');
   });
 
+  it('renders a retry button on a user message when onRetry is provided', () => {
+    const markup = renderToStaticMarkup(
+      <MessageView
+        message={{
+          id: 'u6',
+          role: WebviewRole.User,
+          content: 'hello',
+        }}
+        onRetry={() => {}}
+      />
+    );
+
+    expect(markup).toContain('msg-retry-btn');
+    expect(markup).toContain('Retry from here');
+  });
+
+  it('omits the retry button when onRetry is not provided', () => {
+    const markup = renderToStaticMarkup(
+      <MessageView
+        message={{
+          id: 'u7',
+          role: WebviewRole.User,
+          content: 'hello',
+        }}
+      />
+    );
+
+    expect(markup).not.toContain('msg-retry-btn');
+  });
+
   it('renders input preview for whitelisted historical tools', () => {
     const markup = renderToStaticMarkup(
       <MessageView

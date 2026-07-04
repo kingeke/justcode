@@ -253,6 +253,7 @@ export const initialState: ChatState = {
 /** Local-only actions, distinct from host messages, for optimistic UI updates. */
 export enum LocalActionType {
   OptimisticSubmit = 'optimisticSubmit',
+  OptimisticRetry = 'optimisticRetry',
   DismissApproval = 'dismissApproval',
   DismissInput = 'dismissInput',
   SelectModel = 'selectModel',
@@ -284,6 +285,7 @@ export type LocalAction =
       content: string;
       images: WebviewImage[];
     }
+  | { type: LocalActionType.OptimisticRetry; messageId: string }
   | { type: LocalActionType.DismissApproval }
   | { type: LocalActionType.DismissInput }
   | { type: LocalActionType.SelectModel; modelId: string; providerId: string }
@@ -515,6 +517,29 @@ export function reducer(state: ChatState, action: Action): ChatState {
         completedThinkingItems: [],
         error: undefined,
       };
+
+    // Retrying a user message scraps everything after it; the retried message
+    // itself stays visible as the optimistic echo of the re-submit (the
+    // authoritative rebuild at turn end replaces it with the fresh copy).
+    case LocalActionType.OptimisticRetry: {
+      const index = state.messages.findIndex((m) => m.id === action.messageId);
+      if (index === -1) return state;
+      return {
+        ...state,
+        messages: state.messages.slice(0, index + 1),
+        busy: true,
+        thinking: '',
+        thinkingDurationMs: 0,
+        thinkingStartedAt: 0,
+        streaming: '',
+        turnStartedAt: Date.now(),
+        turnFirstTokenAt: 0,
+        tools: [],
+        liveTurnItems: [],
+        completedThinkingItems: [],
+        error: undefined,
+      };
+    }
 
     case HostMessageType.Token: {
       // First answer token after thinking: commit that thinking segment inline so

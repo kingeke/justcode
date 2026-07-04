@@ -2,7 +2,11 @@ import * as React from 'react';
 
 import { WebviewRole, type WebviewMessage } from '@ext/shared/protocol';
 import { DiffView } from '@ext/webview/components/DiffView';
-import { CheckIcon, CopyIcon } from '@ext/webview/components/Icons';
+import {
+  CheckIcon,
+  CopyIcon,
+  RefreshIcon,
+} from '@ext/webview/components/Icons';
 import { ToolTitle } from '@ext/webview/components/ToolTitle';
 import { renderMarkdown } from '@ext/webview/markdown';
 
@@ -28,6 +32,7 @@ export function MessageView({
   expandTools = false,
   onOpenFile,
   onOpenImage,
+  onRetry,
   domId,
 }: {
   message: WebviewMessage;
@@ -35,6 +40,11 @@ export function MessageView({
   onOpenFile?: (path: string) => void;
   /** Opens a full-size preview of a transcript image (data URL). */
   onOpenImage?: (src: string) => void;
+  /**
+   * Re-sends this user message, scrapping it and every message after it.
+   * Only passed for retryable user messages (idle, current epoch).
+   */
+  onRetry?: () => void;
   /** DOM id for the message's root element, so the sidebar can scroll to it. */
   domId?: string;
 }): React.JSX.Element {
@@ -179,7 +189,9 @@ export function MessageView({
         {message.content ? (
           <pre className="msg-content">{message.content}</pre>
         ) : null}
-        {timing || (message.role === WebviewRole.User && message.content) ? (
+        {timing ||
+        onRetry ||
+        (message.role === WebviewRole.User && message.content) ? (
           <div className="msg-footer">
             {message.role === WebviewRole.User && message.content ? (
               <button
@@ -189,6 +201,16 @@ export function MessageView({
                 onClick={copyContent}
               >
                 {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+              </button>
+            ) : null}
+            {onRetry ? (
+              <button
+                type="button"
+                className="msg-copy-btn msg-retry-btn"
+                title="Retry from here (discards everything after this message)"
+                onClick={onRetry}
+              >
+                <RefreshIcon size={13} />
               </button>
             ) : null}
             {timing ? <div className="msg-time">{timing}</div> : null}

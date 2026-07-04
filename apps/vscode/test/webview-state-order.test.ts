@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { HostMessageType, ToolPhase, WebviewRole } from '@ext/shared/protocol';
-import { LiveTurnItemKind, initialState, reducer } from '@ext/webview/state';
+import {
+  LiveTurnItemKind,
+  LocalActionType,
+  initialState,
+  reducer,
+} from '@ext/webview/state';
 
 describe('webview chat state live turn ordering', () => {
   it('keeps thinking, assistant text, and tools in arrival order during a turn', () => {
@@ -130,5 +135,47 @@ describe('webview chat state live turn ordering', () => {
     ]);
     expect(completed.liveTurnItems).toEqual([]);
     expect(completed.thinking).toBe('');
+  });
+
+  it('scraps everything after the retried message and marks the turn busy', () => {
+    const withHistory = reducer(initialState, {
+      type: HostMessageType.TurnComplete,
+      messages: [
+        { id: 'user-1', role: WebviewRole.User, content: 'first' },
+        { id: 'assistant-1', role: WebviewRole.Assistant, content: 'reply 1' },
+        { id: 'user-2', role: WebviewRole.User, content: 'second' },
+        { id: 'assistant-2', role: WebviewRole.Assistant, content: 'reply 2' },
+      ],
+    });
+
+    const retried = reducer(withHistory, {
+      type: LocalActionType.OptimisticRetry,
+      messageId: 'user-2',
+    });
+
+    // The retried message stays visible as the optimistic echo; everything
+    // after it is gone and the turn is running.
+    expect(retried.messages.map((m) => m.id)).toEqual([
+      'user-1',
+      'assistant-1',
+      'user-2',
+    ]);
+    expect(retried.busy).toBe(true);
+    expect(retried.liveTurnItems).toEqual([]);
+    expect(retried.streaming).toBe('');
+  });
+
+  it('ignores a retry for an unknown message id', () => {
+    const withHistory = reducer(initialState, {
+      type: HostMessageType.TurnComplete,
+      messages: [{ id: 'user-1', role: WebviewRole.User, content: 'first' }],
+    });
+
+    const retried = reducer(withHistory, {
+      type: LocalActionType.OptimisticRetry,
+      messageId: 'missing',
+    });
+
+    expect(retried).toBe(withHistory);
   });
 });

@@ -40,6 +40,8 @@ export enum HostMessageType {
 export enum WebviewMessageType {
   Init = 'init',
   Submit = 'submit',
+  /** Re-send a previous user message, discarding it and everything after it. */
+  Retry = 'retry',
   Cancel = 'cancel',
   ApprovalResponse = 'approvalResponse',
   UserInputResponse = 'userInputResponse',
@@ -656,6 +658,17 @@ export interface SubmitMessage {
   images?: WebviewImage[];
 }
 
+/**
+ * The user clicked retry on one of their messages: the host drops that message
+ * and everything after it from the conversation, then re-submits the same
+ * content (and images) as a fresh turn.
+ */
+export interface RetryMessage {
+  type: WebviewMessageType.Retry;
+  /** Id of the user message to re-send from. */
+  messageId: string;
+}
+
 /** The user asked to abort the in-flight turn. */
 export interface CancelMessage {
   type: WebviewMessageType.Cancel;
@@ -929,6 +942,7 @@ export interface RequestFileSymbolsMessage {
 export type WebviewToHost =
   | InitMessage
   | SubmitMessage
+  | RetryMessage
   | CancelMessage
   | ApprovalResponseMessage
   | UserInputResponseMessage
