@@ -8,8 +8,15 @@
 
 set -e
 
-echo "▶ Running Prettier write..."
-bun run prettier --write .
+# Format only the files in this commit, then re-stage them — the re-stage is
+# what folds the fixes into the commit being created (no second commit, and no
+# unrelated files swept in).
+files=$(git diff --cached --name-only --diff-filter=ACMR)
+if [ -n "$files" ]; then
+  echo "▶ Formatting staged files with Prettier..."
+  printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 bun run prettier --write --ignore-unknown --log-level warn --
+  printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 git add --
+fi
 
 echo "▶ Running typecheck..."
 bun run typecheck
