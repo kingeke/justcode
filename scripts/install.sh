@@ -78,17 +78,28 @@ detect_target() {
 }
 
 # Resolve the version: explicit override, else the latest GitHub release tag.
+# Prefer the releases/latest redirect over the REST API: the API is
+# rate-limited to 60 unauthenticated requests/hour per IP, the redirect isn't.
 resolve_version() {
   if [ "${JUSTCODE_VERSION:-}" != "" ]; then
     echo "$JUSTCODE_VERSION"
     return
   fi
+  latest="https://github.com/${REPO}/releases/latest"
   api="https://api.github.com/repos/${REPO}/releases/latest"
+  v=""
   if has curl; then
-    curl -fsSL "$api" 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1
+    v="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$latest" 2>/dev/null \
+      | sed -n 's|.*/tag/\([^/]*\)$|\1|p')"
+    [ -n "$v" ] || v="$(curl -fsSL "$api" 2>/dev/null \
+      | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
   elif has wget; then
-    wget -qO- "$api" 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1
+    v="$(wget -qO /dev/null -S "$latest" 2>&1 | tr -d '\r' \
+      | sed -n 's|.*[Ll]ocation: .*/tag/\([^ ]*\).*|\1|p' | tail -1)"
+    [ -n "$v" ] || v="$(wget -qO- "$api" 2>/dev/null \
+      | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
   fi
+  echo "$v"
 }
 
 ASSET="$(detect_target)"

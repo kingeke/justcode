@@ -63,6 +63,12 @@ npm install -g justcode-cli
 brew tap kingeke/justcode && brew trust kingeke/justcode && brew install justcode
 ```
 
+To uninstall a curl-installed binary (keeps the cache in `~/.justcode`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kingeke/justcode/main/scripts/uninstall.sh | sh
+```
+
 See [release.md](release.md) for how binaries are built and published.
 
 ## Quick start
