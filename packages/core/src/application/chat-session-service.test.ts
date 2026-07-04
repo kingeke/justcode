@@ -1968,10 +1968,7 @@ describe('compactSession', () => {
   it('throws when there is nothing to compact and never saves', async () => {
     const repository = new InMemoryConversationRepository();
     const original = repository.conversation;
-    const service = new ChatSessionService(
-      repository,
-      createProviderStub()
-    );
+    const service = new ChatSessionService(repository, createProviderStub());
 
     await expect(
       service.compactSession({

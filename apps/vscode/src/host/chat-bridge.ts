@@ -2004,10 +2004,7 @@ export class ChatBridge {
             type: HostMessageType.CompactStatus,
             running: true,
             tokens,
-            percent: compactProgressPercent(
-              tokens,
-              this.expectedSummaryTokens
-            ),
+            percent: compactProgressPercent(tokens, this.expectedSummaryTokens),
           });
         },
       });

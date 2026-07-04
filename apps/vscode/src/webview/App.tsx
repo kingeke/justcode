@@ -1024,7 +1024,11 @@ export function App(): React.JSX.Element {
         {/* Floating banner pinned above the composer: compaction progress, or
             a transient notice (auto-compact warning, cancellation). Slides in
             and out so it's visible regardless of transcript scroll position. */}
-        <FloatingBanner show={state.compacting || Boolean(state.notice && state.noticeTimeoutMs)}>
+        <FloatingBanner
+          show={
+            state.compacting || Boolean(state.notice && state.noticeTimeoutMs)
+          }
+        >
           {state.compacting ? (
             <div className="compact-progress">
               <span className="compact-progress-label">

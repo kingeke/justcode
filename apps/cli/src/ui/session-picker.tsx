@@ -167,9 +167,7 @@ export function SessionPicker({
       built.push({ kind: 'header', group, count: inGroup.length, collapsed });
       if (!collapsed) {
         built.push(
-          ...inGroup.map(
-            (session) => ({ kind: 'session', session }) as const
-          )
+          ...inGroup.map((session) => ({ kind: 'session', session }) as const)
         );
       }
     }
@@ -270,7 +268,9 @@ export function SessionPicker({
         <text fg="cyan" attributes={BOLD}>
           Resume session
         </text>
-        <text fg={MUTED}>enter to load · enter on a group folds it · esc to cancel</text>
+        <text fg={MUTED}>
+          enter to load · enter on a group folds it · esc to cancel
+        </text>
       </box>
 
       <box marginBottom={1}>
@@ -318,9 +318,7 @@ export function SessionPicker({
                 flexShrink={0}
               >
                 <box flexGrow={1}>
-                  <text
-                    content={sessionLineContent(row.session, isSelected)}
-                  />
+                  <text content={sessionLineContent(row.session, isSelected)} />
                 </box>
                 <text content={sessionMetaContent(row.session, isCurrent)} />
               </box>

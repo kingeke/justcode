@@ -1381,10 +1381,10 @@ function PromptsTab({
     <div className="settings-section">
       <h2 className="settings-section-title">System Prompts</h2>
       <p className="settings-hint">
-        Each chat mode sends its own system prompt, and Compaction is the
-        prompt used to summarize a conversation when it's compacted. Edit any
-        of them here — including the built-in defaults. Changes apply to the
-        next message.
+        Each chat mode sends its own system prompt, and Compaction is the prompt
+        used to summarize a conversation when it's compacted. Edit any of them
+        here — including the built-in defaults. Changes apply to the next
+        message.
       </p>
 
       <div className="settings-subhead">Built-in prompts</div>

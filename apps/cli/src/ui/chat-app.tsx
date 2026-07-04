@@ -3065,10 +3065,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       contextWindow != null &&
       contextWindow > 0
     ) {
-      const pct = contextPct(
-        metricsRef.current.lastInputTokens,
-        contextWindow
-      );
+      const pct = contextPct(metricsRef.current.lastInputTokens, contextWindow);
       if (pct >= threshold) {
         await runCompaction('auto', completedConversation);
       } else {
@@ -3398,8 +3395,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         {conversation?.messages.length ? (
           // Compacted-away epochs render first, so the full transcript stays
           // visible; each epoch's summary message draws a divider above itself.
-          [...(conversation.previousMessages ?? []), ...conversation.messages]
-            .map((message) => {
+          [
+            ...(conversation.previousMessages ?? []),
+            ...conversation.messages,
+          ].map((message) => {
             // Collapse mode: render only the user's messages so the transcript
             // is just what was asked, without the model's replies in between.
             if (collapseResponses && message.role !== 'user') {

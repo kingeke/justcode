@@ -2,7 +2,7 @@
 
 How to produce the release notes for a JustCode release. The goal is a short,
 readable summary a user can scan in under a minute — what version this is and
-what changed for *them* since the last one. Not a changelog of commits.
+what changed for _them_ since the last one. Not a changelog of commits.
 
 ## Gathering the changes
 
@@ -11,7 +11,7 @@ what changed for *them* since the last one. Not a changelog of commits.
 2. The previous version is the latest existing tag: `git describe --tags --abbrev=0`
    (or `git tag --sort=-v:refname | head -2` when the new tag already exists).
 3. List what happened between them: `git log <last-tag>..<new-tag> --oneline`.
-   Read the commits for *what changed*, then describe it in product terms —
+   Read the commits for _what changed_, then describe it in product terms —
    never copy commit subjects verbatim.
 
 ## Output format
@@ -22,14 +22,17 @@ what changed for *them* since the last one. Not a changelog of commits.
 One or two sentences on the theme of the release, if it has one.
 
 ### New
+
 - Conversation compaction: summarize a long chat and keep going (`/compact`, auto at 80%).
 - Session switcher in the chat header — search, rename, delete, and jump between sessions.
 
 ### Improved
+
 - Streaming no longer flickers on long responses in the terminal.
 - Session lists group by recency (Today / Yesterday / Last 7 days / Older).
 
 ### Fixed
+
 - Pasted-image markers no longer break the prompt layout.
 ```
 

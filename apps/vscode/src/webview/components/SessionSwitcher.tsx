@@ -35,7 +35,9 @@ interface SessionSwitcherProps {
  * the saved sessions, jump to one, rename, or delete — without leaving the
  * chat for the full sessions screen.
  */
-export function SessionSwitcher(props: SessionSwitcherProps): React.JSX.Element {
+export function SessionSwitcher(
+  props: SessionSwitcherProps
+): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
   const [editingId, setEditingId] = React.useState<string | null>(null);
@@ -139,108 +141,110 @@ export function SessionSwitcher(props: SessionSwitcherProps): React.JSX.Element 
             {props.sessions.length === 0 ? (
               <div className="sessions-empty">No sessions yet.</div>
             ) : filtered.length === 0 ? (
-              <div className="sessions-empty">
-                No sessions match “{query}”.
-              </div>
+              <div className="sessions-empty">No sessions match “{query}”.</div>
             ) : (
               grouped.map(({ group, sessions }) => {
-                const folded =
-                  !trimmedQuery && collapsedGroups.has(group);
+                const folded = !trimmedQuery && collapsedGroups.has(group);
                 return (
-                <React.Fragment key={group}>
-                  <button
-                    type="button"
-                    className="session-switcher-group"
-                    title={folded ? 'Expand' : 'Collapse'}
-                    aria-expanded={!folded}
-                    onClick={() => toggleGroup(group)}
-                  >
-                    <span aria-hidden="true">{folded ? '▸' : '▾'}</span>{' '}
-                    {group} ({sessions.length})
-                  </button>
-                  {folded ? null : sessions.map((session) => {
-                    const isCurrent =
-                      session.sessionId === props.currentSessionId;
-                    const isEditing = session.sessionId === editingId;
-                    return (
-                      <div
-                        key={session.sessionId}
-                        className={`session-switcher-row ${isCurrent ? 'session-switcher-row-current' : ''}`}
-                      >
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            className="session-rename-input"
-                            value={draftTitle}
-                            // eslint-disable-next-line jsx-a11y/no-autofocus
-                            autoFocus
-                            onChange={(event) =>
-                              setDraftTitle(event.target.value)
-                            }
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter')
-                                commitRename(session.sessionId);
-                              else if (event.key === 'Escape')
-                                setEditingId(null);
-                              // Keep Escape from also closing the popup.
-                              event.stopPropagation();
-                            }}
-                            onBlur={() => commitRename(session.sessionId)}
-                          />
-                        ) : (
-                          <button
-                            type="button"
-                            className="session-switcher-item"
-                            onClick={() => {
-                              setOpen(false);
-                              if (!isCurrent) props.onOpen(session.sessionId);
-                            }}
-                          >
-                            <span className="session-switcher-item-title">
-                              {session.title ?? 'New chat'}
-                            </span>
-                            <span className="session-switcher-item-meta">
-                              {relativeTime(session.updatedAt)}
-                            </span>
-                          </button>
-                        )}
-                        {isEditing ? null : (
-                          <span className="session-switcher-actions">
-                            <button
-                              type="button"
-                              className="icon-btn"
-                              title="Rename session"
-                              aria-label="Rename session"
-                              onClick={() => {
-                                setEditingId(session.sessionId);
-                                setDraftTitle(session.title ?? '');
-                              }}
+                  <React.Fragment key={group}>
+                    <button
+                      type="button"
+                      className="session-switcher-group"
+                      title={folded ? 'Expand' : 'Collapse'}
+                      aria-expanded={!folded}
+                      onClick={() => toggleGroup(group)}
+                    >
+                      <span aria-hidden="true">{folded ? '▸' : '▾'}</span>{' '}
+                      {group} ({sessions.length})
+                    </button>
+                    {folded
+                      ? null
+                      : sessions.map((session) => {
+                          const isCurrent =
+                            session.sessionId === props.currentSessionId;
+                          const isEditing = session.sessionId === editingId;
+                          return (
+                            <div
+                              key={session.sessionId}
+                              className={`session-switcher-row ${isCurrent ? 'session-switcher-row-current' : ''}`}
                             >
-                              <PencilIcon size={13} />
-                            </button>
-                            <button
-                              type="button"
-                              className="icon-btn"
-                              title="Delete session"
-                              aria-label="Delete session"
-                              onClick={() => props.onDelete(session.sessionId)}
-                            >
-                              <TrashIcon size={14} />
-                            </button>
-                            {isCurrent ? (
-                              <span
-                                className="session-switcher-current"
-                                title="Current session"
-                              >
-                                <CheckIcon size={14} />
-                              </span>
-                            ) : null}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </React.Fragment>
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  className="session-rename-input"
+                                  value={draftTitle}
+                                  // eslint-disable-next-line jsx-a11y/no-autofocus
+                                  autoFocus
+                                  onChange={(event) =>
+                                    setDraftTitle(event.target.value)
+                                  }
+                                  onKeyDown={(event) => {
+                                    if (event.key === 'Enter')
+                                      commitRename(session.sessionId);
+                                    else if (event.key === 'Escape')
+                                      setEditingId(null);
+                                    // Keep Escape from also closing the popup.
+                                    event.stopPropagation();
+                                  }}
+                                  onBlur={() => commitRename(session.sessionId)}
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="session-switcher-item"
+                                  onClick={() => {
+                                    setOpen(false);
+                                    if (!isCurrent)
+                                      props.onOpen(session.sessionId);
+                                  }}
+                                >
+                                  <span className="session-switcher-item-title">
+                                    {session.title ?? 'New chat'}
+                                  </span>
+                                  <span className="session-switcher-item-meta">
+                                    {relativeTime(session.updatedAt)}
+                                  </span>
+                                </button>
+                              )}
+                              {isEditing ? null : (
+                                <span className="session-switcher-actions">
+                                  <button
+                                    type="button"
+                                    className="icon-btn"
+                                    title="Rename session"
+                                    aria-label="Rename session"
+                                    onClick={() => {
+                                      setEditingId(session.sessionId);
+                                      setDraftTitle(session.title ?? '');
+                                    }}
+                                  >
+                                    <PencilIcon size={13} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="icon-btn"
+                                    title="Delete session"
+                                    aria-label="Delete session"
+                                    onClick={() =>
+                                      props.onDelete(session.sessionId)
+                                    }
+                                  >
+                                    <TrashIcon size={14} />
+                                  </button>
+                                  {isCurrent ? (
+                                    <span
+                                      className="session-switcher-current"
+                                      title="Current session"
+                                    >
+                                      <CheckIcon size={14} />
+                                    </span>
+                                  ) : null}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                  </React.Fragment>
                 );
               })
             )}

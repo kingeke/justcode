@@ -163,86 +163,92 @@ export function SessionsView({
                 {folded
                   ? null
                   : groupSessions.map((session) => {
-            const isActive = session.sessionId === activeSessionId;
-            const isEditing = session.sessionId === editingId;
-            const isOpening = session.sessionId === openingId;
-            return (
-              <div key={session.sessionId} className="session-row">
-                {isEditing ? (
-                  <input
-                    type="text"
-                    className="session-rename-input"
-                    value={draftTitle}
-                    autoFocus
-                    onChange={(event) => setDraftTitle(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter')
-                        commitRename(session.sessionId);
-                      else if (event.key === 'Escape') setEditingId(null);
-                    }}
-                    onBlur={() => commitRename(session.sessionId)}
-                  />
-                ) : (
-                  <button
-                    type="button"
-                    className="session-item"
-                    onClick={() => openSession(session.sessionId)}
-                  >
-                    <span className="session-item-title">
-                      {isActive ? (
-                        <span
-                          className="session-loading-dot"
-                          aria-hidden="true"
-                        />
-                      ) : null}
-                      {session.title ?? 'New chat'}
-                    </span>
-                    <span className="session-item-meta">
-                      {isActive ? (
-                        <span className="session-loading-label">Working…</span>
-                      ) : (
-                        <>
-                          {session.messageCount} msg
-                          {session.messageCount !== 1 ? 's' : ''} ·{' '}
-                          {relativeTime(session.updatedAt)}
-                        </>
-                      )}
-                    </span>
-                  </button>
-                )}
-                {isEditing ? null : isOpening ? (
-                  <span
-                    className="session-opening-spinner"
-                    role="status"
-                    aria-label="Opening session"
-                  >
-                    <span className="spinner" aria-hidden="true" />
-                  </span>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      className="icon-btn session-rename-btn"
-                      title="Rename session"
-                      aria-label="Rename session"
-                      onClick={() => startRename(session)}
-                    >
-                      <PencilIcon size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn session-delete-btn"
-                      title="Delete session"
-                      aria-label="Delete session"
-                      onClick={() => onDelete(session.sessionId)}
-                    >
-                      <TrashIcon size={15} />
-                    </button>
-                  </>
-                )}
-              </div>
-            );
-          })}
+                      const isActive = session.sessionId === activeSessionId;
+                      const isEditing = session.sessionId === editingId;
+                      const isOpening = session.sessionId === openingId;
+                      return (
+                        <div key={session.sessionId} className="session-row">
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              className="session-rename-input"
+                              value={draftTitle}
+                              autoFocus
+                              onChange={(event) =>
+                                setDraftTitle(event.target.value)
+                              }
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter')
+                                  commitRename(session.sessionId);
+                                else if (event.key === 'Escape')
+                                  setEditingId(null);
+                              }}
+                              onBlur={() => commitRename(session.sessionId)}
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              className="session-item"
+                              onClick={() => openSession(session.sessionId)}
+                            >
+                              <span className="session-item-title">
+                                {isActive ? (
+                                  <span
+                                    className="session-loading-dot"
+                                    aria-hidden="true"
+                                  />
+                                ) : null}
+                                {session.title ?? 'New chat'}
+                              </span>
+                              <span className="session-item-meta">
+                                {isActive ? (
+                                  <span className="session-loading-label">
+                                    Working…
+                                  </span>
+                                ) : (
+                                  <>
+                                    {session.messageCount} msg
+                                    {session.messageCount !== 1
+                                      ? 's'
+                                      : ''} · {relativeTime(session.updatedAt)}
+                                  </>
+                                )}
+                              </span>
+                            </button>
+                          )}
+                          {isEditing ? null : isOpening ? (
+                            <span
+                              className="session-opening-spinner"
+                              role="status"
+                              aria-label="Opening session"
+                            >
+                              <span className="spinner" aria-hidden="true" />
+                            </span>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                className="icon-btn session-rename-btn"
+                                title="Rename session"
+                                aria-label="Rename session"
+                                onClick={() => startRename(session)}
+                              >
+                                <PencilIcon size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                className="icon-btn session-delete-btn"
+                                title="Delete session"
+                                aria-label="Delete session"
+                                onClick={() => onDelete(session.sessionId)}
+                              >
+                                <TrashIcon size={15} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
               </React.Fragment>
             );
           })
