@@ -16,6 +16,7 @@ function baseConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     compactPrompt: '',
     autoCompactThresholdPercent: 80,
     localModelAutoRefresh: true,
+    modelAutoRefresh: true,
     lazyToolLoading: true,
     disabledTools: [],
     openai: {

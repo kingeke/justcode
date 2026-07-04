@@ -80,6 +80,7 @@ describe('queued messages', () => {
       autoCompactThresholdPercent: 80,
       thinkingCollapsed: false,
       localModelAutoRefresh: true,
+      modelAutoRefresh: true,
       lazyToolLoading: true,
       manageableTools: [],
       disabledTools: [],

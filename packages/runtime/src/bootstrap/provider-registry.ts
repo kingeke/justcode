@@ -23,7 +23,13 @@ export class ProviderRegistry {
      * per `create` call (via a getter) so a runtime toggle reaches the clients
      * this registry has already built. Defaults to always-on.
      */
-    private readonly autoRefreshLocal: () => boolean = () => true
+    private readonly autoRefreshLocal: () => boolean = () => true,
+    /**
+     * Whether cached model lists auto-refresh once a day. Also read per call so
+     * a runtime toggle takes effect immediately. Defaults to on; when off the
+     * cache is served indefinitely and only a manual refresh refetches.
+     */
+    private readonly autoRefreshModels: () => boolean = () => true
   ) {}
 
   public create(providerId: ProviderId): ProviderClient {
@@ -54,6 +60,7 @@ export class ProviderRegistry {
     return withModelsCache(entry.create(credentials), {
       local: entry.local ?? false,
       autoRefreshLocal: this.autoRefreshLocal,
+      autoRefresh: this.autoRefreshModels,
     });
   }
 

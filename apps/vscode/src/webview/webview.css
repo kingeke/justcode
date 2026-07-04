@@ -192,6 +192,26 @@ body {
   background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15));
 }
 
+/* Inline edit of a committed user message (Copilot-style): the bubble is
+   replaced by a full composer at its spot in the transcript, and everything
+   else grays out and stops taking clicks — clicking the grayed area or
+   pressing Esc cancels back to the normal flow. */
+.app.editing-message > *:not(.transcript-wrap),
+.app.editing-message .transcript-content > *:not(.msg-edit-wrap) {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.msg-edit-wrap {
+  margin: 10px 0;
+}
+
+/* The inline composer keeps its own layout; drop the bottom bar's padding so
+   it lines up with the transcript's messages. */
+.msg-edit-wrap .composer-area {
+  padding: 0;
+}
+
 /* Assistant messages — left-aligned, no bubble. Column so the timestamp
    footer sits under the reply instead of beside it. */
 .msg-assistant {

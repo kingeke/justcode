@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -162,5 +162,46 @@ describe('models cache', () => {
     await cached.listModels(); // off: served from same-day cache
 
     expect(fetches).toBe(2);
+  });
+
+  it('serves a stale cached list indefinitely when auto-refresh is off', async () => {
+    // Seed a cache entry fetched yesterday, which the daily refresh would
+    // normally consider stale and refetch.
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    await writeFile(
+      join(dir, 'models.json'),
+      JSON.stringify({
+        [ProviderId.OpenRouter]: {
+          fetchedAt: yesterday,
+          models: [model('openai/gpt-5', ProviderId.OpenRouter)],
+        },
+      }),
+      'utf8'
+    );
+
+    let fetches = 0;
+    let autoRefresh = false;
+    const inner: ProviderClient = {
+      providerId: ProviderId.OpenRouter,
+      sendChat: async () => ({ content: '' }),
+      getDefaultModel: () => undefined,
+      listModels: async () => {
+        fetches += 1;
+        return [model('openai/gpt-6', ProviderId.OpenRouter)];
+      },
+    };
+    // The flag is read per call, so flipping it changes behavior live.
+    const cached = withModelsCache(inner, {
+      local: false,
+      autoRefresh: () => autoRefresh,
+    });
+
+    const models = await cached.listModels(); // off: stale entry still served
+    expect(fetches).toBe(0);
+    expect(models[0]?.id).toBe('openai/gpt-5');
+
+    autoRefresh = true;
+    await cached.listModels(); // on again: stale → refetch
+    expect(fetches).toBe(1);
   });
 });

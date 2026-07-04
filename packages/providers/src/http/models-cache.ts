@@ -100,9 +100,15 @@ function isSameDay(iso: string, now = new Date()): boolean {
  * `local` providers (Ollama/LM Studio) refetch on every call by default, since
  * their catalog changes as the user pulls models. That live refresh can be
  * turned off via {@link Options.autoRefreshLocal}, in which case local providers
- * fall back to the same once-a-day cache remote providers use. The toggle is
- * read per call (not at construction) so flipping it takes effect immediately on
- * already-created clients. All non-list methods delegate straight through.
+ * fall back to the same once-a-day cache remote providers use.
+ *
+ * The daily refetch of the cache itself can be turned off too, via
+ * {@link Options.autoRefresh}: when disabled, a cached list is served
+ * indefinitely and only a manual refresh (which clears the cache) refetches.
+ *
+ * Both toggles are read per call (not at construction) so flipping them takes
+ * effect immediately on already-created clients. All non-list methods delegate
+ * straight through.
  */
 export function withModelsCache(
   inner: ProviderClient,
@@ -110,12 +116,15 @@ export function withModelsCache(
     local: boolean;
     /** Whether local providers should refetch every call; defaults to true. */
     autoRefreshLocal?: () => boolean;
+    /** Whether cached lists auto-refresh daily; defaults to true. */
+    autoRefresh?: () => boolean;
   }
 ): ProviderClient {
   return new CachingModelsClient(
     inner,
     options.local,
-    options.autoRefreshLocal
+    options.autoRefreshLocal,
+    options.autoRefresh
   );
 }
 
@@ -125,7 +134,8 @@ class CachingModelsClient implements ProviderClient {
   public constructor(
     private readonly inner: ProviderClient,
     private readonly local: boolean,
-    private readonly autoRefreshLocal: () => boolean = () => true
+    private readonly autoRefreshLocal: () => boolean = () => true,
+    private readonly autoRefresh: () => boolean = () => true
   ) {
     this.providerId = inner.providerId;
   }
@@ -148,7 +158,9 @@ class CachingModelsClient implements ProviderClient {
 
     const cache = await readCacheFile();
     const cached = cache[id];
-    if (cached && isSameDay(cached.fetchedAt)) {
+    // With auto-refresh off, a cached list never goes stale on its own — only
+    // the manual "refresh models" action (which clears the cache) refetches.
+    if (cached && (isSameDay(cached.fetchedAt) || !this.autoRefresh())) {
       return cached.models;
     }
 

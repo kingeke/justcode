@@ -68,6 +68,13 @@ export interface RuntimeServices {
    * on the providers already created (they read the flag per `listModels` call).
    */
   setLocalModelAutoRefresh: (enabled: boolean) => void;
+  /** Whether cached model lists auto-refresh once a day. */
+  modelAutoRefresh: boolean;
+  /**
+   * Toggle, at runtime, the daily auto-refresh of cached model lists. Takes
+   * effect on the providers already created (read per `listModels` call).
+   */
+  setModelAutoRefresh: (enabled: boolean) => void;
   /** Whether lazy tool loading is on (off = send all tools up front). */
   lazyToolLoading: boolean;
   /**
@@ -175,7 +182,12 @@ export async function createRuntimeServices(
   // Mutable so a runtime toggle reaches the providers built below: each client
   // reads `localRefresh.enabled` per `listModels` call through the getter.
   const localRefresh = { enabled: config.localModelAutoRefresh };
-  const registry = new ProviderRegistry(config, () => localRefresh.enabled);
+  const modelRefresh = { enabled: config.modelAutoRefresh };
+  const registry = new ProviderRegistry(
+    config,
+    () => localRefresh.enabled,
+    () => modelRefresh.enabled
+  );
   // Without a configured provider the session is backed by a placeholder; the
   // CLI shows the connect screen and swaps in a real provider once chosen.
   const provider = providerId
@@ -374,6 +386,10 @@ export async function createRuntimeServices(
     localModelAutoRefresh: localRefresh.enabled,
     setLocalModelAutoRefresh: (enabled: boolean) => {
       localRefresh.enabled = enabled;
+    },
+    modelAutoRefresh: modelRefresh.enabled,
+    setModelAutoRefresh: (enabled: boolean) => {
+      modelRefresh.enabled = enabled;
     },
     lazyToolLoading: lazyToolLoadingSettings.enabled,
     setLazyToolLoading: (enabled: boolean) => {

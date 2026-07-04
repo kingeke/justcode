@@ -190,6 +190,22 @@ new`);
     expect(markup).toContain('Retry from here');
   });
 
+  it('renders an edit button on a user message when onEdit is provided', () => {
+    const markup = renderToStaticMarkup(
+      <MessageView
+        message={{
+          id: 'u8',
+          role: WebviewRole.User,
+          content: 'hello',
+        }}
+        onEdit={() => {}}
+      />
+    );
+
+    expect(markup).toContain('msg-edit-btn');
+    expect(markup).toContain('Edit and re-send from here');
+  });
+
   it('omits the retry button when onRetry is not provided', () => {
     const markup = renderToStaticMarkup(
       <MessageView

@@ -165,6 +165,34 @@ describe('webview chat state live turn ordering', () => {
     expect(retried.streaming).toBe('');
   });
 
+  it('replaces the edited message with the new content and scraps the tail', () => {
+    const withHistory = reducer(initialState, {
+      type: HostMessageType.TurnComplete,
+      messages: [
+        { id: 'user-1', role: WebviewRole.User, content: 'first' },
+        { id: 'assistant-1', role: WebviewRole.Assistant, content: 'reply 1' },
+        { id: 'user-2', role: WebviewRole.User, content: 'second' },
+        { id: 'assistant-2', role: WebviewRole.Assistant, content: 'reply 2' },
+      ],
+    });
+
+    const edited = reducer(withHistory, {
+      type: LocalActionType.OptimisticEdit,
+      messageId: 'user-2',
+      content: 'second, but better',
+      images: [],
+    });
+
+    expect(edited.messages.map((m) => m.content)).toEqual([
+      'first',
+      'reply 1',
+      'second, but better',
+    ]);
+    // The replacement is a fresh optimistic echo, not the old committed id.
+    expect(edited.messages[2]?.id).toMatch(/^local-/);
+    expect(edited.busy).toBe(true);
+  });
+
   it('ignores a retry for an unknown message id', () => {
     const withHistory = reducer(initialState, {
       type: HostMessageType.TurnComplete,

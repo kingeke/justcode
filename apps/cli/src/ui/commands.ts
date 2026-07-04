@@ -11,6 +11,7 @@ export enum CommandName {
   Reasoning = 'reasoning',
   AutoApprove = 'auto-approve',
   LocalRefresh = 'local-model-refresh',
+  ModelAutoRefresh = 'model-auto-refresh',
   LazyToolLoading = 'toggle-lazy-tool-loading',
   ExpandTools = 'expand-tools',
   ManageTools = 'manage-tools',
@@ -81,6 +82,11 @@ export const COMMANDS: Command[] = [
   {
     name: CommandName.LocalRefresh,
     description: 'Toggle always refreshing local models (off uses daily cache)',
+  },
+  {
+    name: CommandName.ModelAutoRefresh,
+    description:
+      'Toggle refreshing cached model lists daily (off only refetches manually)',
   },
   {
     name: CommandName.LazyToolLoading,

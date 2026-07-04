@@ -186,6 +186,10 @@ export class ChatBridge {
   // when false they use the once-a-day cache. Applied to the live runtime via
   // `setLocalModelAutoRefresh` so toggling takes effect without a reload.
   private localModelAutoRefresh = true;
+  // When true (default), cached model lists auto-refresh once a day; when false
+  // they're served indefinitely and only "Refresh models" refetches. Applied to
+  // the live runtime via `setModelAutoRefresh`.
+  private modelAutoRefresh = true;
   // When true (default), the `lazy_load_tools` gateway is on: the model unlocks
   // the full tool set by calling lazy_load_tools. When false, all tools are sent
   // up front. Applied to the live runtime via `setLazyToolLoading`.
@@ -297,7 +301,12 @@ export class ChatBridge {
         await this.submit(message.content, message.images);
         return;
       case WebviewMessageType.Retry:
-        await this.retry(message.messageId);
+        await this.retry(
+          message.messageId,
+          message.content !== undefined
+            ? { content: message.content, images: message.images }
+            : undefined
+        );
         return;
       case WebviewMessageType.Cancel:
         this.abortController?.abort();
@@ -392,6 +401,9 @@ export class ChatBridge {
         return;
       case WebviewMessageType.ToggleLocalModelAutoRefresh:
         await this.toggleLocalModelAutoRefresh();
+        return;
+      case WebviewMessageType.ToggleModelAutoRefresh:
+        await this.toggleModelAutoRefresh();
         return;
       case WebviewMessageType.ToggleLazyToolLoading:
         await this.toggleLazyToolLoading();
@@ -514,6 +526,7 @@ export class ChatBridge {
       DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT;
     this.thinkingCollapsed = globalConfig.thinkingCollapsed ?? false;
     this.localModelAutoRefresh = globalConfig.localModelAutoRefresh ?? true;
+    this.modelAutoRefresh = globalConfig.modelAutoRefresh ?? true;
     this.lazyToolLoading = globalConfig.lazyToolLoading ?? true;
     this.disabledTools = globalConfig.disabledTools ?? [];
     // Resolve chat modes (built-in + custom) and the active one.
@@ -565,6 +578,7 @@ export class ChatBridge {
         autoCompactThresholdPercent: this.autoCompactThresholdPercent,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
+        modelAutoRefresh: this.modelAutoRefresh,
         lazyToolLoading: this.lazyToolLoading,
         manageableTools: this.manageableTools,
         disabledTools: this.disabledTools,
@@ -582,6 +596,7 @@ export class ChatBridge {
     services.setMaxReadLines(this.maxReadLines);
     services.setMaxHistoryMessages(this.maxHistoryMessages);
     services.setLocalModelAutoRefresh(this.localModelAutoRefresh);
+    services.setModelAutoRefresh(this.modelAutoRefresh);
     services.setLazyToolLoading(this.lazyToolLoading);
     services.setDisabledTools(this.disabledTools);
     services.setCurrentFile(this.currentFile);
@@ -626,6 +641,7 @@ export class ChatBridge {
         autoCompactThresholdPercent: this.autoCompactThresholdPercent,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
+        modelAutoRefresh: this.modelAutoRefresh,
         lazyToolLoading: this.lazyToolLoading,
         manageableTools: this.manageableTools,
         disabledTools: this.disabledTools,
@@ -690,6 +706,7 @@ export class ChatBridge {
         autoCompactThresholdPercent: this.autoCompactThresholdPercent,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
+        modelAutoRefresh: this.modelAutoRefresh,
         lazyToolLoading: this.lazyToolLoading,
         manageableTools: this.manageableTools,
         disabledTools: this.disabledTools,
@@ -755,6 +772,7 @@ export class ChatBridge {
         autoCompactThresholdPercent: this.autoCompactThresholdPercent,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
+        modelAutoRefresh: this.modelAutoRefresh,
         lazyToolLoading: this.lazyToolLoading,
         manageableTools: this.manageableTools,
         disabledTools: this.disabledTools,
@@ -897,10 +915,14 @@ export class ChatBridge {
   /**
    * Re-sends a previous user message: drops that message and everything after
    * it from the conversation, persists the truncation, and submits the same
-   * content (and images) as a fresh turn. Only messages in the current epoch
-   * can be retried — compacted-away history is no longer real model context.
+   * content (and images) as a fresh turn — or, when `edit` is given, the
+   * edited replacement instead of the original. Only messages in the current
+   * epoch can be retried — compacted-away history is no longer real context.
    */
-  private async retry(messageId: string): Promise<void> {
+  private async retry(
+    messageId: string,
+    edit?: { content: string; images?: WebviewImage[] | undefined }
+  ): Promise<void> {
     if (this.abortController || this.compacting) {
       this.post({
         type: HostMessageType.Error,
@@ -940,12 +962,14 @@ export class ChatBridge {
     // service's own save doesn't resurrect the scrapped tail on reload.
     await services.chatSessionService.saveConversation(this.conversation);
     await this.submit(
-      target.content,
-      target.images?.map((image, i) => ({
-        id: `retry-${i}`,
-        mediaType: image.mediaType,
-        data: image.data,
-      }))
+      edit ? edit.content : target.content,
+      edit
+        ? edit.images
+        : target.images?.map((image, i) => ({
+            id: `retry-${i}`,
+            mediaType: image.mediaType,
+            data: image.data,
+          }))
     );
     // A turn that produced anything (success, or an abort whose partial was
     // adopted) grew the conversation past the truncation point. If it's still
@@ -1707,6 +1731,7 @@ export class ChatBridge {
           autoCompactThresholdPercent: this.autoCompactThresholdPercent,
           thinkingCollapsed: this.thinkingCollapsed,
           localModelAutoRefresh: this.localModelAutoRefresh,
+          modelAutoRefresh: this.modelAutoRefresh,
           lazyToolLoading: this.lazyToolLoading,
           manageableTools: this.manageableTools,
           disabledTools: this.disabledTools,
@@ -2172,6 +2197,19 @@ export class ChatBridge {
     }
   }
 
+  private async toggleModelAutoRefresh(): Promise<void> {
+    this.modelAutoRefresh = !this.modelAutoRefresh;
+    // Apply to the live runtime so the change takes effect on the next model
+    // listing without a reload.
+    this.services?.setModelAutoRefresh(this.modelAutoRefresh);
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      modelAutoRefresh: this.modelAutoRefresh,
+    });
+  }
+
   /**
    * Undoes a file's session changes from the changes panel: restores the
    * pre-session baseline, or deletes the file when it was created this session.
@@ -2512,6 +2550,7 @@ export class ChatBridge {
         autoCompactThresholdPercent: this.autoCompactThresholdPercent,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
+        modelAutoRefresh: this.modelAutoRefresh,
         lazyToolLoading: this.lazyToolLoading,
         manageableTools: this.manageableTools,
         disabledTools: this.disabledTools,

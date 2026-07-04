@@ -6,6 +6,7 @@ import {
   WebviewMessageType,
   WebviewRole,
   type WebviewImage,
+  type WebviewMessage,
   type WebviewModel,
   type WebviewReasoningChoice,
   type WebviewStats,
@@ -64,6 +65,64 @@ export function App(): React.JSX.Element {
     },
     []
   );
+  // The committed user message being edited in place (Copilot-style): its
+  // bubble is replaced by a full composer pre-filled with the message, the rest
+  // of the chat grays out, and submitting re-sends from that point in history
+  // (scrapping everything after it, like retry). Esc or clicking outside
+  // cancels. The working draft lives in refs (like the main composer's) so it
+  // survives the model picker taking over the view mid-edit.
+  const [editingMessageId, setEditingMessageId] = React.useState<string | null>(
+    null
+  );
+  const editDraftRef = React.useRef('');
+  const editImagesRef = React.useRef<WebviewImage[]>([]);
+  const editWrapRef = React.useRef<HTMLDivElement | null>(null);
+  const persistEditDraft = React.useCallback(
+    (draft: string, images: WebviewImage[]): void => {
+      editDraftRef.current = draft;
+      editImagesRef.current = images;
+    },
+    []
+  );
+  const cancelEditMessage = React.useCallback((): void => {
+    setEditingMessageId(null);
+    editDraftRef.current = '';
+    editImagesRef.current = [];
+  }, []);
+
+  // While editing a message, Esc or clicking anywhere outside the edit
+  // composer cancels back to the normal flow. Not registered while a
+  // full-screen view (model picker) is up — picking a model there is part of
+  // the edit, not a click outside it.
+  React.useEffect(() => {
+    if (editingMessageId === null || state.view !== 'chat') return undefined;
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') cancelEditMessage();
+    };
+    const onPointerDown = (e: PointerEvent): void => {
+      if (
+        editWrapRef.current &&
+        !editWrapRef.current.contains(e.target as Node)
+      ) {
+        cancelEditMessage();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [editingMessageId, state.view, cancelEditMessage]);
+
+  // Drop the edit if its message disappears from the transcript (session
+  // switched, new snapshot, ...) so the dim state can't get stuck.
+  React.useEffect(() => {
+    if (editingMessageId === null) return;
+    if (!state.messages.some((m) => m.id === editingMessageId)) {
+      cancelEditMessage();
+    }
+  }, [editingMessageId, state.messages, cancelEditMessage]);
   // Live tok/s while a turn streams, mirroring the CLI: the host only sends the
   // real stats at turn-end, so estimate throughput here from the streamed text
   // length and the time since the first token, refreshed on a timer. The turn's
@@ -377,6 +436,41 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.Retry, messageId });
   };
 
+  // Opens the inline edit composer on a committed user message, seeded with
+  // its text and images.
+  const startEditMessage = (message: WebviewMessage): void => {
+    editDraftRef.current = message.content;
+    editImagesRef.current = (message.images ?? []).map((image, i) => ({
+      id: `edit-${i}`,
+      mediaType: image.mediaType,
+      data: image.data,
+    }));
+    setEditingMessageId(message.id);
+  };
+
+  // Sends the edited message from that point in history: like retry, the host
+  // scraps the original and everything after it, but submits the edited
+  // content instead of the original.
+  const submitEditMessage = (content: string, images: WebviewImage[]): void => {
+    const messageId = editingMessageId;
+    if (messageId === null) return;
+    cancelEditMessage();
+    stickToBottomRef.current = true;
+    dispatch({
+      type: LocalActionType.OptimisticEdit,
+      messageId,
+      content,
+      images,
+    });
+    requestAnimationFrame(pinToBottom);
+    postToHost({
+      type: WebviewMessageType.Retry,
+      messageId,
+      content,
+      ...(images.length ? { images } : {}),
+    });
+  };
+
   const cancel = (): void => {
     postToHost({ type: WebviewMessageType.Cancel });
   };
@@ -536,6 +630,11 @@ export function App(): React.JSX.Element {
   const toggleLocalModelAutoRefresh = (): void => {
     dispatch({ type: LocalActionType.ToggleLocalModelAutoRefresh });
     postToHost({ type: WebviewMessageType.ToggleLocalModelAutoRefresh });
+  };
+
+  const toggleModelAutoRefresh = (): void => {
+    dispatch({ type: LocalActionType.ToggleModelAutoRefresh });
+    postToHost({ type: WebviewMessageType.ToggleModelAutoRefresh });
   };
 
   const toggleLazyToolLoading = (): void => {
@@ -775,8 +874,65 @@ export function App(): React.JSX.Element {
       message.role === WebviewRole.Assistant && Boolean(message.thinking)
   );
 
+  // Everything the main composer and the inline edit composer share — the edit
+  // composer is the same full composer (mode, model, images, mentions, ...),
+  // differing only in what submit does and which draft it edits.
+  const sharedComposerProps = {
+    busy: state.busy,
+    // Compaction blocks input entirely: the host would reject a submit
+    // mid-compaction anyway, so don't let one be typed-and-lost.
+    disabled: chatDisabled || state.compacting,
+    models: state.models,
+    activeModel: state.activeModel,
+    activeProviderId: state.providerId,
+    usage: state.usage,
+    stats: state.busy && liveStats ? liveStats : state.stats,
+    autoApprove: state.autoApprove,
+    expandTools: state.expandTools,
+    maxReadLines: state.maxReadLines,
+    maxHistoryMessages: state.maxHistoryMessages,
+    onCancel: cancel,
+    workspaceFiles: state.workspaceFiles,
+    fileSymbols: state.fileSymbols,
+    onRequestWorkspaceFiles: requestWorkspaceFiles,
+    onRequestFileSymbols: requestFileSymbols,
+    onNewSession: newSession,
+    onOpenModelPicker: openModelPicker,
+    onOpenImage: setPreviewImage,
+    reasoningEffortByModel: state.reasoningEffortByModel,
+    onSetReasoningEffort: setReasoningEffort,
+    thinkingCollapsed: state.thinkingCollapsed,
+    localModelAutoRefresh: state.localModelAutoRefresh,
+    modelAutoRefresh: state.modelAutoRefresh,
+    lazyToolLoading: state.lazyToolLoading,
+    manageableTools: state.manageableTools,
+    disabledTools: state.disabledTools,
+    onSetDisabledTools: setDisabledTools,
+    onOpenMcpConfig: openMcpConfig,
+    onOpenPromptSettings: openPromptSettings,
+    mcpLoading: state.mcpLoading,
+    modes: state.modes,
+    activeModeId: state.activeModeId,
+    onSelectMode: selectMode,
+    onCreateMode: createMode,
+    onToggleAutoApprove: toggleAutoApprove,
+    onToggleExpandTools: toggleExpandTools,
+    onToggleThinkingCollapsed: toggleThinkingCollapsed,
+    onToggleLocalModelAutoRefresh: toggleLocalModelAutoRefresh,
+    onToggleModelAutoRefresh: toggleModelAutoRefresh,
+    onToggleLazyToolLoading: toggleLazyToolLoading,
+    onSetReadLimit: setReadLimit,
+    onSetHistoryLimit: setHistoryLimit,
+    autoCompactThresholdPercent: state.autoCompactThresholdPercent,
+    onSetAutoCompactThreshold: setAutoCompactThreshold,
+    compacting: state.compacting,
+    onCompact: compactSession,
+  };
+
   return (
-    <div className="app">
+    <div
+      className={`app${editingMessageId !== null ? ' editing-message' : ''}`}
+    >
       <div className="chat-header">
         <button
           type="button"
@@ -897,8 +1053,8 @@ export function App(): React.JSX.Element {
                 committedMessagesHaveThinking,
                 completedThinkingItems: state.completedThinkingItems,
               });
-              // Retry is offered on committed user messages in the current
-              // epoch while idle. Optimistic `local-` echoes aren't retryable:
+              // Retry/edit are offered on committed user messages in the
+              // current epoch while idle. Optimistic `local-` echoes aren't:
               // the host doesn't know their ids (e.g. a submit that errored).
               const retryable =
                 !state.busy &&
@@ -906,6 +1062,25 @@ export function App(): React.JSX.Element {
                 !message.isCompactSummary &&
                 index > lastCompactIndex &&
                 !message.id.startsWith('local-');
+              // The message under edit renders as a full composer in its
+              // place; submitting re-sends from here, Esc/outside cancels.
+              if (message.id === editingMessageId) {
+                return (
+                  <div
+                    key={message.id}
+                    className="msg-edit-wrap"
+                    ref={editWrapRef}
+                  >
+                    <Composer
+                      {...sharedComposerProps}
+                      onSubmit={submitEditMessage}
+                      initialDraft={editDraftRef.current}
+                      initialImages={editImagesRef.current}
+                      onDraftChange={persistEditDraft}
+                    />
+                  </div>
+                );
+              }
               return (
                 <React.Fragment key={message.id}>
                   {thinkingItems.map((item) => (
@@ -922,7 +1097,12 @@ export function App(): React.JSX.Element {
                     expandTools={state.expandTools}
                     onOpenFile={openFile}
                     onOpenImage={setPreviewImage}
-                    {...(retryable ? { onRetry: () => retry(message.id) } : {})}
+                    {...(retryable
+                      ? {
+                          onRetry: () => retry(message.id),
+                          onEdit: () => startEditMessage(message),
+                        }
+                      : {})}
                     domId={`msg-${message.id}`}
                   />
                 </React.Fragment>
@@ -1177,57 +1357,11 @@ export function App(): React.JSX.Element {
       ) : null}
 
       <Composer
-        busy={state.busy}
-        // Compaction blocks input entirely: the host would reject a submit
-        // mid-compaction anyway, so don't let one be typed-and-lost.
-        disabled={chatDisabled || state.compacting}
-        models={state.models}
-        activeModel={state.activeModel}
-        activeProviderId={state.providerId}
-        usage={state.usage}
-        stats={state.busy && liveStats ? liveStats : state.stats}
-        autoApprove={state.autoApprove}
-        expandTools={state.expandTools}
-        maxReadLines={state.maxReadLines}
-        maxHistoryMessages={state.maxHistoryMessages}
+        {...sharedComposerProps}
         onSubmit={submit}
-        onCancel={cancel}
         initialDraft={composerDraftRef.current}
         initialImages={composerDraftImagesRef.current}
         onDraftChange={persistComposerDraft}
-        workspaceFiles={state.workspaceFiles}
-        fileSymbols={state.fileSymbols}
-        onRequestWorkspaceFiles={requestWorkspaceFiles}
-        onRequestFileSymbols={requestFileSymbols}
-        onNewSession={newSession}
-        onOpenModelPicker={openModelPicker}
-        onOpenImage={setPreviewImage}
-        reasoningEffortByModel={state.reasoningEffortByModel}
-        onSetReasoningEffort={setReasoningEffort}
-        thinkingCollapsed={state.thinkingCollapsed}
-        localModelAutoRefresh={state.localModelAutoRefresh}
-        lazyToolLoading={state.lazyToolLoading}
-        manageableTools={state.manageableTools}
-        disabledTools={state.disabledTools}
-        onSetDisabledTools={setDisabledTools}
-        onOpenMcpConfig={openMcpConfig}
-        onOpenPromptSettings={openPromptSettings}
-        mcpLoading={state.mcpLoading}
-        modes={state.modes}
-        activeModeId={state.activeModeId}
-        onSelectMode={selectMode}
-        onCreateMode={createMode}
-        onToggleAutoApprove={toggleAutoApprove}
-        onToggleExpandTools={toggleExpandTools}
-        onToggleThinkingCollapsed={toggleThinkingCollapsed}
-        onToggleLocalModelAutoRefresh={toggleLocalModelAutoRefresh}
-        onToggleLazyToolLoading={toggleLazyToolLoading}
-        onSetReadLimit={setReadLimit}
-        onSetHistoryLimit={setHistoryLimit}
-        autoCompactThresholdPercent={state.autoCompactThresholdPercent}
-        onSetAutoCompactThreshold={setAutoCompactThreshold}
-        compacting={state.compacting}
-        onCompact={compactSession}
       />
 
       {previewImage ? (

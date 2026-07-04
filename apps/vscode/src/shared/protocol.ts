@@ -60,6 +60,8 @@ export enum WebviewMessageType {
   SetAutoCompactThreshold = 'setAutoCompactThreshold',
   ToggleThinkingCollapsed = 'toggleThinkingCollapsed',
   ToggleLocalModelAutoRefresh = 'toggleLocalModelAutoRefresh',
+  /** Toggle the daily auto-refresh of cached model lists (off = manual only). */
+  ToggleModelAutoRefresh = 'toggleModelAutoRefresh',
   ToggleLazyToolLoading = 'toggleLazyToolLoading',
   SetDisabledTools = 'setDisabledTools',
   SelectMode = 'selectMode',
@@ -348,6 +350,11 @@ export interface ReadyMessage {
    * when false they use the same once-a-day cache as remote providers.
    */
   localModelAutoRefresh: boolean;
+  /**
+   * When true (default), cached model lists auto-refresh once a day. When
+   * false the cache is served indefinitely; only "Refresh models" refetches.
+   */
+  modelAutoRefresh: boolean;
   /**
    * Whether the `lazy_load_tools` gateway is on (default true). When false, the
    * full tool set is advertised to the model from the first turn.
@@ -667,6 +674,14 @@ export interface RetryMessage {
   type: WebviewMessageType.Retry;
   /** Id of the user message to re-send from. */
   messageId: string;
+  /**
+   * When set, the user edited the message before re-sending: this content (and
+   * `images`) is submitted instead of the original message's. Absent on a plain
+   * retry, which re-sends the original verbatim.
+   */
+  content?: string;
+  /** Images accompanying an edited re-send; only read when `content` is set. */
+  images?: WebviewImage[];
 }
 
 /** The user asked to abort the in-flight turn. */
@@ -823,6 +838,11 @@ export interface ToggleLocalModelAutoRefreshMessage {
   type: WebviewMessageType.ToggleLocalModelAutoRefresh;
 }
 
+/** The user toggled the daily auto-refresh of cached model lists. */
+export interface ToggleModelAutoRefreshMessage {
+  type: WebviewMessageType.ToggleModelAutoRefresh;
+}
+
 /** The user toggled the `lazy_load_tools` gateway (off = all tools up front). */
 export interface ToggleLazyToolLoadingMessage {
   type: WebviewMessageType.ToggleLazyToolLoading;
@@ -967,6 +987,7 @@ export type WebviewToHost =
   | SetAutoCompactThresholdMessage
   | ToggleThinkingCollapsedMessage
   | ToggleLocalModelAutoRefreshMessage
+  | ToggleModelAutoRefreshMessage
   | ToggleLazyToolLoadingMessage
   | SetDisabledToolsMessage
   | SelectModeMessage

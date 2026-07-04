@@ -116,6 +116,9 @@ export interface ComposerProps {
   /** When true, local providers refetch their model list on every load. */
   localModelAutoRefresh: boolean;
   onToggleLocalModelAutoRefresh: () => void;
+  /** When true (default), cached model lists auto-refresh once a day. */
+  modelAutoRefresh: boolean;
+  onToggleModelAutoRefresh: () => void;
   /** When true, lazy tool loading is on (off = all tools up front). */
   lazyToolLoading: boolean;
   onToggleLazyToolLoading: () => void;
@@ -1486,6 +1489,24 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         }
                         onClick={props.onToggleLocalModelAutoRefresh}
                         aria-pressed={props.localModelAutoRefresh}
+                      >
+                        <span className="toggle-knob" />
+                      </button>
+                    </div>
+                    <div className="settings-popup-row">
+                      <span className="settings-popup-label">
+                        Models auto-refresh
+                      </span>
+                      <button
+                        type="button"
+                        className={`toggle-btn ${props.modelAutoRefresh ? 'toggle-on' : ''}`}
+                        title={
+                          props.modelAutoRefresh
+                            ? 'On — cached model lists refresh daily'
+                            : 'Off — model lists only refresh manually'
+                        }
+                        onClick={props.onToggleModelAutoRefresh}
+                        aria-pressed={props.modelAutoRefresh}
                       >
                         <span className="toggle-knob" />
                       </button>

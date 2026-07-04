@@ -5,6 +5,7 @@ import { DiffView } from '@ext/webview/components/DiffView';
 import {
   CheckIcon,
   CopyIcon,
+  PencilIcon,
   RefreshIcon,
 } from '@ext/webview/components/Icons';
 import { ToolTitle } from '@ext/webview/components/ToolTitle';
@@ -33,6 +34,7 @@ export function MessageView({
   onOpenFile,
   onOpenImage,
   onRetry,
+  onEdit,
   domId,
 }: {
   message: WebviewMessage;
@@ -45,6 +47,12 @@ export function MessageView({
    * Only passed for retryable user messages (idle, current epoch).
    */
   onRetry?: () => void;
+  /**
+   * Opens an inline composer to edit this user message and re-send it,
+   * scrapping it and every message after it. Passed under the same conditions
+   * as {@link onRetry}.
+   */
+  onEdit?: () => void;
   /** DOM id for the message's root element, so the sidebar can scroll to it. */
   domId?: string;
 }): React.JSX.Element {
@@ -191,6 +199,7 @@ export function MessageView({
         ) : null}
         {timing ||
         onRetry ||
+        onEdit ||
         (message.role === WebviewRole.User && message.content) ? (
           <div className="msg-footer">
             {message.role === WebviewRole.User && message.content ? (
@@ -201,6 +210,16 @@ export function MessageView({
                 onClick={copyContent}
               >
                 {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+              </button>
+            ) : null}
+            {onEdit ? (
+              <button
+                type="button"
+                className="msg-copy-btn msg-edit-btn"
+                title="Edit and re-send from here (discards everything after this message)"
+                onClick={onEdit}
+              >
+                <PencilIcon size={13} />
               </button>
             ) : null}
             {onRetry ? (

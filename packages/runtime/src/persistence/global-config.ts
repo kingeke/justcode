@@ -46,6 +46,12 @@ export interface GlobalConfig {
    */
   localModelAutoRefresh?: boolean;
   /**
+   * When true (the default), cached model lists auto-refresh once a day. When
+   * false the cache is served indefinitely and only a manual "refresh models"
+   * refetches from the providers.
+   */
+  modelAutoRefresh?: boolean;
+  /**
    * When true (the default), lazy tool loading is on: the model is advertised
    * only the `lazy_load_tools` gateway up front and loads the rest by calling
    * it. When false, the full tool set is sent from the first turn.

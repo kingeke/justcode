@@ -43,6 +43,12 @@ export interface AppConfig {
   /** Whether local providers refetch their model list on every load (default true). */
   localModelAutoRefresh: boolean;
   /**
+   * Whether cached model lists auto-refresh once a day (default true). When
+   * false the cache never goes stale on its own; only a manual refresh
+   * refetches.
+   */
+  modelAutoRefresh: boolean;
+  /**
    * Whether lazy tool loading is on (default true): the model is shown only the
    * `lazy_load_tools` gateway up front and loads the rest by calling it. When
    * false, all tools are advertised from the first turn.
@@ -146,6 +152,7 @@ export async function loadAppConfig(
       configWithDefaults.autoCompactThresholdPercent ??
       DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT,
     localModelAutoRefresh: configWithDefaults.localModelAutoRefresh ?? true,
+    modelAutoRefresh: configWithDefaults.modelAutoRefresh ?? true,
     lazyToolLoading: configWithDefaults.lazyToolLoading ?? true,
     disabledTools: configWithDefaults.disabledTools ?? [],
     openai: {

@@ -163,6 +163,8 @@ export interface ChatState {
   thinkingCollapsed: boolean;
   /** When true (default), local providers refetch their model list every load. */
   localModelAutoRefresh: boolean;
+  /** When true (default), cached model lists auto-refresh once a day. */
+  modelAutoRefresh: boolean;
   /** Whether lazy tool loading is on (off = send all tools up front). */
   lazyToolLoading: boolean;
   /** The catalog of toggleable tools, for the manage-tools popup. */
@@ -236,6 +238,7 @@ export const initialState: ChatState = {
   compacting: false,
   thinkingCollapsed: false,
   localModelAutoRefresh: true,
+  modelAutoRefresh: true,
   lazyToolLoading: true,
   manageableTools: [],
   disabledTools: [],
@@ -254,6 +257,7 @@ export const initialState: ChatState = {
 export enum LocalActionType {
   OptimisticSubmit = 'optimisticSubmit',
   OptimisticRetry = 'optimisticRetry',
+  OptimisticEdit = 'optimisticEdit',
   DismissApproval = 'dismissApproval',
   DismissInput = 'dismissInput',
   SelectModel = 'selectModel',
@@ -262,6 +266,7 @@ export enum LocalActionType {
   ToggleExpandTools = 'toggleExpandTools',
   ToggleThinkingCollapsed = 'toggleThinkingCollapsed',
   ToggleLocalModelAutoRefresh = 'toggleLocalModelAutoRefresh',
+  ToggleModelAutoRefresh = 'toggleModelAutoRefresh',
   ToggleLazyToolLoading = 'toggleLazyToolLoading',
   SetDisabledTools = 'setDisabledTools',
   SetReadLimit = 'setReadLimit',
@@ -286,6 +291,12 @@ export type LocalAction =
       images: WebviewImage[];
     }
   | { type: LocalActionType.OptimisticRetry; messageId: string }
+  | {
+      type: LocalActionType.OptimisticEdit;
+      messageId: string;
+      content: string;
+      images: WebviewImage[];
+    }
   | { type: LocalActionType.DismissApproval }
   | { type: LocalActionType.DismissInput }
   | { type: LocalActionType.SelectModel; modelId: string; providerId: string }
@@ -299,6 +310,7 @@ export type LocalAction =
   | { type: LocalActionType.ToggleExpandTools }
   | { type: LocalActionType.ToggleThinkingCollapsed }
   | { type: LocalActionType.ToggleLocalModelAutoRefresh }
+  | { type: LocalActionType.ToggleModelAutoRefresh }
   | { type: LocalActionType.ToggleLazyToolLoading }
   | { type: LocalActionType.SetDisabledTools; names: string[] }
   | { type: LocalActionType.SetReadLimit; lines: number }
@@ -377,6 +389,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         compacting: false,
         thinkingCollapsed: action.thinkingCollapsed,
         localModelAutoRefresh: action.localModelAutoRefresh,
+        modelAutoRefresh: action.modelAutoRefresh,
         lazyToolLoading: action.lazyToolLoading,
         manageableTools: action.manageableTools,
         disabledTools: action.disabledTools,
@@ -541,6 +554,44 @@ export function reducer(state: ChatState, action: Action): ChatState {
       };
     }
 
+    // Editing-and-resending a user message scraps it and everything after it;
+    // the edited replacement shows as a fresh optimistic echo in its place.
+    case LocalActionType.OptimisticEdit: {
+      const index = state.messages.findIndex((m) => m.id === action.messageId);
+      if (index === -1) return state;
+      return {
+        ...state,
+        messages: [
+          ...state.messages.slice(0, index),
+          {
+            id: `local-${Date.now()}`,
+            role: WebviewRole.User,
+            content: action.content,
+            createdAt: new Date().toISOString(),
+            ...(action.images.length
+              ? {
+                  images: action.images.map((image) => ({
+                    mediaType: image.mediaType,
+                    data: image.data,
+                  })),
+                }
+              : {}),
+          },
+        ],
+        busy: true,
+        thinking: '',
+        thinkingDurationMs: 0,
+        thinkingStartedAt: 0,
+        streaming: '',
+        turnStartedAt: Date.now(),
+        turnFirstTokenAt: 0,
+        tools: [],
+        liveTurnItems: [],
+        completedThinkingItems: [],
+        error: undefined,
+      };
+    }
+
     case HostMessageType.Token: {
       // First answer token after thinking: commit that thinking segment inline so
       // it settles above the streaming answer instead of growing in one block.
@@ -684,6 +735,12 @@ export function reducer(state: ChatState, action: Action): ChatState {
       return {
         ...state,
         localModelAutoRefresh: !state.localModelAutoRefresh,
+      };
+
+    case LocalActionType.ToggleModelAutoRefresh:
+      return {
+        ...state,
+        modelAutoRefresh: !state.modelAutoRefresh,
       };
 
     case LocalActionType.ToggleLazyToolLoading:

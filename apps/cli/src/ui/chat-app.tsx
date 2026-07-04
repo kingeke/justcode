@@ -181,6 +181,8 @@ interface ChatAppProps {
   onAutoApproveChange?: (autoApply: boolean) => void;
   initialLocalModelAutoRefresh?: boolean;
   onLocalModelAutoRefreshChange?: (enabled: boolean) => void;
+  initialModelAutoRefresh?: boolean;
+  onModelAutoRefreshChange?: (enabled: boolean) => void;
   initialLazyToolLoading?: boolean;
   onLazyToolLoadingChange?: (enabled: boolean) => void;
   /** The toggleable tools and their startup state, for the manage-tools modal. */
@@ -382,6 +384,7 @@ function commandLineContent(
     thinkingCollapsed: boolean;
     autoApprove: boolean;
     localModelAutoRefresh: boolean;
+    modelAutoRefresh: boolean;
     lazyToolLoading: boolean;
     expandTools: boolean;
     maxReadLines: number;
@@ -419,6 +422,13 @@ function commandLineContent(
       tc('  '),
       tc(`[${state.localModelAutoRefresh ? 'on' : 'off'}]`, {
         fg: state.localModelAutoRefresh ? 'green' : 'yellow',
+      })
+    );
+  } else if (cmd.name === CommandName.ModelAutoRefresh) {
+    chunks.push(
+      tc('  '),
+      tc(`[${state.modelAutoRefresh ? 'on' : 'off'}]`, {
+        fg: state.modelAutoRefresh ? 'green' : 'yellow',
       })
     );
   } else if (cmd.name === CommandName.LazyToolLoading) {
@@ -850,6 +860,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const autoApproveRef = useRef(props.initialAutoApprove ?? false);
   const [localModelAutoRefresh, setLocalModelAutoRefresh] = useState(
     props.initialLocalModelAutoRefresh ?? true
+  );
+  const [modelAutoRefresh, setModelAutoRefresh] = useState(
+    props.initialModelAutoRefresh ?? true
   );
   const [lazyToolLoading, setLazyToolLoading] = useState(
     props.initialLazyToolLoading ?? true
@@ -2113,6 +2126,18 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           next
             ? 'Always refreshing local models'
             : 'Local models use the daily cache'
+        );
+        return;
+      }
+
+      case CommandName.ModelAutoRefresh: {
+        const next = !modelAutoRefresh;
+        setModelAutoRefresh(next);
+        props.onModelAutoRefreshChange?.(next);
+        setStatus(
+          next
+            ? 'Refreshing cached model lists daily'
+            : 'Model lists only refresh via /refresh-models'
         );
         return;
       }
@@ -3659,6 +3684,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                       thinkingCollapsed,
                       autoApprove,
                       localModelAutoRefresh,
+                      modelAutoRefresh,
                       lazyToolLoading,
                       expandTools,
                       maxReadLines,
