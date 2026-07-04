@@ -386,6 +386,7 @@ function commandLineContent(
     expandTools: boolean;
     maxReadLines: number;
     maxHistoryMessages: number;
+    autoCompactThresholdPercent: number;
     reasoning: {
       supported: boolean;
       effort: ReasoningEffort | 'off' | undefined;
@@ -441,6 +442,13 @@ function commandLineContent(
       tc('  '),
       state.maxHistoryMessages > 0
         ? tc(`[${state.maxHistoryMessages} items]`, { fg: 'green' })
+        : tc('[off]', { fg: 'yellow' })
+    );
+  } else if (cmd.name === CommandName.AutoCompact) {
+    chunks.push(
+      tc('  '),
+      state.autoCompactThresholdPercent > 0
+        ? tc(`[${state.autoCompactThresholdPercent}%]`, { fg: 'green' })
         : tc('[off]', { fg: 'yellow' })
     );
   } else if (cmd.name === CommandName.Reasoning) {
@@ -881,6 +889,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   // Auto-compact threshold (percent of the context window; 0 = off). The ref
   // mirrors the state so the post-turn check reads the current value.
   const autoCompactThresholdRef = useRef(
+    props.initialAutoCompactThresholdPercent ??
+      DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT
+  );
+  const [autoCompactThreshold, setAutoCompactThreshold] = useState(
     props.initialAutoCompactThresholdPercent ??
       DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT
   );
@@ -2072,6 +2084,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           return;
         }
         autoCompactThresholdRef.current = percent;
+        setAutoCompactThreshold(percent);
         props.onAutoCompactThresholdChange?.(percent);
         setStatus(
           percent > 0
@@ -3650,6 +3663,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                       expandTools,
                       maxReadLines,
                       maxHistoryMessages,
+                      autoCompactThresholdPercent: autoCompactThreshold,
                       reasoning: {
                         supported: Boolean(
                           activeModelInfo?.reasoning?.effortLevels.length

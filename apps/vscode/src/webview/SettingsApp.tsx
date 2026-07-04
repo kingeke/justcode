@@ -1273,7 +1273,7 @@ function McpTab({
         <button
           type="button"
           className="provider-action provider-action-primary"
-          disabled={saving || !dirty || parseError !== null}
+          disabled={saving || content === undefined || parseError !== null}
           onClick={() => onSave(draft)}
         >
           {saving ? 'Saving…' : 'Save'}
