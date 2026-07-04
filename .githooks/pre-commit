@@ -1,21 +1,21 @@
 #!/bin/sh
-# Pre-commit hook: auto-format the staged files with Prettier (folding the
-# fixes into the commit) and typecheck. Tests stay in pre-push, so commits
+# Pre-commit hook: format the WHOLE repo with Prettier and stage whatever it
+# rewrote, so the formatting fixes ride this commit and the repo can never
+# hold unformatted files. Then typecheck. Tests stay in pre-push, so commits
 # remain quick. Bypass with `git commit --no-verify` when needed.
 #
-# Note: a partially staged file (git add -p) gets fully re-staged after
-# formatting — Prettier rewrites the whole file on disk.
+# Trade-off (deliberate): a file Prettier reformats is staged in full, even if
+# it wasn't part of this commit — repo-wide cleanliness over commit purity.
 
 set -e
 
-# Format only the files in this commit, then re-stage them — the re-stage is
-# what folds the fixes into the commit being created (no second commit, and no
-# unrelated files swept in).
-files=$(git diff --cached --name-only --diff-filter=ACMR)
-if [ -n "$files" ]; then
-  echo "▶ Formatting staged files with Prettier..."
-  printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 bun run prettier --write --ignore-unknown --log-level warn --
-  printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 git add --
+echo "▶ Formatting with Prettier..."
+# The direct binary (not `bun run`) so stdout is only the list of files
+# Prettier actually rewrote, which is exactly what gets staged.
+changed=$(node_modules/.bin/prettier --write --list-different --log-level warn .)
+if [ -n "$changed" ]; then
+  printf '%s\n' "$changed" | tr '\n' '\0' | xargs -0 git add --
+  echo "  formatted and staged: $changed"
 fi
 
 echo "▶ Running typecheck..."
