@@ -14,6 +14,7 @@ import type { ProviderId } from '@core/ports/provider-catalog';
 import { createRuntimeServices } from '@runtime/bootstrap/create-services';
 import { DEFAULT_MAX_READ_LINES } from '@runtime/tools/read-file-tool';
 import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
+import { DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT } from '@core/application/compact-prompt';
 import { loadAppConfig, parseProviderId } from '@runtime/config/app-config';
 import {
   readGlobalConfig,
@@ -349,6 +350,9 @@ async function runChat(options: SharedOptions): Promise<void> {
         savedConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES,
       initialMaxHistoryMessages:
         savedConfig.cache?.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES,
+      initialAutoCompactThresholdPercent:
+        savedConfig.autoCompactThresholdPercent ??
+        DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT,
       ...(savedConfig.reasoningEffortByModel
         ? { initialReasoningEffortByModel: savedConfig.reasoningEffortByModel }
         : {}),
@@ -387,6 +391,9 @@ async function runChat(options: SharedOptions): Promise<void> {
         persistConfig({
           cache: { ...currentConfig.cache, maxHistoryMessages: count },
         });
+      },
+      onAutoCompactThresholdChange: (percent: number) => {
+        persistConfig({ autoCompactThresholdPercent: percent });
       },
       onReasoningEffortChange: (providerId, modelId, effort) => {
         persistConfig({

@@ -43,6 +43,11 @@ import {
   renderHistoryWindow,
   selectRecentMessages,
 } from '@core/application/history-window';
+import {
+  DEFAULT_COMPACT_PROMPT,
+  buildCompactSummaryContent,
+  extractCompactSummary,
+} from '@core/application/compact-prompt';
 import { parseLazyLoadArguments } from '@core/application/lazy-tool-arguments';
 
 const SESSION_TITLE_SYSTEM_PROMPT = [
@@ -160,6 +165,23 @@ export interface SubmitMessageResult {
   usage?: TokenUsage;
 }
 
+export interface CompactSessionInput {
+  conversation: Conversation;
+  model: string;
+  /** Same semantics as {@link SubmitMessageInput.reasoningEffort}. */
+  reasoningEffort?: ReasoningEffortChoice;
+  signal?: AbortSignal;
+  /** Streams the summary as it generates so hosts can show progress. */
+  onToken?: (token: string) => void;
+}
+
+export interface CompactSessionResult {
+  conversation: Conversation;
+  summary: string;
+  /** Usage of the summarization call, for hosts to fold into their metrics. */
+  usage?: TokenUsage;
+}
+
 export interface ChatSessionOptions {
   toolRegistry?: ToolRegistry;
   workspaceRoot?: string;
@@ -202,6 +224,12 @@ export interface ChatSessionOptions {
    */
   getDisabledToolNames?: () => string[];
   /**
+   * Returns the summarization prompt injected (as a user message) by
+   * {@link ChatSessionService.compactSession}. Read per call so a config edit
+   * takes effect immediately. Falls back to the built-in default when unset.
+   */
+  getCompactPrompt?: () => string;
+  /**
    * Returns names of tools to advertise up front even under lazy loading — i.e.
    * alongside the `lazy_load_tools` gateway before the model has loaded the full
    * set. Lets a host make a specific tool reachable from the first turn without
@@ -223,6 +251,7 @@ export class ChatSessionService {
   private readonly getSystemPrompt: () => string;
   private readonly describeToolsInSystemPrompt: boolean;
   private readonly getMaxHistoryMessages: () => number;
+  private readonly getCompactPrompt: () => string;
   private readonly getLazyToolLoadingEnabled: () => boolean;
   private readonly getDisabledToolNames: () => string[];
   private readonly getEagerlyAdvertisedToolNames: () => string[];
@@ -251,6 +280,8 @@ export class ChatSessionService {
       options.describeToolsInSystemPrompt ?? false;
     this.getMaxHistoryMessages =
       options.getMaxHistoryMessages ?? (() => DEFAULT_MAX_HISTORY_MESSAGES);
+    this.getCompactPrompt =
+      options.getCompactPrompt ?? (() => DEFAULT_COMPACT_PROMPT);
     this.getLazyToolLoadingEnabled =
       options.getLazyToolLoadingEnabled ?? (() => true);
     this.getDisabledToolNames = options.getDisabledToolNames ?? (() => []);
@@ -354,6 +385,95 @@ export class ChatSessionService {
     } catch {
       // Ignore: losing a stats update only costs a footer readout on reload.
     }
+  }
+
+  /**
+   * Compacts a conversation: asks the model to summarize the whole exchange,
+   * then moves the current messages into `previousMessages` and restarts
+   * `messages` with a single flagged user message carrying the summary. The
+   * request mirrors a normal turn's shape — same system prompt, then history —
+   * with the compaction prompt appended as a *user* message and **no tools**,
+   * so the provider's prompt cache still covers the shared prefix. The injected
+   * prompt itself is never persisted. Nothing is saved until the summary
+   * arrives, so an abort or provider error leaves the conversation untouched.
+   */
+  public async compactSession(
+    input: CompactSessionInput
+  ): Promise<CompactSessionResult> {
+    const { conversation } = input;
+    const [firstMessage] = conversation.messages;
+    if (
+      conversation.messages.length === 0 ||
+      (conversation.messages.length === 1 && firstMessage?.isCompactSummary)
+    ) {
+      throw new Error('There is nothing new to compact in this conversation.');
+    }
+
+    const systemMessage = createMessage(
+      'system',
+      buildSystemPrompt(
+        this.getSystemPrompt(),
+        this.workspaceRoot,
+        [],
+        await this.loadProjectInstructions()
+      )
+    );
+    const history = selectRecentMessages(
+      conversation.messages,
+      Math.floor(this.getMaxHistoryMessages())
+    );
+    const compactMessage = createMessage('user', this.getCompactPrompt());
+
+    // Reasoning is deliberately not disabled here (unlike title generation):
+    // summarizing a long session benefits from deliberation, and the host
+    // passes the same effort it uses for normal turns.
+    const response = await this.provider.sendChat({
+      model: input.model,
+      sessionId: conversation.sessionId,
+      messages: [systemMessage, ...history, compactMessage],
+      ...(input.reasoningEffort
+        ? { reasoningEffort: input.reasoningEffort }
+        : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
+      ...(input.onToken ? { onToken: input.onToken } : {}),
+    });
+
+    // Keep only the usable summary: legacy/tag-style replies get their
+    // <analysis> scratch dropped and <summary> unwrapped, so scratch work
+    // never rides along in every future request.
+    const summary = extractCompactSummary(response.content);
+    if (!summary) {
+      throw new Error('Compaction produced an empty summary.');
+    }
+
+    const summaryMessage = createMessage(
+      'user',
+      buildCompactSummaryContent(summary),
+      new Date(),
+      undefined,
+      { isCompactSummary: true }
+    );
+    const compacted: Conversation = {
+      ...conversation,
+      previousMessages: [
+        ...(conversation.previousMessages ?? []),
+        ...conversation.messages,
+      ],
+      messages: [summaryMessage],
+      // Reset the ctx readout so auto-compact doesn't refire off the
+      // pre-compaction measurement; the next turn's usage restores a real value.
+      ...(conversation.stats
+        ? { stats: { ...conversation.stats, lastInputTokens: 0 } }
+        : {}),
+      updatedAt: new Date().toISOString(),
+    };
+    await this.repository.save(compacted);
+
+    return {
+      conversation: compacted,
+      summary,
+      ...(response.usage ? { usage: response.usage } : {}),
+    };
   }
 
   public async submitMessage(

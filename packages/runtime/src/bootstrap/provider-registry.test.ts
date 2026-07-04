@@ -13,6 +13,8 @@ function baseConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     systemPrompt: '',
     askSystemPrompt: '',
     planSystemPrompt: '',
+    compactPrompt: '',
+    autoCompactThresholdPercent: 80,
     localModelAutoRefresh: true,
     lazyToolLoading: true,
     disabledTools: [],

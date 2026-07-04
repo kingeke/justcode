@@ -13,6 +13,16 @@ describe('commands', () => {
     expect(isCommandName('not-a-command')).toBe(false);
   });
 
+  it('registers the compaction commands', () => {
+    expect(isCommandName(CommandName.Compact)).toBe(true);
+    expect(isCommandName(CommandName.AutoCompact)).toBe(true);
+    // "/compact" must rank the exact name over auto-compact's substring match.
+    expect(filterCommands('compact')[0]?.name).toBe(CommandName.Compact);
+    expect(filterCommands('auto-compact')[0]?.name).toBe(
+      CommandName.AutoCompact
+    );
+  });
+
   it('ranks prefix matches ahead of fuzzy matches', () => {
     // Whole-name prefix matches come first, in declaration order; segment/
     // substring matches (e.g. "refresh" in local-model-refresh) follow.

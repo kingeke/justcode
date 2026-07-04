@@ -22,6 +22,8 @@ export enum CommandName {
   ReadLimit = 'read-limit',
   ContextWindow = 'context-window',
   ContextUsage = 'context-usage',
+  Compact = 'compact',
+  AutoCompact = 'auto-compact',
   Config = 'config',
   Reset = 'reset',
 }
@@ -125,6 +127,15 @@ export const COMMANDS: Command[] = [
   {
     name: CommandName.ContextUsage,
     description: "Show how much of the model's context window is used",
+  },
+  {
+    name: CommandName.Compact,
+    description: 'Summarize the conversation and free up context',
+  },
+  {
+    name: CommandName.AutoCompact,
+    description:
+      'Set the auto-compact threshold, e.g. /auto-compact 80 or /auto-compact off',
   },
   {
     name: CommandName.Config,

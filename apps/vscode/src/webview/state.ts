@@ -119,6 +119,8 @@ export interface ChatState {
   /** Providers whose model list couldn't be fetched, shown in the picker. */
   providerErrors: WebviewProviderError[];
   notice?: string | undefined;
+  /** When set, the notice self-dismisses after this many ms (see App effect). */
+  noticeTimeoutMs?: number | undefined;
   messages: WebviewMessage[];
   busy: boolean;
   thinking: string;
@@ -149,6 +151,14 @@ export interface ChatState {
   maxReadLines: number;
   /** Recent context window items sent to the model per request; 0 means "off" (send all). */
   maxHistoryMessages: number;
+  /** Auto-compact when ctx usage reaches this percent of the window; 0 = off. */
+  autoCompactThresholdPercent: number;
+  /** True while the host is summarizing the conversation (compaction). */
+  compacting: boolean;
+  /** Rough size of the summary streamed so far during compaction (chars/4). */
+  compactTokens?: number | undefined;
+  /** Estimated compaction progress percent (capped at 99); see protocol note. */
+  compactPercent?: number | undefined;
   /** When true, thinking blocks start collapsed (user must click to expand). */
   thinkingCollapsed: boolean;
   /** When true (default), local providers refetch their model list every load. */
@@ -222,6 +232,8 @@ export const initialState: ChatState = {
   expandTools: false,
   maxReadLines: 200,
   maxHistoryMessages: 50,
+  autoCompactThresholdPercent: 80,
+  compacting: false,
   thinkingCollapsed: false,
   localModelAutoRefresh: true,
   lazyToolLoading: true,
@@ -253,6 +265,7 @@ export enum LocalActionType {
   SetDisabledTools = 'setDisabledTools',
   SetReadLimit = 'setReadLimit',
   SetHistoryLimit = 'setHistoryLimit',
+  SetAutoCompactThreshold = 'setAutoCompactThreshold',
   SetView = 'setView',
   ToggleCollapseResponses = 'toggleCollapseResponses',
   ToggleConversationSidebar = 'toggleConversationSidebar',
@@ -288,6 +301,7 @@ export type LocalAction =
   | { type: LocalActionType.SetDisabledTools; names: string[] }
   | { type: LocalActionType.SetReadLimit; lines: number }
   | { type: LocalActionType.SetHistoryLimit; count: number }
+  | { type: LocalActionType.SetAutoCompactThreshold; percent: number }
   | { type: LocalActionType.SetView; view: ChatView }
   | { type: LocalActionType.ToggleCollapseResponses }
   | { type: LocalActionType.ToggleConversationSidebar }
@@ -357,6 +371,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
         expandTools: action.expandTools,
         maxReadLines: action.maxReadLines,
         maxHistoryMessages: action.maxHistoryMessages,
+        autoCompactThresholdPercent: action.autoCompactThresholdPercent,
+        compacting: false,
         thinkingCollapsed: action.thinkingCollapsed,
         localModelAutoRefresh: action.localModelAutoRefresh,
         lazyToolLoading: action.lazyToolLoading,
@@ -392,7 +408,20 @@ export function reducer(state: ChatState, action: Action): ChatState {
       };
 
     case HostMessageType.Notice:
-      return { ...state, notice: action.notice };
+      return {
+        ...state,
+        notice: action.notice,
+        noticeTimeoutMs: action.timeoutMs,
+      };
+
+    case HostMessageType.CompactStatus:
+      return {
+        ...state,
+        compacting: action.running,
+        compactTokens: action.running ? action.tokens : undefined,
+        compactPercent: action.running ? action.percent : undefined,
+        ...(action.error ? { error: action.error } : {}),
+      };
 
     case HostMessageType.ModelsUpdate:
       return {
@@ -643,6 +672,9 @@ export function reducer(state: ChatState, action: Action): ChatState {
 
     case LocalActionType.SetHistoryLimit:
       return { ...state, maxHistoryMessages: action.count };
+
+    case LocalActionType.SetAutoCompactThreshold:
+      return { ...state, autoCompactThresholdPercent: action.percent };
 
     case LocalActionType.SetView:
       return { ...state, view: action.view };

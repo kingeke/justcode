@@ -88,7 +88,11 @@ export class FileConversationRepository implements ConversationRepository {
       ...(conversation.title ? { title: conversation.title } : {}),
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
-      messageCount: conversation.messages.length,
+      // Count compacted-away messages too, so a freshly compacted session
+      // doesn't list as a near-empty one.
+      messageCount:
+        conversation.messages.length +
+        (conversation.previousMessages?.length ?? 0),
     };
     await writeFile(
       this.getFilePath(conversation.sessionId),

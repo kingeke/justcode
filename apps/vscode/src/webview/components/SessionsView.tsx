@@ -3,18 +3,12 @@ import * as React from 'react';
 import type { WebviewSessionSummary } from '@ext/shared/protocol';
 import { PencilIcon, PlusIcon, TrashIcon } from '@ext/webview/components/Icons';
 import { logoUri } from '@ext/webview/vscode-api';
-
-function relativeTime(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
-}
+import {
+  SESSION_GROUPS,
+  relativeTime,
+  sessionGroupFor,
+  type SessionGroup,
+} from '@ext/webview/session-groups';
 
 interface SessionsViewProps {
   loading: boolean;
@@ -42,6 +36,20 @@ export function SessionsView({
   // The session whose title is being edited inline, and the working text.
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [draftTitle, setDraftTitle] = React.useState('');
+  // Recency groups the user folded shut. Ignored while searching, so a query
+  // always surfaces every match.
+  const [collapsedGroups, setCollapsedGroups] = React.useState<
+    Set<SessionGroup>
+  >(() => new Set());
+
+  const toggleGroup = (group: SessionGroup): void => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  };
   // The session being opened in the host; its row shows a spinner instead of
   // the rename/delete actions until the view switches (unmounting us).
   const [openingId, setOpeningId] = React.useState<string | null>(null);
@@ -77,6 +85,12 @@ export function SessionsView({
           .includes(trimmedQuery)
       )
     : sessions;
+  const groupedSessions = SESSION_GROUPS.map((group) => ({
+    group,
+    sessions: filteredSessions.filter(
+      (session) => sessionGroupFor(session.updatedAt) === group
+    ),
+  })).filter((bucket) => bucket.sessions.length > 0);
 
   return (
     <div className="sessions-view">
@@ -132,7 +146,23 @@ export function SessionsView({
         ) : filteredSessions.length === 0 ? (
           <div className="sessions-empty">No sessions match “{query}”.</div>
         ) : (
-          filteredSessions.map((session) => {
+          groupedSessions.map(({ group, sessions: groupSessions }) => {
+            const folded = !trimmedQuery && collapsedGroups.has(group);
+            return (
+              <React.Fragment key={group}>
+                <button
+                  type="button"
+                  className="sessions-group"
+                  title={folded ? 'Expand' : 'Collapse'}
+                  aria-expanded={!folded}
+                  onClick={() => toggleGroup(group)}
+                >
+                  <span aria-hidden="true">{folded ? '▸' : '▾'}</span> {group} (
+                  {groupSessions.length})
+                </button>
+                {folded
+                  ? null
+                  : groupSessions.map((session) => {
             const isActive = session.sessionId === activeSessionId;
             const isEditing = session.sessionId === editingId;
             const isOpening = session.sessionId === openingId;
@@ -211,6 +241,9 @@ export function SessionsView({
                   </>
                 )}
               </div>
+            );
+          })}
+              </React.Fragment>
             );
           })
         )}

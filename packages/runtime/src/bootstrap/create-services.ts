@@ -99,6 +99,11 @@ export interface RuntimeServices {
    */
   setSystemPrompt: (prompt: string) => void;
   /**
+   * Replace the compaction summarization prompt, used when the user edits it in
+   * settings. Read per compaction, so it takes effect on the next `/compact`.
+   */
+  setCompactPrompt: (prompt: string) => void;
+  /**
    * Replace the tool names advertised up front even under lazy loading. The host
    * sets this per chat mode (e.g. `['present_plan']` in Plan mode, `[]` in
    * others) so a mode-specific tool is callable from the first turn. Read per
@@ -210,6 +215,9 @@ export async function createRuntimeServices(
   // the active mode's prompt and calls `setSystemPrompt`; until then it's the
   // configured base (the Build/agent prompt).
   const systemPromptSetting = { value: config.systemPrompt };
+  // Mutable so a compact-prompt edit (settings UI / config reload) reaches the
+  // chat session: it reads `compactPromptSetting.value` per compaction.
+  const compactPromptSetting = { value: config.compactPrompt };
   // Tool names to advertise up front even under lazy loading (the host sets this
   // per mode — e.g. `present_plan` in Plan mode — so a mode-specific tool is
   // reachable from the first turn without loading the whole toolset).
@@ -342,6 +350,7 @@ export async function createRuntimeServices(
       workspaceRoot,
       workspaceFiles,
       getSystemPrompt: () => systemPromptSetting.value,
+      getCompactPrompt: () => compactPromptSetting.value,
       getMaxHistoryMessages: () => historySettings.maxHistoryMessages,
       getLazyToolLoadingEnabled: () => lazyToolLoadingSettings.enabled,
       getDisabledToolNames: () => disabledToolsSettings.names,
@@ -379,6 +388,9 @@ export async function createRuntimeServices(
     },
     setSystemPrompt: (prompt: string) => {
       systemPromptSetting.value = prompt;
+    },
+    setCompactPrompt: (prompt: string) => {
+      compactPromptSetting.value = prompt;
     },
     setEagerlyAdvertisedTools: (names: string[]) => {
       eagerToolsSetting.names = names;

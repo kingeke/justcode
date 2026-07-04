@@ -24,7 +24,10 @@ export function modeGlyph(icon: ModeIcon): string {
     case 'ask':
       return '?';
     case 'plan':
-      return '☰';
+      // U+2261 (identical to), not U+2630 (trigram): the trigram has patchy
+      // monospace coverage and often draws wider than the single cell the
+      // layout engine reserves, bleeding into the next glyph.
+      return '≡';
     case 'custom':
       return '✦';
   }

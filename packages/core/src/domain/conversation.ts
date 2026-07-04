@@ -35,6 +35,13 @@ export interface Conversation {
   sessionId: string;
   title?: string;
   messages: ChatMessage[];
+  /**
+   * Message histories of prior compaction epochs, oldest first. Every
+   * compaction appends the then-current `messages` here before resetting
+   * `messages` to the summary. Never sent to the model — UIs render these
+   * above the active messages so the full transcript stays visible.
+   */
+  previousMessages?: ChatMessage[];
   createdAt: string;
   updatedAt: string;
   /** Footer metrics carried across reloads; absent for pre-stats sessions. */

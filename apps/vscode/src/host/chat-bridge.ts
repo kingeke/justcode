@@ -39,6 +39,12 @@ import {
 import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
 import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
 import {
+  DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT,
+  DEFAULT_COMPACT_PROMPT,
+  DEFAULT_EXPECTED_SUMMARY_TOKENS,
+  compactProgressPercent,
+} from '@core/application/compact-prompt';
+import {
   readGlobalConfig,
   writeGlobalConfig,
   type GlobalConfig,
@@ -162,6 +168,19 @@ export class ChatBridge {
   private maxReadLines = DEFAULT_MAX_READ_LINES;
   // 0 means "off" — the full conversation is sent without trimming.
   private maxHistoryMessages = DEFAULT_MAX_HISTORY_MESSAGES;
+  // Auto-compact when the last request used at least this percent of the
+  // model's context window; 0 turns it off. Checked after each completed turn.
+  private autoCompactThresholdPercent = DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT;
+  // Guards re-entry: a compaction is a model call of its own, so a second
+  // trigger while one runs (or while a turn runs) must be ignored.
+  private compacting = false;
+  // The last "auto-compact is close" milestone warned (5/3/2/1 points left),
+  // so each milestone posts one notice instead of re-warning every turn.
+  // Reset when the pressure drops (compaction, metrics reset).
+  private autoCompactWarnedMilestone: number | null = null;
+  // Expected summary size for the compaction progress percentage: seeded with
+  // the default, replaced by each compaction's actual summary size.
+  private expectedSummaryTokens = DEFAULT_EXPECTED_SUMMARY_TOKENS;
   private thinkingCollapsed = false;
   // When true (default), local providers refetch their model list every load;
   // when false they use the once-a-day cache. Applied to the live runtime via
@@ -323,12 +342,19 @@ export class ChatBridge {
         );
         return;
       case WebviewMessageType.NewSession:
+        if (this.refuseNavigationWhileCompacting()) return;
         await this.resetSession();
         return;
       case WebviewMessageType.ListSessions:
-        await this.sendSessionsList();
+        // Data-only refreshes are always fine; leaving the chat view is not
+        // while a compaction runs (its progress/result would land on whatever
+        // session the user wandered into).
+        if ((message.focus ?? true) && this.refuseNavigationWhileCompacting())
+          return;
+        await this.sendSessionsList(message.focus ?? true);
         return;
       case WebviewMessageType.OpenSession:
+        if (this.refuseNavigationWhileCompacting()) return;
         await this.openSession(message.sessionId);
         return;
       case WebviewMessageType.RenameSession:
@@ -351,6 +377,12 @@ export class ChatBridge {
         return;
       case WebviewMessageType.SetHistoryLimit:
         await this.setHistoryLimit(message.count);
+        return;
+      case WebviewMessageType.CompactSession:
+        await this.compactSession();
+        return;
+      case WebviewMessageType.SetAutoCompactThreshold:
+        await this.setAutoCompactThreshold(message.percent);
         return;
       case WebviewMessageType.ToggleThinkingCollapsed:
         await this.toggleThinkingCollapsed();
@@ -474,6 +506,9 @@ export class ChatBridge {
       globalConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES;
     this.maxHistoryMessages =
       globalConfig.cache?.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES;
+    this.autoCompactThresholdPercent =
+      globalConfig.autoCompactThresholdPercent ??
+      DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT;
     this.thinkingCollapsed = globalConfig.thinkingCollapsed ?? false;
     this.localModelAutoRefresh = globalConfig.localModelAutoRefresh ?? true;
     this.lazyToolLoading = globalConfig.lazyToolLoading ?? true;
@@ -524,6 +559,7 @@ export class ChatBridge {
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
+        autoCompactThresholdPercent: this.autoCompactThresholdPercent,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         lazyToolLoading: this.lazyToolLoading,
@@ -584,6 +620,7 @@ export class ChatBridge {
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
+        autoCompactThresholdPercent: this.autoCompactThresholdPercent,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         lazyToolLoading: this.lazyToolLoading,
@@ -647,6 +684,7 @@ export class ChatBridge {
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
+        autoCompactThresholdPercent: this.autoCompactThresholdPercent,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         lazyToolLoading: this.lazyToolLoading,
@@ -711,6 +749,7 @@ export class ChatBridge {
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
+        autoCompactThresholdPercent: this.autoCompactThresholdPercent,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         lazyToolLoading: this.lazyToolLoading,
@@ -857,10 +896,12 @@ export class ChatBridge {
     content: string,
     images?: WebviewImage[]
   ): Promise<void> {
-    if (this.abortController) {
+    if (this.abortController || this.compacting) {
       this.post({
         type: HostMessageType.Error,
-        message: 'A turn is already in progress.',
+        message: this.compacting
+          ? 'Compaction is in progress — try again when it finishes.'
+          : 'A turn is already in progress.',
       });
       return;
     }
@@ -904,6 +945,9 @@ export class ChatBridge {
     let streamedContent = '';
     let streamedThinking = '';
     let thinkingStartMs = 0;
+    // Set on turn success so the auto-compact check after the finally (it must
+    // run once the abort controller is released) knows the turn completed.
+    let turnSucceeded = false;
 
     try {
       const reasoningEffort = this.effectiveEffortForActiveModel();
@@ -1031,6 +1075,7 @@ export class ChatBridge {
         ...(hasUsage ? { usage: this.usageSnapshot() } : {}),
         ...(stats ? { stats } : {}),
       });
+      turnSucceeded = true;
     } catch (error) {
       const aborted = isAbortError(error);
       if (aborted && this.conversation) {
@@ -1139,6 +1184,45 @@ export class ChatBridge {
       // clears once the turn finishes.
       void this.sendSessionsList(false);
     }
+
+    // Auto-compact: when this turn's request used at least the configured share
+    // of the model's context window, compact now so the next message starts
+    // from the summary. Only after a successful turn — never mid-turn or off an
+    // interrupted one — and only when the model reports its window size. Within
+    // 5 points below the threshold, warn instead (once per milestone: 5/3/2/1
+    // points left), so the compaction pause never comes as a surprise.
+    const contextWindow = this.models.find(
+      (m) => m.id === this.activeModel
+    )?.contextWindow;
+    if (
+      turnSucceeded &&
+      this.autoCompactThresholdPercent > 0 &&
+      contextWindow != null &&
+      contextWindow > 0
+    ) {
+      const threshold = this.autoCompactThresholdPercent;
+      const pct = Math.min(
+        100,
+        Math.round((this.lastInputTokens / contextWindow) * 100)
+      );
+      if (pct >= threshold) {
+        await this.compactSession();
+      } else {
+        const milestone = autoCompactWarnMilestone(threshold - pct);
+        if (
+          milestone !== null &&
+          (this.autoCompactWarnedMilestone === null ||
+            milestone < this.autoCompactWarnedMilestone)
+        ) {
+          this.autoCompactWarnedMilestone = milestone;
+          this.post({
+            type: HostMessageType.Notice,
+            notice: `Context ${pct}% full — auto-compact triggers at >=${threshold}%.`,
+            timeoutMs: 5000,
+          });
+        }
+      }
+    }
   }
 
   /**
@@ -1189,6 +1273,7 @@ export class ChatBridge {
     this.avgTokensPerSecond = 0;
     this.completedTurnCount = 0;
     this.lastInputTokens = 0;
+    this.autoCompactWarnedMilestone = null;
     this.lastTurnStats = undefined;
     this.toolViewsByCallId.clear();
     this.capturedDeletions.clear();
@@ -1544,6 +1629,7 @@ export class ChatBridge {
           expandTools: this.expandTools,
           maxReadLines: this.maxReadLines,
           maxHistoryMessages: this.maxHistoryMessages,
+          autoCompactThresholdPercent: this.autoCompactThresholdPercent,
           thinkingCollapsed: this.thinkingCollapsed,
           localModelAutoRefresh: this.localModelAutoRefresh,
           lazyToolLoading: this.lazyToolLoading,
@@ -1614,13 +1700,17 @@ export class ChatBridge {
 
     // If the deleted session was the one loaded, drop it so reopening the chat
     // starts fresh rather than resurrecting the cleared conversation.
-    if (sessionId === this.sessionId) {
+    const wasCurrent = sessionId === this.sessionId;
+    if (wasCurrent) {
       this.sessionId = randomUUID();
       this.conversation = undefined;
       this.resetMetrics();
     }
 
-    await this.sendSessionsList();
+    // Deleting the open session leaves nothing to show, so navigate to the
+    // sessions list; deleting any other (e.g. from the header's session
+    // switcher) just refreshes the data without yanking the user out of chat.
+    await this.sendSessionsList(wasCurrent);
   }
 
   private async renameSession(sessionId: string, title: string): Promise<void> {
@@ -1829,6 +1919,160 @@ export class ChatBridge {
     });
   }
 
+  /**
+   * While a compaction runs the user stays in the compacting session — its
+   * progress and result must land where they started. Returns true (and posts
+   * a transient notice) when navigation should be refused.
+   */
+  private refuseNavigationWhileCompacting(): boolean {
+    if (!this.compacting) return false;
+    this.post({
+      type: HostMessageType.Notice,
+      notice:
+        'Compaction in progress — wait for it to finish, or stop it first.',
+      timeoutMs: 5000,
+    });
+    return true;
+  }
+
+  /** 0 turns auto-compact off; otherwise the percent of the window that triggers it. */
+  private async setAutoCompactThreshold(percent: number): Promise<void> {
+    this.autoCompactThresholdPercent = percent;
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      autoCompactThresholdPercent: percent,
+    });
+  }
+
+  /**
+   * Summarizes the conversation and swaps it for the compacted one (the old
+   * messages move to `previousMessages`; the transcript keeps showing them
+   * above a divider). Skipped while a turn or another compaction runs. On
+   * success the refreshed transcript rides a TurnComplete; on failure the
+   * conversation is untouched and the error rides the final CompactStatus.
+   */
+  private async compactSession(): Promise<void> {
+    if (this.compacting || this.abortController) return;
+    const services = await this.ensureServices();
+    if (!this.conversation || !this.activeModel) return;
+    const [firstMessage] = this.conversation.messages;
+    if (
+      this.conversation.messages.length === 0 ||
+      (this.conversation.messages.length === 1 &&
+        firstMessage?.isCompactSummary)
+    ) {
+      this.post({
+        type: HostMessageType.Notice,
+        notice: 'Nothing to compact yet.',
+        timeoutMs: 5000,
+      });
+      return;
+    }
+
+    this.compacting = true;
+    // Compaction takes the same abort slot as a turn, so the webview's Stop
+    // button (a Cancel message) tears it down exactly like an in-flight turn.
+    // Nothing is saved until the summary lands, so a cancel is always safe.
+    const abortController = new AbortController();
+    this.abortController = abortController;
+    // If the user navigates to another session while this runs, the result
+    // must not be painted onto (or adopted as) that other conversation.
+    const compactingSessionId = this.conversation.sessionId;
+    this.post({ type: HostMessageType.CompactStatus, running: true });
+    try {
+      const reasoningEffort = this.effectiveEffortForActiveModel();
+      // The summary streams like any reply; push its rough size periodically
+      // so the UI's indeterminate bar has a live "how much so far" label.
+      let summaryChars = 0;
+      let lastProgressPost = 0;
+      const result = await services.chatSessionService.compactSession({
+        conversation: this.conversation,
+        model: this.activeModel,
+        signal: abortController.signal,
+        ...(reasoningEffort
+          ? { reasoningEffort: reasoningEffort as ReasoningEffortChoice }
+          : {}),
+        onToken: (token) => {
+          summaryChars += token.length;
+          const now = Date.now();
+          if (now - lastProgressPost < 250) return;
+          lastProgressPost = now;
+          const tokens = Math.max(1, Math.round(summaryChars / 4));
+          this.post({
+            type: HostMessageType.CompactStatus,
+            running: true,
+            tokens,
+            percent: compactProgressPercent(
+              tokens,
+              this.expectedSummaryTokens
+            ),
+          });
+        },
+      });
+      // The compacted conversation is already saved to disk; only adopt it in
+      // memory (and refresh the transcript) if this session is still the one
+      // showing. Reopening it later loads the compacted state from disk.
+      if (this.conversation?.sessionId !== compactingSessionId) {
+        this.post({ type: HostMessageType.CompactStatus, running: false });
+        return;
+      }
+      this.conversation = result.conversation;
+      // The summarization call is a real request: fold its usage into the
+      // session totals, but zero the ctx readout — the next turn starts from
+      // the compact summary (this also keeps auto-compact from refiring).
+      if (result.usage) {
+        this.accumulateUsage(result.usage);
+      }
+      this.lastInputTokens = 0;
+      // Pressure has dropped back to zero; re-arm the approach warnings, and
+      // remember this summary's size as the next compaction's 100% estimate.
+      this.autoCompactWarnedMilestone = null;
+      this.expectedSummaryTokens = Math.max(
+        1,
+        Math.round(result.summary.length / 4)
+      );
+      this.persistSessionStats(services);
+      this.post({
+        type: HostMessageType.TurnComplete,
+        messages: await toWebviewMessages(
+          this.conversation,
+          services,
+          this.toolViewsByCallId
+        ),
+        ...(this.cumulativeUsage.inputTokens > 0 ||
+        this.cumulativeUsage.outputTokens > 0
+          ? { usage: this.usageSnapshot() }
+          : {}),
+      });
+      this.post({ type: HostMessageType.CompactStatus, running: false });
+    } catch (error) {
+      if (isAbortError(error)) {
+        // Cancelled by the user: nothing was saved, the conversation is
+        // exactly as it was — no error to surface, just a gentle notice.
+        this.post({ type: HostMessageType.CompactStatus, running: false });
+        this.post({
+          type: HostMessageType.Notice,
+          notice: 'Compaction cancelled.',
+          timeoutMs: 5000,
+        });
+      } else {
+        this.post({
+          type: HostMessageType.CompactStatus,
+          running: false,
+          error: errorMessage(error),
+        });
+      }
+    } finally {
+      this.compacting = false;
+      // Only release the slot if it's still ours — never clobber a turn's.
+      if (this.abortController === abortController) {
+        this.abortController = undefined;
+      }
+    }
+  }
+
   private async toggleThinkingCollapsed(): Promise<void> {
     this.thinkingCollapsed = !this.thinkingCollapsed;
     const configDir = cacheDirectory();
@@ -1996,6 +2240,10 @@ export class ChatBridge {
     this.agentPrompt = config.systemPrompt;
     this.askPrompt = config.askSystemPrompt;
     this.planPrompt = config.planSystemPrompt;
+    // An edited compaction prompt applies to the next /compact immediately.
+    this.services?.setCompactPrompt(
+      config.compactPrompt ?? DEFAULT_COMPACT_PROMPT
+    );
     this.customModesConfig = config.customModes ?? {};
     this.modes = listModes(this.customModesConfig);
     if (!isKnownMode(this.activeModeId, this.customModesConfig)) {
@@ -2189,6 +2437,7 @@ export class ChatBridge {
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
         maxHistoryMessages: this.maxHistoryMessages,
+        autoCompactThresholdPercent: this.autoCompactThresholdPercent,
         thinkingCollapsed: this.thinkingCollapsed,
         localModelAutoRefresh: this.localModelAutoRefresh,
         lazyToolLoading: this.lazyToolLoading,
@@ -2357,7 +2606,12 @@ export async function toWebviewMessages(
 ): Promise<WebviewMessage[]> {
   const result: WebviewMessage[] = [];
   const toolViewsByCallId = new Map<string, WebviewToolView>();
-  for (const message of conversation.messages) {
+  // Compacted-away epochs render first, so the full transcript stays visible;
+  // the flagged summary message that opens each new epoch draws the divider.
+  for (const message of [
+    ...(conversation.previousMessages ?? []),
+    ...conversation.messages,
+  ]) {
     if (message.role === 'system') continue;
     if (message.role === 'assistant' && message.toolCalls?.length && services) {
       for (const toolCall of message.toolCalls) {
@@ -2409,6 +2663,7 @@ export async function toWebviewMessages(
           }
         : {}),
       ...(message.thinking ? { thinking: message.thinking } : {}),
+      ...(message.isCompactSummary ? { isCompactSummary: true } : {}),
       ...(message.role === 'user' && message.images?.length
         ? {
             images: message.images.map((image) => ({
@@ -2420,6 +2675,18 @@ export async function toWebviewMessages(
     });
   }
   return result;
+}
+
+/**
+ * Which "auto-compact is close" milestone applies for the given distance (in
+ * percentage points) below the threshold: 1, 2, or 3 points left map to that
+ * milestone, up to 5 maps to 5, and anything farther is no warning. Each
+ * milestone is warned once as pressure rises (mirrors the CLI).
+ */
+function autoCompactWarnMilestone(pointsLeft: number): number | null {
+  if (pointsLeft > 5) return null;
+  if (pointsLeft <= 3) return Math.max(1, Math.ceil(pointsLeft));
+  return 5;
 }
 
 function toWebviewRole(role: MessageRole): WebviewRole {

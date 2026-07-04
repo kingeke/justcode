@@ -17,6 +17,14 @@ export interface GlobalConfig {
   askSystemPrompt?: string;
   /** Plan mode system prompt; falls back to the built-in when unset. */
   planSystemPrompt?: string;
+  /** Compaction summarization prompt; falls back to the built-in when unset. */
+  compactPrompt?: string;
+  /**
+   * Auto-compact the conversation when the last request used at least this
+   * percent of the model's context window. 0 disables auto-compact; unset
+   * means the default (80).
+   */
+  autoCompactThresholdPercent?: number;
   thinkingCollapsed?: boolean;
   /**
    * Reasoning intensity per model, nested by provider id so entries are

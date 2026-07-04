@@ -27,6 +27,8 @@ export enum HostMessageType {
   ModeUpdate = 'modeUpdate',
   /** A transient status line shown above the transcript (no full reload). */
   Notice = 'notice',
+  /** A compaction started or finished; drives the busy state and error surface. */
+  CompactStatus = 'compactStatus',
   FileReverted = 'fileReverted',
   SteeringConsumed = 'steeringConsumed',
   WorkspaceFiles = 'workspaceFiles',
@@ -50,6 +52,10 @@ export enum WebviewMessageType {
   ToggleExpandTools = 'toggleExpandTools',
   SetReadLimit = 'setReadLimit',
   SetHistoryLimit = 'setHistoryLimit',
+  /** Summarize the conversation and continue from the compact summary. */
+  CompactSession = 'compactSession',
+  /** Set the auto-compact threshold percent (0 = off). */
+  SetAutoCompactThreshold = 'setAutoCompactThreshold',
   ToggleThinkingCollapsed = 'toggleThinkingCollapsed',
   ToggleLocalModelAutoRefresh = 'toggleLocalModelAutoRefresh',
   ToggleLazyToolLoading = 'toggleLazyToolLoading',
@@ -250,6 +256,11 @@ export interface WebviewMessage {
   };
   /** Images attached to a user message, rendered as thumbnails. */
   images?: WebviewMessageImage[];
+  /**
+   * True on the user message that opens a post-compaction epoch (it carries the
+   * summary of compacted-away history); the transcript draws a divider on it.
+   */
+  isCompactSummary?: boolean;
 }
 
 export interface WebviewUsage {
@@ -326,6 +337,8 @@ export interface ReadyMessage {
   maxReadLines: number;
   /** Recent context window items sent to the model per request; 0 means "off" (send all). */
   maxHistoryMessages: number;
+  /** Auto-compact when ctx usage reaches this percent of the window; 0 = off. */
+  autoCompactThresholdPercent: number;
   /** When true, thinking blocks start collapsed so the user has to click to expand. */
   thinkingCollapsed: boolean;
   /**
@@ -527,6 +540,33 @@ export interface ModeUpdateMessage {
 export interface NoticeMessage {
   type: HostMessageType.Notice;
   notice: string;
+  /**
+   * When set, the webview clears the notice after this many milliseconds
+   * (e.g. the "auto-compact is close" warning). Unset notices persist until
+   * replaced or the next snapshot.
+   */
+  timeoutMs?: number;
+}
+
+/**
+ * A compaction started (`running: true`) or finished. On success the refreshed
+ * transcript rides a {@link TurnCompleteMessage} sent just before the final
+ * status; on failure `error` carries the reason and the conversation is
+ * unchanged.
+ */
+export interface CompactStatusMessage {
+  type: HostMessageType.CompactStatus;
+  running: boolean;
+  /** Rough size of the summary streamed so far (chars/4), pushed periodically. */
+  tokens?: number;
+  /**
+   * Estimated progress: streamed tokens against the previous summary's size
+   * (default before any compaction has run), capped at 99 — the real total
+   * isn't knowable until the model stops, so treat this as a good-faith
+   * estimate, not ground truth.
+   */
+  percent?: number;
+  error?: string;
 }
 
 /**
@@ -585,6 +625,7 @@ export type HostToWebview =
   | McpStatusMessage
   | ModeUpdateMessage
   | NoticeMessage
+  | CompactStatusMessage
   | SessionsListMessage
   | TitleUpdateMessage
   | TokenMessage
@@ -675,6 +716,12 @@ export interface NewSessionMessage {
 /** The user navigated back to the sessions list. */
 export interface ListSessionsMessage {
   type: WebviewMessageType.ListSessions;
+  /**
+   * When false, only refresh the session data in place (e.g. for the header's
+   * session-switcher popup) instead of switching to the sessions view.
+   * Defaults to true (navigate).
+   */
+  focus?: boolean;
 }
 
 /** The user selected a session from the list. */
@@ -740,6 +787,17 @@ export interface SetReadLimitMessage {
 export interface SetHistoryLimitMessage {
   type: WebviewMessageType.SetHistoryLimit;
   count: number;
+}
+
+/** The user asked to compact the conversation now. */
+export interface CompactSessionMessage {
+  type: WebviewMessageType.CompactSession;
+}
+
+/** The user set a new auto-compact threshold percent; 0 turns it off. */
+export interface SetAutoCompactThresholdMessage {
+  type: WebviewMessageType.SetAutoCompactThreshold;
+  percent: number;
 }
 
 /** The user toggled whether thinking blocks start collapsed. */
@@ -891,6 +949,8 @@ export type WebviewToHost =
   | ToggleExpandToolsMessage
   | SetReadLimitMessage
   | SetHistoryLimitMessage
+  | CompactSessionMessage
+  | SetAutoCompactThresholdMessage
   | ToggleThinkingCollapsedMessage
   | ToggleLocalModelAutoRefreshMessage
   | ToggleLazyToolLoadingMessage

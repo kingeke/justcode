@@ -21,11 +21,19 @@ try {
   /* ignore */
 }
 
-const linkPath = join(binDir, 'justcode');
-if (existsSync(linkPath) || isSymlink(linkPath)) {
-  rmSync(linkPath, { force: true });
-  console.log(`✓ Removed ${linkPath}`);
-} else {
+// Remove the default link plus any alternate name passed as an argument
+// (e.g. `npm run uninstall:local -- justcode-local`).
+const names = ['justcode', ...process.argv.slice(2)];
+let removed = 0;
+for (const name of names) {
+  const linkPath = join(binDir, name);
+  if (existsSync(linkPath) || isSymlink(linkPath)) {
+    rmSync(linkPath, { force: true });
+    console.log(`✓ Removed ${linkPath}`);
+    removed += 1;
+  }
+}
+if (removed === 0) {
   console.log('Nothing to remove.');
 }
 

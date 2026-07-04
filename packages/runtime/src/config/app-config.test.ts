@@ -8,6 +8,7 @@ import {
   DEFAULT_SYSTEM_PROMPT,
   PLAN_SYSTEM_PROMPT,
 } from '@core/application/system-prompt';
+import { DEFAULT_COMPACT_PROMPT } from '@core/application/compact-prompt';
 
 vi.mock('node:fs/promises', () => ({
   mkdir: vi.fn(),
@@ -146,6 +147,7 @@ describe('loadAppConfig', () => {
         systemPrompt: '',
         askSystemPrompt: '',
         planSystemPrompt: '',
+        compactPrompt: '',
       })
     );
 
@@ -154,6 +156,7 @@ describe('loadAppConfig', () => {
     expect(config.systemPrompt).toBe('');
     expect(config.askSystemPrompt).toBe('');
     expect(config.planSystemPrompt).toBe('');
+    expect(config.compactPrompt).toBe('');
     expect(writeFile).not.toHaveBeenCalled();
   });
 
@@ -164,14 +167,21 @@ describe('loadAppConfig', () => {
 
     const config = await loadAppConfig(mockConfigDir);
 
-    // The explicit Build prompt is kept; Ask/Plan are filled from the defaults.
+    // The explicit Build prompt is kept; Ask/Plan/Compaction are filled from
+    // the defaults.
     expect(config.systemPrompt).toBe('my custom build prompt');
     expect(config.askSystemPrompt).toBe(ASK_SYSTEM_PROMPT);
     expect(config.planSystemPrompt).toBe(PLAN_SYSTEM_PROMPT);
+    expect(config.compactPrompt).toBe(DEFAULT_COMPACT_PROMPT);
     // Missing prompts are written back so they show up in config.json.
     expect(writeFile).toHaveBeenCalledWith(
       join(mockConfigDir, 'config.json'),
       expect.stringContaining('askSystemPrompt'),
+      expect.objectContaining({ encoding: 'utf8' })
+    );
+    expect(writeFile).toHaveBeenCalledWith(
+      join(mockConfigDir, 'config.json'),
+      expect.stringContaining('compactPrompt'),
       expect.objectContaining({ encoding: 'utf8' })
     );
   });

@@ -2325,6 +2325,9 @@ textarea:focus {
   justify-content: space-between;
   gap: 12px;
   font-size: 12px;
+  /* Token counts stay on one line ("29,898 / 1,048,576 tokens" must not wrap
+     the unit onto its own row); the popup is wide enough for any real value. */
+  white-space: nowrap;
 }
 
 .context-popup-pct {
@@ -2358,6 +2361,310 @@ textarea:focus {
 
 .context-popup-bar-fill.context-ring-danger {
   background: var(--vscode-errorForeground, #f48771);
+}
+
+/* Ambient heads-up that auto-compact is close: the ring pulses gently. */
+.icon-btn.context-ring-pulse {
+  animation: context-ring-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes context-ring-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(1.12);
+  }
+}
+
+/* --- Session switcher (chat-header title dropdown) ------------------------ */
+
+.session-switcher {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.session-switcher-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.session-switcher-btn:hover:not(:disabled),
+.session-switcher-btn-open {
+  background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15));
+}
+
+.session-switcher-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.session-switcher-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-switcher-popup {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 90;
+  width: min(420px, calc(100vw - 24px));
+  /* Roughly 8 rows before the list scrolls; capped harder on short panels. */
+  max-height: min(320px, 50vh);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.35));
+  background: var(
+    --vscode-editorWidget-background,
+    var(--vscode-editor-background)
+  );
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.session-switcher-list {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.session-switcher-group,
+.sessions-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 6px 2px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.55;
+}
+
+.session-switcher-group:hover,
+.sessions-group:hover {
+  opacity: 0.9;
+}
+
+
+.session-switcher-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 4px;
+  padding-right: 4px;
+}
+
+.session-switcher-row:hover {
+  background: var(--vscode-list-hoverBackground, rgba(127, 127, 127, 0.12));
+}
+
+.session-switcher-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 6px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+}
+
+.session-switcher-item-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-switcher-item-meta {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+/* Rename/delete stay hidden until the row is hovered; the current-session
+   check is always visible. */
+.session-switcher-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.session-switcher-actions .icon-btn {
+  visibility: hidden;
+}
+
+.session-switcher-row:hover .session-switcher-actions .icon-btn {
+  visibility: visible;
+}
+
+.session-switcher-current {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.8;
+}
+
+/* Banner floated above the composer, pinned to the bottom of the transcript
+   area so it's visible regardless of scroll position. Leaves room on the
+   right for the jump-to-bottom button. */
+.floating-banner {
+  position: absolute;
+  left: 12px;
+  right: 56px;
+  bottom: 10px;
+  z-index: 60;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.35));
+  background: var(
+    --vscode-editorWidget-background,
+    var(--vscode-editor-background)
+  );
+  color: var(--vscode-foreground);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.floating-banner-in {
+  animation: floating-banner-slide-in 0.25s ease-out;
+}
+
+.floating-banner-out {
+  animation: floating-banner-slide-out 0.25s ease-in forwards;
+}
+
+@keyframes floating-banner-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes floating-banner-slide-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+/* Indeterminate "compacting" bar inside the floating banner: the total isn't
+   knowable, so a sweeping fill + live token label stand in for a percentage. */
+.compact-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.compact-progress-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(127, 127, 127, 0.25);
+  overflow: hidden;
+  position: relative;
+}
+
+.compact-progress-fill {
+  position: absolute;
+  height: 100%;
+  width: 35%;
+  border-radius: 2px;
+  background: var(--vscode-progressBar-background, #3794ff);
+  animation: compact-progress-sweep 1.2s ease-in-out infinite;
+}
+
+/* Once an estimated percent is known the fill anchors left and grows with it
+   instead of sweeping. */
+.compact-progress-fill-known {
+  left: 0;
+  animation: none;
+  transition: width 0.25s ease-out;
+}
+
+@keyframes compact-progress-sweep {
+  0% {
+    left: -35%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+.context-compact-btn {
+  width: 100%;
+  font-size: 12px;
+  font-family: inherit;
+  padding: 4px 8px;
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.3));
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.context-compact-btn:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15));
+}
+
+.context-compact-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The compacted-epoch summary reuses the thinking block styling; this wrapper
+   spaces it and caps how tall the expanded summary can grow. `.msg` is a flex
+   row, so the details block must be allowed to shrink below its content width
+   (`min-width: 0`) — otherwise long summary lines stretch it past the
+   transcript instead of wrapping. */
+.msg-compact-summary {
+  margin: 8px 0;
+}
+
+.msg-compact-summary .thinking-done {
+  flex: 1;
+  min-width: 0;
+}
+
+.msg-compact-summary .thinking-content {
+  max-height: 240px;
+  overflow-y: auto;
 }
 
 .settings-popup-hint {

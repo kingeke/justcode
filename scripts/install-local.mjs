@@ -34,13 +34,19 @@ try {
 }
 mkdirSync(binDir, { recursive: true });
 
-// 3. Remove any prior install (including an old `npm link`) and symlink.
-try {
-  execFileSync('npm', ['rm', '-g', 'justcode'], { stdio: 'ignore' });
-} catch {
-  /* nothing to unlink */
+// 3. Remove any prior install (including an old `npm link`) and symlink. An
+// optional argument names the command (e.g. `npm run install:local -- justcode-local`)
+// so the dev build can live alongside a released `justcode` install; the
+// default remains `justcode`.
+const linkName = process.argv[2] ?? 'justcode';
+if (linkName === 'justcode') {
+  try {
+    execFileSync('npm', ['rm', '-g', 'justcode'], { stdio: 'ignore' });
+  } catch {
+    /* nothing to unlink */
+  }
 }
-const linkPath = join(binDir, 'justcode');
+const linkPath = join(binDir, linkName);
 rmSync(linkPath, { force: true });
 symlinkSync(binaryPath, linkPath);
 
@@ -52,6 +58,6 @@ if (!(process.env.PATH ?? '').split(':').includes(binDir)) {
   );
 } else {
   console.log(
-    "Run 'justcode' from any terminal. Re-run 'npm run update:local' after code changes."
+    `Run '${linkName}' from any terminal. Re-run 'npm run update:local' after code changes.`
   );
 }

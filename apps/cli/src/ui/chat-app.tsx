@@ -78,6 +78,11 @@ import { renderDiff } from '@cli/ui/render-diff.js';
 import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
 import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
 import {
+  DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT,
+  DEFAULT_EXPECTED_SUMMARY_TOKENS,
+  compactProgressPercent,
+} from '@core/application/compact-prompt';
+import {
   COMMANDS,
   CommandName,
   filterCommands,
@@ -208,6 +213,10 @@ interface ChatAppProps {
   onMaxReadLinesChange?: (lines: number) => void;
   initialMaxHistoryMessages?: number;
   onMaxHistoryMessagesChange?: (count: number) => void;
+  /** Auto-compact threshold percent at startup (0 = off). */
+  initialAutoCompactThresholdPercent?: number;
+  /** Persist a new auto-compact threshold (0 = off). */
+  onAutoCompactThresholdChange?: (percent: number) => void;
   initialReasoningEffortByModel?: Record<
     string,
     Record<string, ReasoningEffort | 'off' | undefined> | undefined
@@ -230,6 +239,9 @@ interface PendingQuestion {
 }
 
 const MAX_PREVIEW_LINES = 16;
+// How many percentage points below the auto-compact threshold the "context
+// almost full" warning starts flashing after a turn.
+const AUTO_COMPACT_WARN_MARGIN = 5;
 const EXIT_HINT = 'Press Ctrl+C again to exit';
 const EXIT_WINDOW_MS = 2000;
 const MARKDOWN_FG = '#d4d4d4';
@@ -253,6 +265,32 @@ function getSyntaxStyle(): SyntaxStyle {
     sharedSyntaxStyle = SyntaxStyle.fromStyles(MARKDOWN_SYNTAX_STYLES);
   }
   return sharedSyntaxStyle;
+}
+
+/**
+ * Once the live streaming block grows past this many characters, everything up
+ * to its last safe paragraph boundary is committed inline (as an optimistic
+ * assistant message) so only the small tail keeps re-rendering. Re-laying-out
+ * an ever-growing markdown block on every flush is what reads as transcript
+ * flicker on long answers.
+ */
+const LIVE_BLOCK_COMMIT_CHARS = 2000;
+
+/**
+ * The last safe point to split a streamed markdown buffer: a paragraph
+ * boundary (`\n\n`) that isn't inside an open code fence, so a fence spanning
+ * paragraphs is never torn across two renders. Returns the index just past the
+ * boundary, or null when no safe boundary exists yet.
+ */
+function safeStreamCommitPoint(buffer: string): number | null {
+  let boundary = buffer.lastIndexOf('\n\n');
+  while (boundary > 0) {
+    const fences =
+      buffer.slice(0, boundary).match(/^\s*(```|~~~)/gm)?.length ?? 0;
+    if (fences % 2 === 0) return boundary + 2;
+    boundary = buffer.lastIndexOf('\n\n', boundary - 1);
+  }
+  return null;
 }
 
 // A dimmed SyntaxStyle for reasoning/thinking, so it renders formatted but in a
@@ -574,6 +612,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const turnOutputCharsRef = useRef(0);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState('');
+  // Mirror of `input` for callbacks that run on a later tick (e.g. the
+  // deferred image-marker insert) and must read the current text, not the
+  // value captured when the callback was created.
+  const inputRef = useRef('');
+  inputRef.current = input;
   // Images pasted into the prompt, awaiting the next send. Each carries a stable
   // `marker` number matching its `[Image #n]` marker in the prompt text (see
   // IMAGE_MARKER_PATTERN). Deleting a marker from the prompt drops its image
@@ -624,20 +667,23 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     const marker = `[Image #${count}]`;
     setPendingImages((prev) => [...prev, { ...image, marker: count }]);
 
-    const area = promptAreaRef.current;
-    if (area && !area.isDestroyed) {
-      const existing = area.plainText;
+    // Defer the buffer mutation out of the paste event: inserting into the
+    // textarea while it is still mid-paste leaves its layout and cursor stale
+    // (the cursor renders outside the input box until a key press forces a
+    // re-measure). On the next tick, re-seed the whole buffer with the marker
+    // appended and the cursor at the end — the same full-set path every other
+    // programmatic input change (clear, tab-complete, restore) goes through.
+    setTimeout(() => {
+      const area = promptAreaRef.current;
+      const existing =
+        area && !area.isDestroyed ? area.plainText : inputRef.current;
       const lead = existing.length > 0 && !existing.endsWith(' ') ? ' ' : '';
-      area.insertText(`${lead}${marker} `);
-      setInput(area.plainText);
-    } else {
-      const base = input.length && !input.endsWith(' ') ? `${input} ` : input;
-      setInputWithCursorAtEnd(`${base}${marker} `);
-    }
+      setInputWithCursorAtEnd(`${existing}${lead}${marker} `);
+    }, 0);
 
     setStatus(`Image #${count} attached — send your message to include it`);
     return true;
-  }, [input, setInputWithCursorAtEnd]);
+  }, [setInputWithCursorAtEnd]);
 
   // Drop any staged image whose `[Image #n]` marker the user has since deleted
   // from the prompt. Called on every prompt edit so the images sent always match
@@ -678,6 +724,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setQueueEditIndex(null);
     setPendingImages([]);
     setConversation(null);
+    autoCompactWarnedMilestoneRef.current = null;
     setError(null);
     updateLastStats(null);
     updateMetrics(() => getInitialMetrics());
@@ -831,6 +878,23 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const [maxHistoryMessages, setMaxHistoryMessages] = useState(
     props.initialMaxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES
   );
+  // Auto-compact threshold (percent of the context window; 0 = off). The ref
+  // mirrors the state so the post-turn check reads the current value.
+  const autoCompactThresholdRef = useRef(
+    props.initialAutoCompactThresholdPercent ??
+      DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT
+  );
+  // Guards re-entry: a compaction is a model call of its own, so a second
+  // trigger (manual or auto) while one runs must be ignored.
+  const compactingRef = useRef(false);
+  // The last "auto-compact is close" milestone flashed (5/3/2/1 points left),
+  // so each milestone warns once instead of re-flashing every turn. Reset when
+  // the pressure drops (compaction, new session).
+  const autoCompactWarnedMilestoneRef = useRef<number | null>(null);
+  // Expected summary size for the compaction progress percentage: seeded with
+  // the default, replaced by each compaction's actual summary size, so the
+  // estimate tracks how this model/session actually summarizes.
+  const expectedSummaryTokensRef = useRef(DEFAULT_EXPECTED_SUMMARY_TOKENS);
   // Reasoning effort is chosen per model (only models that advertise reasoning
   // support), nested by provider id. The ref mirrors the map so the submit
   // closure reads fresh values.
@@ -1981,6 +2045,42 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         return;
       }
 
+      case CommandName.Compact:
+        void runCompaction('manual');
+        return;
+
+      case CommandName.AutoCompact: {
+        const trimmed = (arg ?? '').trim();
+        const current = autoCompactThresholdRef.current;
+        if (!trimmed) {
+          setStatus(
+            current > 0
+              ? `Auto-compact triggers at >=${current}% of the context window (use /auto-compact <percent|off> to change)`
+              : 'Auto-compact is off (use /auto-compact <percent> to enable)'
+          );
+          return;
+        }
+        const isOff = trimmed.toLowerCase() === 'off';
+        const percent = isOff ? 0 : Number.parseInt(trimmed, 10);
+        if (
+          !isOff &&
+          (!Number.isFinite(percent) || percent < 0 || percent > 100)
+        ) {
+          setError(
+            `Invalid auto-compact threshold '${trimmed}'. Provide a percent from 1 to 100, or "off" (0 also turns it off).`
+          );
+          return;
+        }
+        autoCompactThresholdRef.current = percent;
+        props.onAutoCompactThresholdChange?.(percent);
+        setStatus(
+          percent > 0
+            ? `Auto-compact set to ${percent}% of the context window`
+            : 'Auto-compact turned off'
+        );
+        return;
+      }
+
       case CommandName.AutoApprove: {
         const next = !autoApproveRef.current;
         setAutoApprove(next);
@@ -2196,6 +2296,136 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     }
   };
 
+  /**
+   * Summarizes the conversation and swaps it for the compacted one. `target`
+   * lets the post-turn auto trigger pass the turn's fresh conversation (the
+   * `conversation` state may not have committed yet); the manual command
+   * omits it and compacts the current state. Runs as its own model call, so
+   * it takes the sending slot (spinner, queued messages) like a normal turn.
+   */
+  const runCompaction = async (
+    trigger: 'manual' | 'auto',
+    target?: Conversation
+  ): Promise<void> => {
+    if (compactingRef.current || activeRequestControllerRef.current) return;
+    const conversationToCompact = target ?? conversation;
+    if (!conversationToCompact || !session) return;
+    const model = activeModel || session.activeModel;
+    if (!model) {
+      if (trigger === 'manual') {
+        flashCommandNotice('Pick a model before compacting');
+      }
+      return;
+    }
+    const [firstMessage] = conversationToCompact.messages;
+    if (
+      conversationToCompact.messages.length === 0 ||
+      (conversationToCompact.messages.length === 1 &&
+        firstMessage?.isCompactSummary)
+    ) {
+      if (trigger === 'manual') {
+        flashCommandNotice('Nothing to compact yet');
+      }
+      return;
+    }
+
+    const requestController = new AbortController();
+    activeRequestControllerRef.current = requestController;
+    compactingRef.current = true;
+    setIsSending(true);
+    const compactLabel =
+      trigger === 'auto'
+        ? 'Context almost full — compacting conversation...'
+        : 'Compacting conversation...';
+    setStatus(compactLabel);
+    try {
+      const provider = activeModelInfo?.providerId ?? activeProviderId;
+      const effort = effectiveEffort(
+        activeModelInfo?.reasoning,
+        provider
+          ? reasoningEffortByModelRef.current[provider]?.[model]
+          : undefined
+      );
+      // The summary streams like any reply; show its growth as an estimated
+      // percentage (against the previous summary's size) in the notification
+      // slot — the status line is hidden behind the live stats while a
+      // request is in flight, so the priority slot is the visible one.
+      let summaryChars = 0;
+      let lastProgressUpdate = 0;
+      const result = await props.chatSessionService.compactSession({
+        conversation: conversationToCompact,
+        model,
+        ...(effort ? { reasoningEffort: effort } : {}),
+        signal: requestController.signal,
+        onToken: (token) => {
+          summaryChars += token.length;
+          const now = Date.now();
+          if (now - lastProgressUpdate < 250) return;
+          lastProgressUpdate = now;
+          // Same chars→tokens heuristic as estimateTokenCount.
+          const summaryTokens = Math.max(1, Math.round(summaryChars / 4));
+          const pct = compactProgressPercent(
+            summaryTokens,
+            expectedSummaryTokensRef.current
+          );
+          flashCommandNotice(
+            new StyledText([
+              tc('Compacting ', { fg: MUTED }),
+              tc(`${contextBar(pct)} ~${pct}%`, { fg: 'cyan' }),
+              tc(` · ${summaryTokens.toLocaleString()} summary tokens`, {
+                fg: MUTED,
+              }),
+            ])
+          );
+        },
+      });
+      setConversation(result.conversation);
+      // The summarization call is a real request: fold its usage into the
+      // session totals, but zero the ctx readout — the next turn starts from
+      // the compact summary, and this also keeps auto-compact from refiring.
+      const usage = result.usage;
+      const pricing = activeModelInfo?.pricing;
+      updateMetrics((prev) => ({
+        inputTokens: prev.inputTokens + (usage?.inputTokens ?? 0),
+        outputTokens: prev.outputTokens + (usage?.outputTokens ?? 0),
+        cachedTokens: prev.cachedTokens + (usage?.cachedTokens ?? 0),
+        cost:
+          prev.cost +
+          (usage?.cost ??
+            (usage && pricing
+              ? usage.inputTokens * pricing.inputPerToken +
+                usage.outputTokens * pricing.outputPerToken +
+                usage.cachedTokens *
+                  (pricing.cacheReadPerToken ?? pricing.inputPerToken)
+              : 0)),
+        lastInputTokens: 0,
+      }));
+      persistSessionStats(result.conversation.sessionId);
+      // Pressure has dropped back to zero; re-arm the approach warnings, and
+      // remember this summary's size as the next compaction's 100% estimate.
+      autoCompactWarnedMilestoneRef.current = null;
+      expectedSummaryTokensRef.current = Math.max(
+        1,
+        Math.round(result.summary.length / 4)
+      );
+      setStatus('Ready');
+      flashCommandNotice('Conversation compacted');
+    } catch (caughtError: unknown) {
+      if (isAbortError(caughtError)) {
+        // Nothing was saved: an aborted compaction leaves the conversation
+        // exactly as it was.
+        setStatus('Compaction cancelled');
+      } else {
+        setError(getErrorMessage(caughtError));
+        setStatus('Compaction failed');
+      }
+    } finally {
+      compactingRef.current = false;
+      setIsSending(false);
+      activeRequestControllerRef.current = null;
+    }
+  };
+
   const submit = async (value: string): Promise<void> => {
     if (!value.trim()) return;
 
@@ -2307,10 +2537,28 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setInput('');
     setStatus('Waiting for response...');
 
+    // Thinking uses the same completed-line gating as the answer below: its
+    // block otherwise re-renders in full every 50ms tick, which flickers just
+    // as badly on long reasoning. Turn-local, so it resets with each submit;
+    // a buffer that shrank (a segment was flushed inline) re-arms it.
+    const thinkingFlushed = { length: 0, atMs: 0 };
     const flushInterval = setInterval(() => {
       setActivityTick((tick) => tick + 1);
       const t = thinkingRef.current;
-      if (t.buffer) setStreamingThinking(t.buffer);
+      if (t.buffer.length < thinkingFlushed.length) {
+        thinkingFlushed.length = 0;
+        thinkingFlushed.atMs = 0;
+      }
+      if (t.buffer && t.buffer.length !== thinkingFlushed.length) {
+        const now = Date.now();
+        const sinceMs = now - thinkingFlushed.atMs;
+        const lineDone = t.buffer.indexOf('\n', thinkingFlushed.length) !== -1;
+        if ((lineDone && sinceMs >= 100) || sinceMs >= 500) {
+          thinkingFlushed.length = t.buffer.length;
+          thinkingFlushed.atMs = now;
+          setStreamingThinking(t.buffer);
+        }
+      }
       if (t.durationMs !== null) setThinkingDuration(t.durationMs);
 
       // Push the live markdown tail only on a completed line, and at most
@@ -2324,6 +2572,33 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         const sinceFlushMs = now - flushed.atMs;
         const newlineArrived = cBuf.indexOf('\n', flushed.length) !== -1;
         if ((newlineArrived && sinceFlushMs >= 100) || sinceFlushMs >= 500) {
+          // Long answers: once the live block is big, commit everything up to
+          // its last safe paragraph boundary as an inline message. Committed
+          // text renders once (concealed markers) and never re-lays-out; only
+          // the small tail keeps streaming, which kills the flicker of
+          // re-rendering the whole growing block on every flush. The real
+          // message replaces these optimistic chunks when the turn commits.
+          if (cBuf.length >= LIVE_BLOCK_COMMIT_CHARS) {
+            const splitAt = safeStreamCommitPoint(cBuf);
+            if (splitAt !== null && splitAt >= LIVE_BLOCK_COMMIT_CHARS / 2) {
+              const committed = cBuf.slice(0, splitAt);
+              streamingBufferRef.current = cBuf.slice(splitAt);
+              contentFlushRef.current = { length: 0, atMs: now };
+              setStreamingContent(streamingBufferRef.current);
+              setConversation((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      messages: [
+                        ...prev.messages,
+                        createMessage('assistant', committed),
+                      ],
+                    }
+                  : prev
+              );
+              return;
+            }
+          }
           contentFlushRef.current = { length: cBuf.length, atMs: now };
           setStreamingContent(cBuf);
         }
@@ -2446,6 +2721,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       }));
     };
 
+    // Set on turn success so the auto-compact check below the try/finally (it
+    // must run after the request controller is released) sees the fresh
+    // conversation rather than the not-yet-committed state.
+    let completedConversation: Conversation | null = null;
     try {
       const attachments =
         await props.promptAttachmentService.resolveAttachments(
@@ -2672,6 +2951,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       // The startTransition callback ran synchronously, so the refs already
       // hold this turn's final values — persist them with the conversation.
       persistSessionStats(result.conversation.sessionId);
+      completedConversation = result.conversation;
     } catch (caughtError: unknown) {
       clearInterval(flushInterval);
       setPendingApproval(null);
@@ -2769,6 +3049,52 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       // messages share, so a write/edit keeps showing its diff in the
       // transcript after the turn (cleared only when the session resets).
       activeRequestControllerRef.current = null;
+    }
+
+    // Auto-compact: when this turn's request used at least the configured
+    // share of the model's context window, compact now so the next message
+    // starts from the summary. Only after a successful turn — never mid-turn
+    // or off an interrupted one — and only when the window size is known.
+    // Within 5 points below the threshold, warn instead, so the compaction
+    // pause never comes as a surprise.
+    const threshold = autoCompactThresholdRef.current;
+    const contextWindow = activeModelInfo?.contextWindow;
+    if (
+      completedConversation &&
+      threshold > 0 &&
+      contextWindow != null &&
+      contextWindow > 0
+    ) {
+      const pct = contextPct(
+        metricsRef.current.lastInputTokens,
+        contextWindow
+      );
+      if (pct >= threshold) {
+        await runCompaction('auto', completedConversation);
+      } else {
+        // Escalating heads-up as the threshold approaches: once at 5 points
+        // left, then again at 3, 2, and 1. Each milestone flashes once.
+        const milestone = autoCompactWarnMilestone(threshold - pct);
+        if (
+          milestone !== null &&
+          (autoCompactWarnedMilestoneRef.current === null ||
+            milestone < autoCompactWarnedMilestoneRef.current)
+        ) {
+          autoCompactWarnedMilestoneRef.current = milestone;
+          flashCommandNotice(
+            new StyledText([
+              tc('Context ', { fg: MUTED }),
+              tc(`${contextBar(pct)} ${pct}%`, {
+                fg: contextUsageColor(pct),
+              }),
+              tc(
+                ` — auto-compact triggers at >=${threshold}% (/compact to run it now)`,
+                { fg: MUTED }
+              ),
+            ])
+          );
+        }
+      }
     }
   };
 
@@ -3070,11 +3396,26 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         contentOptions={{ flexDirection: 'column' }}
       >
         {conversation?.messages.length ? (
-          conversation.messages.map((message) => {
+          // Compacted-away epochs render first, so the full transcript stays
+          // visible; each epoch's summary message draws a divider above itself.
+          [...(conversation.previousMessages ?? []), ...conversation.messages]
+            .map((message) => {
             // Collapse mode: render only the user's messages so the transcript
             // is just what was asked, without the model's replies in between.
             if (collapseResponses && message.role !== 'user') {
               return null;
+            }
+            // A compaction summary opens a new epoch: draw a divider and render
+            // the summary muted and left-aligned — it's carried-over context,
+            // not something the user typed.
+            if (message.isCompactSummary) {
+              return (
+                <box key={message.id} flexDirection="column" marginY={1}>
+                  <text fg="cyan">─── Conversation compacted ───</text>
+                  <MarkdownView content={message.content} muted />
+                  <text fg={MUTED}>{formatTime(message.createdAt)}</text>
+                </box>
+              );
             }
             const thinking =
               message.role === 'assistant'
@@ -4019,6 +4360,18 @@ function truncatePreview(preview: string): string {
 
 function contextPct(inputTokens: number, contextWindow: number): number {
   return Math.min(100, Math.round((inputTokens / contextWindow) * 100));
+}
+
+/**
+ * Which "auto-compact is close" milestone applies for the given distance (in
+ * percentage points) below the threshold: 1, 2, or 3 points left map to that
+ * milestone, up to {@link AUTO_COMPACT_WARN_MARGIN} maps to 5, and anything
+ * farther is no warning. Each milestone is flashed once as pressure rises.
+ */
+function autoCompactWarnMilestone(pointsLeft: number): number | null {
+  if (pointsLeft > AUTO_COMPACT_WARN_MARGIN) return null;
+  if (pointsLeft <= 3) return Math.max(1, Math.ceil(pointsLeft));
+  return AUTO_COMPACT_WARN_MARGIN;
 }
 
 /** ASCII progress bar for the /context-usage readout, e.g. [████░░░░░░░░]. */

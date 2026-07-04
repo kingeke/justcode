@@ -21,7 +21,9 @@ import { kofiUrl, wallets } from './support';
 
 const NAV = [
   { href: '#why', label: 'Why' },
-  { href: '#surfaces', label: 'VS Code' },
+  // The platforms section covers every place you can run it (terminal + VS
+  // Code), so the label says that rather than naming one editor.
+  { href: '#platforms', label: 'Platforms' },
   { href: '#tools', label: 'Tools' },
   { href: '#commands', label: 'Commands' },
   { href: '#providers', label: 'Providers' },
@@ -211,10 +213,10 @@ export function App() {
           </div>
         </Section>
 
-        {/* Surfaces */}
+        {/* Platforms */}
         <Section
-          id="surfaces"
-          eyebrow="Terminal & VS Code"
+          id="platforms"
+          eyebrow="Platforms"
           title="Use it where you work"
           lead="One lean engine, two front ends — the terminal TUI and a VS Code extension, both driving the same providers, tools, and modes."
         >
@@ -228,30 +230,32 @@ export function App() {
                     <li key={p}>{p}</li>
                   ))}
                 </ul>
+                <div className="surface-install">
+                  {s.install.map((c) => (
+                    <div key={c.label} className="cmd">
+                      <span className="cmd-label">{c.label}</span>
+                      <code>{c.command}</code>
+                      <CopyButton value={c.command} />
+                    </div>
+                  ))}
+                  {s.marketplace ? (
+                    <>
+                      <a
+                        className="ghost-btn"
+                        href={marketplaceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        View on the Marketplace ↗
+                      </a>
+                      <p className="support-note dim">
+                        Or search “JustCode” in the VS Code Extensions panel.
+                      </p>
+                    </>
+                  ) : null}
+                </div>
               </article>
             ))}
-          </div>
-
-          <div className="ext-install">
-            <span className="ext-install-label">
-              Install the VS Code extension
-            </span>
-            <div className="cmd">
-              <span className="cmd-label">vscode</span>
-              <code>{extensionInstall}</code>
-              <CopyButton value={extensionInstall} />
-            </div>
-            <a
-              className="ghost-btn"
-              href={marketplaceUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
-              View on the Marketplace ↗
-            </a>
-            <p className="support-note dim">
-              Or search “JustCode” in the VS Code Extensions panel.
-            </p>
           </div>
         </Section>
 

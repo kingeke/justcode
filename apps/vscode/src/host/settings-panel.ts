@@ -8,6 +8,7 @@ import {
   DEFAULT_SYSTEM_PROMPT,
   PLAN_SYSTEM_PROMPT,
 } from '@core/application/system-prompt';
+import { DEFAULT_COMPACT_PROMPT } from '@core/application/compact-prompt';
 import { BUILT_IN_MODES, addCustomMode } from '@core/domain/chat-mode';
 import {
   readGlobalConfig,
@@ -524,17 +525,26 @@ export class SettingsPanel {
   }
 }
 
-/** Each built-in mode's default prompt text and its config override key. */
+/**
+ * Each built-in prompt's default text and its config override key: the three
+ * mode prompts plus the (non-mode) compaction prompt, which rides the same
+ * save/reset machinery.
+ */
 const BUILT_IN_PROMPTS: Record<
   string,
   {
     default: string;
-    configKey: 'systemPrompt' | 'askSystemPrompt' | 'planSystemPrompt';
+    configKey:
+      | 'systemPrompt'
+      | 'askSystemPrompt'
+      | 'planSystemPrompt'
+      | 'compactPrompt';
   }
 > = {
   build: { default: DEFAULT_SYSTEM_PROMPT, configKey: 'systemPrompt' },
   ask: { default: ASK_SYSTEM_PROMPT, configKey: 'askSystemPrompt' },
   plan: { default: PLAN_SYSTEM_PROMPT, configKey: 'planSystemPrompt' },
+  compact: { default: DEFAULT_COMPACT_PROMPT, configKey: 'compactPrompt' },
 };
 
 /**
@@ -557,6 +567,23 @@ function listPromptInfos(config: GlobalConfig): SettingsPromptInfo[] {
       overridden: override !== undefined && override !== entry?.default,
     };
   });
+  // The compaction prompt isn't a chat mode, but it's edited (and reset) the
+  // same way, so it rides along after the built-in modes.
+  const compactEntry = BUILT_IN_PROMPTS['compact'];
+  const compactOverride = config.compactPrompt;
+  const compact = compactEntry
+    ? [
+        {
+          id: 'compact',
+          name: 'Compaction',
+          custom: false,
+          prompt: compactOverride ?? compactEntry.default,
+          overridden:
+            compactOverride !== undefined &&
+            compactOverride !== compactEntry.default,
+        },
+      ]
+    : [];
   const custom = Object.entries(config.customModes ?? {}).map(
     ([id, modeConfig]) => ({
       id,
@@ -566,7 +593,7 @@ function listPromptInfos(config: GlobalConfig): SettingsPromptInfo[] {
       overridden: false,
     })
   );
-  return [...builtIns, ...custom];
+  return [...builtIns, ...compact, ...custom];
 }
 
 /**

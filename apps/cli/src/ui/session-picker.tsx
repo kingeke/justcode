@@ -18,6 +18,34 @@ const MUTED = '#8a8a8a';
 const MUTED_RGBA = RGBA.fromHex(MUTED);
 const INVERSE = createTextAttributes({ inverse: true });
 
+/** Recency buckets, in display order (mirrors the extension's session lists). */
+const SESSION_GROUPS = ['Today', 'Yesterday', 'Last 7 days', 'Older'] as const;
+type SessionGroup = (typeof SESSION_GROUPS)[number];
+
+function sessionGroupFor(iso: string): SessionGroup {
+  const then = new Date(iso);
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  if (then >= startOfToday) return 'Today';
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+  if (then >= startOfYesterday) return 'Yesterday';
+  const startOfWeek = new Date(startOfToday);
+  startOfWeek.setDate(startOfWeek.getDate() - 7);
+  if (then >= startOfWeek) return 'Last 7 days';
+  return 'Older';
+}
+
+/** A focusable list entry: a collapsible group header, or a session. */
+type PickerRow =
+  | {
+      kind: 'header';
+      group: SessionGroup;
+      count: number;
+      collapsed: boolean;
+    }
+  | { kind: 'session'; session: ConversationSummary };
+
 interface SessionPickerProps {
   sessions: ConversationSummary[];
   currentSessionId: string;
@@ -39,6 +67,21 @@ function queryLineContent(query: string): StyledText {
   }
   chunks.push({ __isChunk: true, text: ' ', attributes: INVERSE });
   return new StyledText(chunks);
+}
+
+function groupHeaderContent(
+  group: SessionGroup,
+  count: number,
+  collapsed: boolean,
+  isSelected: boolean
+): StyledText {
+  return new StyledText([
+    tc(isSelected ? '› ' : '  ', isSelected ? { fg: 'cyan' } : {}),
+    tc(
+      `${collapsed ? '▸' : '▾'} ${group} (${count})`,
+      isSelected ? { fg: 'cyan', bold: true } : { fg: MUTED }
+    ),
+  ]);
 }
 
 function sessionLineContent(
@@ -92,6 +135,11 @@ export function SessionPicker({
 }: SessionPickerProps): React.ReactNode {
   const [query, setQuery] = useState('');
   const [focusedIndex, setFocusedIndex] = useState(0);
+  // Recency groups the user folded shut (Enter on a header row). Ignored while
+  // a query is active, so searching always surfaces every match.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<SessionGroup>>(
+    () => new Set()
+  );
   const scrollOffsetRef = useRef(0);
 
   const filteredSessions = useMemo(
@@ -105,11 +153,41 @@ export function SessionPicker({
     [query, sessions]
   );
 
+  // The rendered/navigable list: a header row per non-empty recency bucket,
+  // followed by its sessions unless the bucket is folded shut.
+  const searching = query.trim().length > 0;
+  const rows = useMemo(() => {
+    const built: PickerRow[] = [];
+    for (const group of SESSION_GROUPS) {
+      const inGroup = filteredSessions.filter(
+        (session) => sessionGroupFor(session.updatedAt) === group
+      );
+      if (inGroup.length === 0) continue;
+      const collapsed = !searching && collapsedGroups.has(group);
+      built.push({ kind: 'header', group, count: inGroup.length, collapsed });
+      if (!collapsed) {
+        built.push(
+          ...inGroup.map(
+            (session) => ({ kind: 'session', session }) as const
+          )
+        );
+      }
+    }
+    return built;
+  }, [filteredSessions, collapsedGroups, searching]);
+  // Mirror for the reset effect below, which must read the fresh rows without
+  // re-running (and thus resetting focus) every time a group is folded.
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+
   const clampFocus = (next: number) =>
-    Math.max(0, Math.min(next, filteredSessions.length - 1));
+    Math.max(0, Math.min(next, rows.length - 1));
 
   useEffect(() => {
-    setFocusedIndex(0);
+    // Land on the first session, not the leading group header, so Enter right
+    // after opening still resumes the most recent session.
+    const first = rowsRef.current[0]?.kind === 'header' ? 1 : 0;
+    setFocusedIndex(rowsRef.current.length > first ? first : 0);
     scrollOffsetRef.current = 0;
   }, [query, sessions]);
 
@@ -120,8 +198,20 @@ export function SessionPicker({
     }
 
     if (key.name === KeyName.Return) {
-      const session = filteredSessions[focusedIndex];
-      if (session) onSelect(session.sessionId);
+      const row = rows[focusedIndex];
+      if (!row) return;
+      if (row.kind === 'session') {
+        onSelect(row.session.sessionId);
+        return;
+      }
+      // Enter on a header folds/unfolds its group; focus stays on the header
+      // (rows only change after it, so the index still points at it).
+      setCollapsedGroups((prev) => {
+        const next = new Set(prev);
+        if (next.has(row.group)) next.delete(row.group);
+        else next.add(row.group);
+        return next;
+      });
       return;
     }
 
@@ -162,7 +252,7 @@ export function SessionPicker({
     }
   });
 
-  const visibleSessions = filteredSessions.slice(
+  const visibleRows = rows.slice(
     scrollOffsetRef.current,
     scrollOffsetRef.current + VISIBLE_ROWS
   );
@@ -180,7 +270,7 @@ export function SessionPicker({
         <text fg="cyan" attributes={BOLD}>
           Resume session
         </text>
-        <text fg={MUTED}>enter to load · esc to cancel</text>
+        <text fg={MUTED}>enter to load · enter on a group folds it · esc to cancel</text>
       </box>
 
       <box marginBottom={1}>
@@ -197,25 +287,50 @@ export function SessionPicker({
         </text>
       ) : (
         <box flexDirection="column">
-          {visibleSessions.map((session, index) => {
+          {visibleRows.map((row, index) => {
             const absoluteIndex = scrollOffsetRef.current + index;
             const isSelected = absoluteIndex === focusedIndex;
-            const isCurrent = session.sessionId === currentSessionId;
 
-            return (
-              <box key={session.sessionId} flexDirection="row" flexShrink={0}>
-                <box flexGrow={1}>
-                  <text content={sessionLineContent(session, isSelected)} />
+            if (row.kind === 'header') {
+              return (
+                <box
+                  key={`header-${row.group}`}
+                  flexDirection="row"
+                  flexShrink={0}
+                >
+                  <text
+                    content={groupHeaderContent(
+                      row.group,
+                      row.count,
+                      row.collapsed,
+                      isSelected
+                    )}
+                  />
                 </box>
-                <text content={sessionMetaContent(session, isCurrent)} />
+              );
+            }
+
+            const isCurrent = row.session.sessionId === currentSessionId;
+            return (
+              <box
+                key={row.session.sessionId}
+                flexDirection="row"
+                flexShrink={0}
+              >
+                <box flexGrow={1}>
+                  <text
+                    content={sessionLineContent(row.session, isSelected)}
+                  />
+                </box>
+                <text content={sessionMetaContent(row.session, isCurrent)} />
               </box>
             );
           })}
-          {filteredSessions.length > VISIBLE_ROWS ? (
+          {rows.length > VISIBLE_ROWS ? (
             <text fg={MUTED}>
               {'\n'}
-              {scrollOffsetRef.current + VISIBLE_ROWS < filteredSessions.length
-                ? `↓ ${filteredSessions.length - scrollOffsetRef.current - VISIBLE_ROWS} more`
+              {scrollOffsetRef.current + VISIBLE_ROWS < rows.length
+                ? `↓ ${rows.length - scrollOffsetRef.current - VISIBLE_ROWS} more`
                 : ''}
             </text>
           ) : null}

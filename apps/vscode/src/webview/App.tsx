@@ -24,6 +24,7 @@ import { ToolActivityView } from '@ext/webview/components/ToolActivityView';
 import { ApprovalPrompt, InputPrompt } from '@ext/webview/components/Prompts';
 import { Composer } from '@ext/webview/components/Composer';
 import { SessionsView } from '@ext/webview/components/SessionsView';
+import { SessionSwitcher } from '@ext/webview/components/SessionSwitcher';
 import { ConversationSidebar } from '@ext/webview/components/ConversationSidebar';
 import { ModelPickerView } from '@ext/webview/components/ModelPickerView';
 import {
@@ -76,6 +77,16 @@ export function App(): React.JSX.Element {
     const id = setInterval(() => setStatsTick((t) => t + 1), 150);
     return () => clearInterval(id);
   }, [state.busy]);
+
+  // Self-dismiss transient notices (e.g. the "auto-compact is close" warning):
+  // the host stamps them with a timeout, persistent ones carry none.
+  React.useEffect(() => {
+    if (!state.notice || !state.noticeTimeoutMs) return undefined;
+    const id = setTimeout(() => {
+      dispatch({ type: HostMessageType.Notice, notice: '' });
+    }, state.noticeTimeoutMs);
+    return () => clearTimeout(id);
+  }, [state.notice, state.noticeTimeoutMs]);
 
   const liveStats = React.useMemo<WebviewStats | undefined>(() => {
     if (!state.busy || state.turnStartedAt === 0) return undefined;
@@ -537,6 +548,15 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.SetHistoryLimit, count });
   };
 
+  const setAutoCompactThreshold = (percent: number): void => {
+    dispatch({ type: LocalActionType.SetAutoCompactThreshold, percent });
+    postToHost({ type: WebviewMessageType.SetAutoCompactThreshold, percent });
+  };
+
+  const compactSession = (): void => {
+    postToHost({ type: WebviewMessageType.CompactSession });
+  };
+
   // Every file the agent edited/created this session, minus those the user has
   // already kept or undone (and not edited again since). Recomputed from the
   // authoritative transcript plus any in-flight tool activity.
@@ -740,12 +760,28 @@ export function App(): React.JSX.Element {
         <button
           type="button"
           className="chat-back-btn"
-          title="Back to sessions"
+          title={
+            state.compacting
+              ? 'Compacting — wait for it to finish or stop it first'
+              : 'Back to sessions'
+          }
+          disabled={state.compacting}
           onClick={goBack}
         >
           ← Back
         </button>
-        <span className="chat-title">{state.sessionTitle ?? 'New chat'}</span>
+        <SessionSwitcher
+          title={state.sessionTitle ?? 'New chat'}
+          sessions={state.sessions}
+          currentSessionId={state.sessionId}
+          disabled={state.compacting}
+          onOpen={openSession}
+          onRename={renameSession}
+          onDelete={deleteSession}
+          onRefreshSessions={() =>
+            postToHost({ type: WebviewMessageType.ListSessions, focus: false })
+          }
+        />
         <button
           type="button"
           className={`icon-btn ${state.collapseResponses ? 'icon-btn-active' : ''}`}
@@ -797,7 +833,12 @@ export function App(): React.JSX.Element {
           {/* Single wrapper around everything scrollable so the auto-scroll
               ResizeObserver sees every height change in one place. */}
           <div className="transcript-content" ref={observeTranscriptContent}>
-            {state.notice ? <div className="notice">{state.notice}</div> : null}
+            {/* Persistent notices render in-flow at the top; transient ones
+                (auto-compact warnings etc.) use the floating banner below so
+                they're visible regardless of scroll position. */}
+            {state.notice && !state.noticeTimeoutMs ? (
+              <div className="notice">{state.notice}</div>
+            ) : null}
 
             {state.messages.map((message, index) => {
               // Collapse mode: show only the user's own messages so they can scan
@@ -980,6 +1021,38 @@ export function App(): React.JSX.Element {
             }
           />
         ) : null}
+        {/* Floating banner pinned above the composer: compaction progress, or
+            a transient notice (auto-compact warning, cancellation). Slides in
+            and out so it's visible regardless of transcript scroll position. */}
+        <FloatingBanner show={state.compacting || Boolean(state.notice && state.noticeTimeoutMs)}>
+          {state.compacting ? (
+            <div className="compact-progress">
+              <span className="compact-progress-label">
+                Compacting conversation…
+                {state.compactPercent !== undefined
+                  ? ` ~${state.compactPercent}%`
+                  : ''}
+                {state.compactTokens
+                  ? ` · ${state.compactTokens.toLocaleString()} summary tokens`
+                  : ''}
+              </span>
+              <div className="compact-progress-bar">
+                {/* Estimated percent drives a real fill; before the first
+                    progress post the bar sweeps indeterminately. */}
+                {state.compactPercent !== undefined ? (
+                  <div
+                    className="compact-progress-fill compact-progress-fill-known"
+                    style={{ width: `${state.compactPercent}%` }}
+                  />
+                ) : (
+                  <div className="compact-progress-fill" />
+                )}
+              </div>
+            </div>
+          ) : (
+            <span>{state.notice}</span>
+          )}
+        </FloatingBanner>
       </div>
 
       <ChangesPanel
@@ -1070,7 +1143,9 @@ export function App(): React.JSX.Element {
 
       <Composer
         busy={state.busy}
-        disabled={chatDisabled}
+        // Compaction blocks input entirely: the host would reject a submit
+        // mid-compaction anyway, so don't let one be typed-and-lost.
+        disabled={chatDisabled || state.compacting}
         models={state.models}
         activeModel={state.activeModel}
         activeProviderId={state.providerId}
@@ -1114,6 +1189,10 @@ export function App(): React.JSX.Element {
         onToggleLazyToolLoading={toggleLazyToolLoading}
         onSetReadLimit={setReadLimit}
         onSetHistoryLimit={setHistoryLimit}
+        autoCompactThresholdPercent={state.autoCompactThresholdPercent}
+        onSetAutoCompactThreshold={setAutoCompactThreshold}
+        compacting={state.compacting}
+        onCompact={compactSession}
       />
 
       {previewImage ? (
@@ -1184,6 +1263,43 @@ function PlanCard({
           </button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * A banner floated above the composer (bottom of the transcript area), used
+ * for compaction progress and transient notices. Slides up on show; on hide it
+ * plays a slide-down exit animation before unmounting, keeping a snapshot of
+ * its last content so the banner doesn't blank mid-slide (the notice text is
+ * usually cleared in the same update that hides it).
+ */
+function FloatingBanner({
+  show,
+  children,
+}: {
+  show: boolean;
+  children: React.ReactNode;
+}): React.JSX.Element | null {
+  const [mounted, setMounted] = React.useState(show);
+  const lastChildrenRef = React.useRef<React.ReactNode>(children);
+  if (show) lastChildrenRef.current = children;
+
+  React.useEffect(() => {
+    if (show) {
+      setMounted(true);
+      return undefined;
+    }
+    const id = setTimeout(() => setMounted(false), 250);
+    return () => clearTimeout(id);
+  }, [show]);
+
+  if (!mounted) return null;
+  return (
+    <div
+      className={`floating-banner ${show ? 'floating-banner-in' : 'floating-banner-out'}`}
+    >
+      {show ? children : lastChildrenRef.current}
     </div>
   );
 }

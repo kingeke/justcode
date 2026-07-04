@@ -36,12 +36,12 @@ var __toESM = (mod, isNodeMode, target) => {
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __require = import.meta.require;
 
-// node_modules/web-tree-sitter/tree-sitter.wasm
+// node_modules/.pnpm/web-tree-sitter@0.25.10/node_modules/web-tree-sitter/tree-sitter.wasm
 var require_tree_sitter = __commonJS((exports, module2) => {
   module2.exports = "./tree-sitter-3jzf13jk.wasm";
 });
 
-// node_modules/web-tree-sitter/tree-sitter.js
+// node_modules/.pnpm/web-tree-sitter@0.25.10/node_modules/web-tree-sitter/tree-sitter.js
 var __defProp2 = Object.defineProperty;
 var __name = (target, value) => __defProp2(target, "name", { value, configurable: true });
 var SIZE_OF_SHORT = 2;
@@ -3253,7 +3253,7 @@ var Parser = class {
   }
 };
 
-// node_modules/@opentui/core/parser.worker.js
+// node_modules/.pnpm/@opentui+core@0.4.2_typescript@5.9.3_web-tree-sitter@0.25.10/node_modules/@opentui/core/parser.worker.js
 import { mkdir as mkdir3 } from "fs/promises";
 import * as path2 from "path";
 import { mkdir, readFile, writeFile } from "fs/promises";

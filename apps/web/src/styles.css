@@ -28,6 +28,35 @@ html {
   scroll-behavior: smooth;
 }
 
+/* Lean, brand-colored scrollbars everywhere (page + the horizontally
+   scrolling install commands). Firefox first, then WebKit. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-dim) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--accent-dim);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -374,23 +403,22 @@ main {
   border-radius: 2px;
   background: var(--brand-gradient);
 }
-.ext-install {
+/* Per-surface install commands: each platform card carries how to get it. */
+.surface-install {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 12px;
-  margin-top: 22px;
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--bg-elev);
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
 }
-.ext-install-label {
-  font-weight: 600;
-}
-.ext-install .cmd {
+.surface-install .cmd {
   width: 100%;
-  max-width: 560px;
+}
+.surface-install .cmd code {
+  overflow-x: auto;
+  white-space: nowrap;
 }
 .commands {
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));

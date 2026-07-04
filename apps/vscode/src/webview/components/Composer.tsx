@@ -138,6 +138,14 @@ export interface ComposerProps {
   onSelectMode: (modeId: string) => void;
   /** Create a custom mode with a name and optional system prompt. */
   onCreateMode: (name: string, systemPrompt?: string) => void;
+  /** Auto-compact when ctx usage reaches this percent of the window; 0 = off. */
+  autoCompactThresholdPercent: number;
+  /** Persist a new auto-compact threshold percent (0 = off). */
+  onSetAutoCompactThreshold: (percent: number) => void;
+  /** True while the host is summarizing the conversation. */
+  compacting: boolean;
+  /** Summarize the conversation now and continue from the compact summary. */
+  onCompact: () => void;
 }
 
 /**
@@ -174,6 +182,17 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   const [showSettings, setShowSettings] = React.useState(false);
   const [showReasoning, setShowReasoning] = React.useState(false);
   const [showTools, setShowTools] = React.useState(false);
+  // Compaction locks the toolbar; also fold shut any popup already open so its
+  // inner controls (mode switch, settings edits, ...) can't be used mid-run.
+  const { compacting } = props;
+  React.useEffect(() => {
+    if (!compacting) return;
+    setShowSettings(false);
+    setShowReasoning(false);
+    setShowTools(false);
+    setShowModes(false);
+    setShowContextInfo(false);
+  }, [compacting]);
   // Category headings folded shut in the manage-tools popup (tool rows hidden).
   const [collapsedCategories, setCollapsedCategories] = React.useState<
     Set<string>
@@ -192,6 +211,8 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   const [editingReadLimit, setEditingReadLimit] = React.useState(false);
   const [historyLimitDraft, setHistoryLimitDraft] = React.useState('');
   const [editingHistoryLimit, setEditingHistoryLimit] = React.useState(false);
+  const [autoCompactDraft, setAutoCompactDraft] = React.useState('');
+  const [editingAutoCompact, setEditingAutoCompact] = React.useState(false);
   const settingsRef = React.useRef<HTMLDivElement>(null);
   // Commits any in-progress settings edits before the popup closes. Closing
   // unmounts the inputs without firing their onBlur, so the drafts would be
@@ -392,6 +413,13 @@ export function Composer(props: ComposerProps): React.JSX.Element {
           pct: Math.min(100, Math.round((contextUsed / contextWindow) * 100)),
         }
       : undefined;
+  // Within 5 points below the auto-compact threshold the ring pulses as an
+  // ambient heads-up that the next turn is likely to trigger a compaction.
+  const nearAutoCompact =
+    contextInfo !== undefined &&
+    props.autoCompactThresholdPercent > 0 &&
+    contextInfo.pct < props.autoCompactThresholdPercent &&
+    contextInfo.pct >= props.autoCompactThresholdPercent - 5;
 
   const reasoning = activeModelObj?.reasoning;
   const reasoningLevels = reasoning?.effortLevels ?? [];
@@ -635,9 +663,31 @@ export function Composer(props: ComposerProps): React.JSX.Element {
     if (event.key === 'Escape') setEditingHistoryLimit(false);
   };
 
+  const commitAutoCompact = (): void => {
+    // Blank or 0 turns auto-compact off; 1-100 sets the trigger percent.
+    const trimmed = autoCompactDraft.trim();
+    if (trimmed === '') {
+      props.onSetAutoCompactThreshold(0);
+    } else {
+      const parsed = parseInt(trimmed, 10);
+      if (!isNaN(parsed) && parsed >= 0 && parsed <= 100) {
+        props.onSetAutoCompactThreshold(parsed);
+      }
+    }
+    setEditingAutoCompact(false);
+  };
+
+  const onAutoCompactKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement>
+  ): void => {
+    if (event.key === 'Enter') commitAutoCompact();
+    if (event.key === 'Escape') setEditingAutoCompact(false);
+  };
+
   commitPendingSettingsEditsRef.current = (): void => {
     if (editingReadLimit) commitReadLimit();
     if (editingHistoryLimit) commitHistoryLimit();
+    if (editingAutoCompact) commitAutoCompact();
   };
 
   return (
@@ -739,6 +789,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
               type="button"
               className="icon-btn"
               title="New session"
+              disabled={props.compacting}
               onClick={props.onNewSession}
             >
               <PlusIcon />
@@ -901,6 +952,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                 type="button"
                 className={`mode-btn ${showModes ? 'mode-btn-active' : ''}`}
                 title="Change mode"
+                disabled={props.compacting}
                 onClick={() => {
                   setShowModes((s) => !s);
                   setCreatingMode(false);
@@ -932,7 +984,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                   // The label truncates with an ellipsis, so surface the full
                   // model name on hover.
                   title={m ? label : 'Change model'}
-                  disabled={props.models.length === 0}
+                  disabled={props.models.length === 0 || props.compacting}
                   onClick={props.onOpenModelPicker}
                 >
                   {label}
@@ -946,6 +998,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                   type="button"
                   className={`reasoning-btn ${showReasoning ? 'reasoning-btn-active' : ''}`}
                   title="Thinking level"
+                  disabled={props.compacting}
                   onClick={() => setShowReasoning((s) => !s)}
                 >
                   {effectiveEffort}
@@ -1046,12 +1099,33 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         </div>
                       ) : null}
                     </div>
+                    <div className="settings-popup-section">
+                      <button
+                        type="button"
+                        className="context-compact-btn"
+                        disabled={busy || props.compacting}
+                        title="Summarize the conversation and continue from the summary, freeing up context"
+                        onClick={() => {
+                          setShowContextInfo(false);
+                          props.onCompact();
+                        }}
+                      >
+                        {props.compacting
+                          ? 'Compacting…'
+                          : 'Compact conversation'}
+                      </button>
+                    </div>
                   </div>
                 ) : null}
                 <button
                   type="button"
-                  className={`icon-btn ${showContextInfo ? 'icon-btn-active' : ''} ${contextPressureClass(contextInfo.pct)}`}
-                  title={`Context window ${contextInfo.pct}% full — ${fmtTokenCount(contextInfo.used)} / ${fmtTokenCount(contextInfo.window)} tokens`}
+                  className={`icon-btn ${showContextInfo ? 'icon-btn-active' : ''} ${contextPressureClass(contextInfo.pct)} ${nearAutoCompact ? 'context-ring-pulse' : ''}`}
+                  title={
+                    nearAutoCompact
+                      ? `Context window ${contextInfo.pct}% full — auto-compact triggers at >=${props.autoCompactThresholdPercent}%`
+                      : `Context window ${contextInfo.pct}% full — ${fmtTokenCount(contextInfo.used)} / ${fmtTokenCount(contextInfo.window)} tokens`
+                  }
+                  disabled={props.compacting}
                   onClick={() => setShowContextInfo((s) => !s)}
                 >
                   <ContextRing pct={contextInfo.pct} />
@@ -1175,6 +1249,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                     ? 'Manage tools (loading MCP servers…)'
                     : 'Manage tools'
                 }
+                disabled={props.compacting}
                 onClick={() => setShowTools((s) => !s)}
               >
                 {props.mcpLoading ? (
@@ -1261,6 +1336,44 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                           {props.maxHistoryMessages > 0
                             ? `${props.maxHistoryMessages} items`
                             : 'All'}
+                        </button>
+                      )}
+                    </div>
+                    <div className="settings-popup-row">
+                      <span className="settings-popup-label">
+                        Auto-compact at
+                        <span className="settings-popup-hint">
+                          set 0 to turn off
+                        </span>
+                      </span>
+                      {editingAutoCompact ? (
+                        <input
+                          className="settings-popup-input"
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={autoCompactDraft}
+                          // eslint-disable-next-line jsx-a11y/no-autofocus
+                          autoFocus
+                          onChange={(e) => setAutoCompactDraft(e.target.value)}
+                          onBlur={commitAutoCompact}
+                          onKeyDown={onAutoCompactKeyDown}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="settings-popup-value-btn"
+                          title="Compact the conversation automatically when the last request used this share of the context window — 0 turns it off"
+                          onClick={() => {
+                            setAutoCompactDraft(
+                              String(props.autoCompactThresholdPercent)
+                            );
+                            setEditingAutoCompact(true);
+                          }}
+                        >
+                          {props.autoCompactThresholdPercent > 0
+                            ? `${props.autoCompactThresholdPercent}% of context`
+                            : 'Off'}
                         </button>
                       )}
                     </div>
@@ -1367,6 +1480,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                 type="button"
                 className={`icon-btn ${showSettings ? 'icon-btn-active' : ''}`}
                 title="Chat settings"
+                disabled={props.compacting}
                 onClick={() => {
                   if (showSettings) commitPendingSettingsEditsRef.current();
                   setShowSettings((s) => !s);
@@ -1376,18 +1490,18 @@ export function Composer(props: ComposerProps): React.JSX.Element {
               </button>
             </div>
 
-            {busy ? (
+            {busy || props.compacting ? (
               <>
                 <span
                   className="composer-spinner"
                   role="status"
                   aria-label="Working"
-                  title="Working…"
+                  title={props.compacting ? 'Compacting…' : 'Working…'}
                 />
                 <button
                   type="button"
                   className="icon-btn icon-btn-stop"
-                  title="Stop"
+                  title={props.compacting ? 'Stop compaction' : 'Stop'}
                   onClick={props.onCancel}
                 >
                   <StopIcon />

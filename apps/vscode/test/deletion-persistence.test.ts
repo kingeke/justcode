@@ -29,7 +29,7 @@ describe('deletion persistence through a turn', () => {
       autoApprove: true,
       expandTools: false,
       maxReadLines: 200,
-      maxHistoryMessages: 50,
+      maxHistoryMessages: 50,      autoCompactThresholdPercent: 80,
       thinkingCollapsed: false,
       localModelAutoRefresh: true,
       lazyToolLoading: true,

@@ -96,6 +96,11 @@ export const tools: Item[] = [
     name: 'lazy_load_tools',
     description: 'Load extra tools on demand to keep requests lean.',
   },
+  {
+    name: '…and more',
+    description:
+      'Plus MCP servers: plug in any Model Context Protocol server and its tools join the set.',
+  },
 ];
 
 /** The chat modes (plus user-defined custom modes). */
@@ -193,10 +198,24 @@ export const commands: Item[] = [
     name: '/context-usage',
     description: "Show how much of the model's context window is used.",
   },
+  {
+    name: '/compact',
+    description: 'Summarize the conversation and free up context.',
+  },
+  {
+    name: '/auto-compact',
+    description:
+      'Set the threshold that compacts the conversation automatically.',
+  },
   { name: '/config', description: 'Open the config file in your editor.' },
   {
     name: '/reset',
     description: 'Reset app defaults and clear connected providers and models.',
+  },
+  {
+    name: '…and more',
+    description:
+      'Session renaming, read limits, and new commands with every release — type / in the chat to see them all.',
   },
 ];
 
@@ -244,8 +263,18 @@ export const extensionId = 'kingeke.justcode-vscode';
 export const marketplaceUrl = `https://marketplace.visualstudio.com/items?itemName=${extensionId}`;
 export const extensionInstall = `code --install-extension ${extensionId}`;
 
-/** The two surfaces the same engine drives, shown side by side. */
-export const surfaces: { name: string; blurb: string; points: string[] }[] = [
+/**
+ * The two surfaces the same engine drives, shown side by side — each carrying
+ * its own install commands so the card says both what it is and how to get it.
+ */
+export const surfaces: {
+  name: string;
+  blurb: string;
+  points: string[];
+  install: { label: string; command: string }[];
+  /** When true, the card links to the VS Code Marketplace under the commands. */
+  marketplace?: boolean;
+}[] = [
   {
     name: 'Terminal',
     blurb:
@@ -255,8 +284,8 @@ export const surfaces: { name: string; blurb: string; points: string[] }[] = [
       'Slash commands, modes, and session history',
       'Live context-usage meter with /context-usage',
       'Model picker with collapsible provider groups',
-      'Works over SSH and in any shell',
     ],
+    install: installCommands,
   },
   {
     name: 'VS Code extension',
@@ -268,5 +297,7 @@ export const surfaces: { name: string; blurb: string; points: string[] }[] = [
       'Settings UI for providers and MCP servers',
       'Attach images, browse and resume sessions',
     ],
+    install: [{ label: 'vscode', command: extensionInstall }],
+    marketplace: true,
   },
 ];

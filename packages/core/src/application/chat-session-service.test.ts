@@ -19,6 +19,10 @@ import type { ConversationRepository } from '@core/ports/conversation-repository
 import type { Tool } from '@core/ports/tool';
 import { LazyLoadToolsTool } from '@runtime/tools/lazy-load-tools-tool';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
+import {
+  COMPACT_CONTINUATION_HEADER,
+  DEFAULT_COMPACT_PROMPT,
+} from '@core/application/compact-prompt';
 
 class InMemoryConversationRepository implements ConversationRepository {
   public conversation = createConversation('session-1');
@@ -1857,5 +1861,215 @@ describe('ChatSessionService', () => {
     expect(
       seenRequests[seenRequests.length - 1]?.map((tool) => tool.name)
     ).toEqual(['lazy_load_tools']);
+  });
+});
+
+describe('compactSession', () => {
+  function conversationWithHistory(): ReturnType<typeof createConversation> {
+    const conversation = titledConversation('session-1');
+    conversation.messages = [
+      createMessage('user', 'first question'),
+      createMessage('assistant', 'first answer'),
+      createMessage('user', 'second question'),
+      createMessage('assistant', 'second answer'),
+    ];
+    return conversation;
+  }
+
+  it('sends the system prompt, history, and compact prompt with no tools', async () => {
+    const repository = new InMemoryConversationRepository();
+    const requests: ChatRequest[] = [];
+    const provider: ProviderClient = {
+      ...createProviderStub(),
+      async sendChat(request: ChatRequest): Promise<ChatResult> {
+        requests.push(request);
+        return { content: 'the summary' };
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry: new ToolRegistry([new RecordingWriteTool()], []),
+    });
+
+    await service.compactSession({
+      conversation: conversationWithHistory(),
+      model: 'llama3.1',
+    });
+
+    expect(requests).toHaveLength(1);
+    const request = requests[0]!;
+    expect(request.tools).toBeUndefined();
+    expect(request.messages[0]?.role).toBe('system');
+    // The full history rides between the system prompt and the compact prompt.
+    expect(request.messages.slice(1, -1).map((m) => m.content)).toEqual([
+      'first question',
+      'first answer',
+      'second question',
+      'second answer',
+    ]);
+    const last = request.messages[request.messages.length - 1]!;
+    expect(last.role).toBe('user');
+    expect(last.content).toBe(DEFAULT_COMPACT_PROMPT);
+  });
+
+  it('replaces messages with a flagged summary and accumulates previousMessages', async () => {
+    const repository = new InMemoryConversationRepository();
+    const provider: ProviderClient = {
+      ...createProviderStub(),
+      async sendChat(): Promise<ChatResult> {
+        return {
+          content: 'summary text',
+          usage: { inputTokens: 100, outputTokens: 20, cachedTokens: 0 },
+        };
+      },
+    };
+    const service = new ChatSessionService(repository, provider);
+    const conversation = conversationWithHistory();
+    conversation.stats = {
+      inputTokens: 1000,
+      outputTokens: 200,
+      cachedTokens: 0,
+      cost: 0.5,
+      lastInputTokens: 900,
+    };
+
+    const first = await service.compactSession({
+      conversation,
+      model: 'llama3.1',
+    });
+
+    expect(first.summary).toBe('summary text');
+    expect(first.usage?.inputTokens).toBe(100);
+    expect(first.conversation.messages).toHaveLength(1);
+    const summaryMessage = first.conversation.messages[0]!;
+    expect(summaryMessage.role).toBe('user');
+    expect(summaryMessage.isCompactSummary).toBe(true);
+    expect(summaryMessage.content).toContain(COMPACT_CONTINUATION_HEADER);
+    expect(summaryMessage.content).toContain('summary text');
+    expect(first.conversation.previousMessages).toHaveLength(4);
+    // The ctx readout resets so auto-compact doesn't immediately refire.
+    expect(first.conversation.stats?.lastInputTokens).toBe(0);
+    expect(first.conversation.stats?.inputTokens).toBe(1000);
+    // Persisted once, as returned.
+    expect(repository.conversation).toEqual(first.conversation);
+
+    // A second compaction (after more turns) accumulates the prior epoch.
+    first.conversation.messages.push(
+      createMessage('user', 'third question'),
+      createMessage('assistant', 'third answer')
+    );
+    const second = await service.compactSession({
+      conversation: first.conversation,
+      model: 'llama3.1',
+    });
+    expect(second.conversation.previousMessages).toHaveLength(4 + 3);
+    expect(second.conversation.messages).toHaveLength(1);
+  });
+
+  it('throws when there is nothing to compact and never saves', async () => {
+    const repository = new InMemoryConversationRepository();
+    const original = repository.conversation;
+    const service = new ChatSessionService(
+      repository,
+      createProviderStub()
+    );
+
+    await expect(
+      service.compactSession({
+        conversation: titledConversation('session-1'),
+        model: 'llama3.1',
+      })
+    ).rejects.toThrow(/nothing new to compact/i);
+
+    const summaryOnly = titledConversation('session-1');
+    summaryOnly.messages = [
+      createMessage('user', 'summary', new Date(), undefined, {
+        isCompactSummary: true,
+      }),
+    ];
+    await expect(
+      service.compactSession({ conversation: summaryOnly, model: 'llama3.1' })
+    ).rejects.toThrow(/nothing new to compact/i);
+    expect(repository.conversation).toBe(original);
+  });
+
+  it('does not save when the provider fails or returns an empty summary', async () => {
+    const repository = new InMemoryConversationRepository();
+    const original = repository.conversation;
+    const failingProvider: ProviderClient = {
+      ...createProviderStub(),
+      async sendChat(): Promise<ChatResult> {
+        throw new Error('provider exploded');
+      },
+    };
+    const failing = new ChatSessionService(repository, failingProvider);
+    await expect(
+      failing.compactSession({
+        conversation: conversationWithHistory(),
+        model: 'llama3.1',
+      })
+    ).rejects.toThrow('provider exploded');
+    expect(repository.conversation).toBe(original);
+
+    const emptyProvider: ProviderClient = {
+      ...createProviderStub(),
+      async sendChat(): Promise<ChatResult> {
+        return { content: '   ' };
+      },
+    };
+    const empty = new ChatSessionService(repository, emptyProvider);
+    await expect(
+      empty.compactSession({
+        conversation: conversationWithHistory(),
+        model: 'llama3.1',
+      })
+    ).rejects.toThrow(/empty summary/i);
+    expect(repository.conversation).toBe(original);
+  });
+
+  it('strips tag-style scratch work from the summary before persisting', async () => {
+    const repository = new InMemoryConversationRepository();
+    const provider: ProviderClient = {
+      ...createProviderStub(),
+      async sendChat(): Promise<ChatResult> {
+        return {
+          content:
+            '<analysis>long scratch review</analysis>\n<summary>## Current Work\nthe real summary</summary>',
+        };
+      },
+    };
+    const service = new ChatSessionService(repository, provider);
+
+    const result = await service.compactSession({
+      conversation: conversationWithHistory(),
+      model: 'llama3.1',
+    });
+
+    expect(result.summary).toBe('## Current Work\nthe real summary');
+    const persisted = result.conversation.messages[0]!.content;
+    expect(persisted).not.toContain('analysis');
+    expect(persisted).toContain('the real summary');
+  });
+
+  it('uses the configured compact prompt over the default', async () => {
+    const repository = new InMemoryConversationRepository();
+    const requests: ChatRequest[] = [];
+    const provider: ProviderClient = {
+      ...createProviderStub(),
+      async sendChat(request: ChatRequest): Promise<ChatResult> {
+        requests.push(request);
+        return { content: 'summary' };
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      getCompactPrompt: () => 'Summarize briefly.',
+    });
+
+    await service.compactSession({
+      conversation: conversationWithHistory(),
+      model: 'llama3.1',
+    });
+
+    const last = requests[0]!.messages[requests[0]!.messages.length - 1]!;
+    expect(last.content).toBe('Summarize briefly.');
   });
 });

@@ -59,6 +59,16 @@ describe('renderMessageContentForModel', () => {
 
     expect(message.llmReceivedAt).toBe('2026-07-02T10:00:05.000Z');
   });
+
+  it('carries the compact-summary flag passed via extras', () => {
+    const flagged = createMessage('user', 'summary', new Date(), undefined, {
+      isCompactSummary: true,
+    });
+    expect(flagged.isCompactSummary).toBe(true);
+
+    const plain = createMessage('user', 'hello');
+    expect(plain.isCompactSummary).toBeUndefined();
+  });
 });
 
 describe('markLlmReceived', () => {

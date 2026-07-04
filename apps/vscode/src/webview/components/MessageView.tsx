@@ -49,6 +49,30 @@ export function MessageView({
     });
   };
 
+  // A compaction summary opens a new epoch. It renders exactly like a
+  // collapsed thinking block — it's carried-over context the model works
+  // from, not something the user typed.
+  if (message.isCompactSummary) {
+    const compactedAt = message.createdAt ? formatTime(message.createdAt) : '';
+    return (
+      <div id={domId} className="msg msg-compact-summary">
+        <details className="thinking thinking-done">
+          <summary className="thinking-label">
+            Conversation compacted
+            {compactedAt ? ` at ${compactedAt}` : ''} — summary sent to the
+            model
+          </summary>
+          <div
+            className="thinking-content markdown-body"
+            dangerouslySetInnerHTML={{
+              __html: renderMarkdown(message.content),
+            }}
+          />
+        </details>
+      </div>
+    );
+  }
+
   if (message.role === WebviewRole.Tool) {
     const isError = message.toolView?.isError === true;
     return (

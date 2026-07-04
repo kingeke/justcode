@@ -55,6 +55,11 @@ export interface ChatMessage {
     content: string;
     durationMs: number;
   };
+  /**
+   * Set on the `user` message that opens a post-compaction epoch: it carries
+   * the summary of everything compacted away. UIs render a divider/badge on it.
+   */
+  isCompactSummary?: boolean;
 }
 
 export interface CreateMessageExtras {
@@ -69,6 +74,7 @@ export interface CreateMessageExtras {
   };
   /** For `assistant` messages: when the LLM received the producing request. */
   llmReceivedAt?: string;
+  isCompactSummary?: boolean;
 }
 
 export function createMessage(
@@ -91,6 +97,7 @@ export function createMessage(
     ...(extras?.isError ? { isError: true } : {}),
     ...(extras?.thinking ? { thinking: extras.thinking } : {}),
     ...(extras?.llmReceivedAt ? { llmReceivedAt: extras.llmReceivedAt } : {}),
+    ...(extras?.isCompactSummary ? { isCompactSummary: true } : {}),
   };
 }
 
