@@ -71,6 +71,16 @@ export function ToolIcon({ size = 16 }: IconProps): React.JSX.Element {
   );
 }
 
+export function LayersIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M12 4l8 4-8 4-8-4 8-4z" />
+      <path d="M4 12l8 4 8-4" />
+      <path d="M4 16l8 4 8-4" />
+    </svg>
+  );
+}
+
 export function SendIcon({ size = 16 }: IconProps): React.JSX.Element {
   return (
     <svg {...svgProps(size)} aria-hidden="true">

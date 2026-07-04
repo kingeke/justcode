@@ -28,6 +28,7 @@ import type {
 } from '@ext/shared/protocol';
 import {
   CogIcon,
+  LayersIcon,
   ModeIcon,
   PlusIcon,
   SendIcon,
@@ -1042,10 +1043,10 @@ export function Composer(props: ComposerProps): React.JSX.Element {
           </div>
 
           <div className="toolbar-right">
-            {contextInfo ? (
-              <div className="settings-popup-anchor" ref={contextInfoRef}>
-                {showContextInfo ? (
-                  <div className="settings-popup context-popup">
+            <div className="settings-popup-anchor" ref={contextInfoRef}>
+              {showContextInfo ? (
+                <div className="settings-popup context-popup">
+                  {contextInfo ? (
                     <div className="settings-popup-section">
                       <div className="settings-popup-heading">Session Info</div>
                       <div className="context-popup-title">Context Window</div>
@@ -1065,73 +1066,89 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         />
                       </div>
                     </div>
-                    <div className="settings-popup-section">
-                      <div className="context-popup-row">
+                  ) : null}
+                  <div className="settings-popup-section">
+                    {!contextInfo ? (
+                      <div className="context-popup-row context-popup-row-stack">
                         <span className="settings-popup-label">
-                          Total Input Tokens
+                          Context Window
                         </span>
-                        <span>
-                          {(props.usage?.inputTokens ?? 0).toLocaleString()}
+                        <span className="context-popup-note">
+                          This model does not report a context window.
                         </span>
                       </div>
-                      <div className="context-popup-row">
-                        <span className="settings-popup-label">
-                          Total Cached Tokens
-                        </span>
-                        <span>
-                          {(props.usage?.cachedTokens ?? 0).toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="context-popup-row">
-                        <span className="settings-popup-label">
-                          Total Output Tokens
-                        </span>
-                        <span>
-                          {(props.usage?.outputTokens ?? 0).toLocaleString()}
-                        </span>
-                      </div>
-                      {props.usage?.cost !== undefined ? (
-                        <div className="context-popup-row">
-                          <span className="settings-popup-label">
-                            Total Session Cost
-                          </span>
-                          <span>${props.usage.cost.toFixed(4)}</span>
-                        </div>
-                      ) : null}
+                    ) : null}
+                    <div className="context-popup-row">
+                      <span className="settings-popup-label">
+                        Total Input Tokens
+                      </span>
+                      <span>
+                        {(props.usage?.inputTokens ?? 0).toLocaleString()}
+                      </span>
                     </div>
-                    <div className="settings-popup-section">
-                      <button
-                        type="button"
-                        className="context-compact-btn"
-                        disabled={busy || props.compacting}
-                        title="Summarize the conversation and continue from the summary, freeing up context"
-                        onClick={() => {
-                          setShowContextInfo(false);
-                          props.onCompact();
-                        }}
-                      >
-                        {props.compacting
-                          ? 'Compacting…'
-                          : 'Compact conversation'}
-                      </button>
+                    <div className="context-popup-row">
+                      <span className="settings-popup-label">
+                        Total Cached Tokens
+                      </span>
+                      <span>
+                        {(props.usage?.cachedTokens ?? 0).toLocaleString()}
+                      </span>
                     </div>
+                    <div className="context-popup-row">
+                      <span className="settings-popup-label">
+                        Total Output Tokens
+                      </span>
+                      <span>
+                        {(props.usage?.outputTokens ?? 0).toLocaleString()}
+                      </span>
+                    </div>
+                    {props.usage?.cost !== undefined ? (
+                      <div className="context-popup-row">
+                        <span className="settings-popup-label">
+                          Total Session Cost
+                        </span>
+                        <span>${props.usage.cost.toFixed(4)}</span>
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-                <button
-                  type="button"
-                  className={`icon-btn ${showContextInfo ? 'icon-btn-active' : ''} ${contextPressureClass(contextInfo.pct)} ${nearAutoCompact ? 'context-ring-pulse' : ''}`}
-                  title={
-                    nearAutoCompact
+                  <div className="settings-popup-section">
+                    <button
+                      type="button"
+                      className="context-compact-btn"
+                      disabled={busy || props.compacting}
+                      title="Summarize the conversation and continue from the summary, freeing up context"
+                      onClick={() => {
+                        setShowContextInfo(false);
+                        props.onCompact();
+                      }}
+                    >
+                      {props.compacting
+                        ? 'Compacting…'
+                        : 'Compact conversation'}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className={`icon-btn ${showContextInfo ? 'icon-btn-active' : ''} ${contextInfo ? contextPressureClass(contextInfo.pct) : ''} ${nearAutoCompact ? 'context-ring-pulse' : ''}`}
+                title={
+                  contextInfo
+                    ? nearAutoCompact
                       ? `Context window ${contextInfo.pct}% full — auto-compact triggers at >=${props.autoCompactThresholdPercent}%`
                       : `Context window ${contextInfo.pct}% full — ${fmtTokenCount(contextInfo.used)} / ${fmtTokenCount(contextInfo.window)} tokens`
-                  }
-                  disabled={props.compacting}
-                  onClick={() => setShowContextInfo((s) => !s)}
-                >
+                    : 'Session info and conversation compaction'
+                }
+                disabled={props.compacting}
+                onClick={() => setShowContextInfo((s) => !s)}
+              >
+                {contextInfo ? (
                   <ContextRing pct={contextInfo.pct} />
-                </button>
-              </div>
-            ) : null}
+                ) : (
+                  <LayersIcon size={14} />
+                )}
+              </button>
+            </div>
             <div className="settings-popup-anchor" ref={toolsRef}>
               {showTools ? (
                 <div className="settings-popup tools-popup">
