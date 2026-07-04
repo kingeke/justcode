@@ -1,0 +1,17 @@
+#!/bin/sh
+# Pre-commit hook: auto-format the staged files with Prettier (folding the
+# fixes into the commit) and typecheck. Tests stay in pre-push, so commits
+# remain quick. Bypass with `git commit --no-verify` when needed.
+#
+# Note: a partially staged file (git add -p) gets fully re-staged after
+# formatting — Prettier rewrites the whole file on disk.
+
+set -e
+
+echo "▶ Running Prettier write..."
+bun run prettier --write .
+
+echo "▶ Running typecheck..."
+bun run typecheck
+
+echo "✓ Pre-commit checks passed."
