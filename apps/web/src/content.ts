@@ -266,6 +266,11 @@ export const providers: Item[] = [
   { name: 'OpenAI', description: 'GPT models via the OpenAI API.' },
   { name: 'Anthropic', description: 'Claude models via the Anthropic API.' },
   {
+    name: 'Claude Code',
+    description:
+      'Your Claude Pro/Max subscription via the official Claude Agent SDK — no API key.',
+  },
+  {
     name: 'OpenRouter',
     description: 'One key, hundreds of models across providers.',
   },
