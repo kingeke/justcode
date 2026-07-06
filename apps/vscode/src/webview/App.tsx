@@ -1245,24 +1245,14 @@ export function App(): React.JSX.Element {
             <div className="compact-progress">
               <span className="compact-progress-label">
                 Compacting conversation…
-                {state.compactPercent !== undefined
-                  ? ` ~${state.compactPercent}%`
-                  : ''}
                 {state.compactTokens
                   ? ` · ${state.compactTokens.toLocaleString()} summary tokens`
                   : ''}
               </span>
               <div className="compact-progress-bar">
-                {/* Estimated percent drives a real fill; before the first
-                    progress post the bar sweeps indeterminately. */}
-                {state.compactPercent !== undefined ? (
-                  <div
-                    className="compact-progress-fill compact-progress-fill-known"
-                    style={{ width: `${state.compactPercent}%` }}
-                  />
-                ) : (
-                  <div className="compact-progress-fill" />
-                )}
+                {/* Always indeterminate: the summary's final size isn't
+                    knowable while it streams, so there's no honest percent. */}
+                <div className="compact-progress-fill" />
               </div>
             </div>
           ) : (

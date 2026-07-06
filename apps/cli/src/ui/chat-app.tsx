@@ -77,11 +77,7 @@ import { clearModelsCache } from '@providers/http/models-cache';
 import { renderDiff } from '@cli/ui/render-diff.js';
 import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
 import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
-import {
-  DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT,
-  DEFAULT_EXPECTED_SUMMARY_TOKENS,
-  compactProgressPercent,
-} from '@core/application/compact-prompt';
+import { DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT } from '@core/application/compact-prompt';
 import {
   COMMANDS,
   CommandName,
@@ -928,10 +924,6 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   // so each milestone warns once instead of re-flashing every turn. Reset when
   // the pressure drops (compaction, new session).
   const autoCompactWarnedMilestoneRef = useRef<number | null>(null);
-  // Expected summary size for the compaction progress percentage: seeded with
-  // the default, replaced by each compaction's actual summary size, so the
-  // estimate tracks how this model/session actually summarizes.
-  const expectedSummaryTokensRef = useRef(DEFAULT_EXPECTED_SUMMARY_TOKENS);
   // Reasoning effort is chosen per model (only models that advertise reasoning
   // support), nested by provider id. The ref mirrors the map so the submit
   // closure reads fresh values.
@@ -2440,14 +2432,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           lastProgressUpdate = now;
           // Same chars→tokens heuristic as estimateTokenCount.
           const summaryTokens = Math.max(1, Math.round(summaryChars / 4));
-          const pct = compactProgressPercent(
-            summaryTokens,
-            expectedSummaryTokensRef.current
-          );
           flashCommandNotice(
             new StyledText([
               tc('Compacting ', { fg: MUTED }),
-              tc(`${contextBar(pct)} ~${pct}%`, { fg: 'cyan' }),
+              tc(compactSweepBar(now), { fg: 'cyan' }),
               tc(` · ${summaryTokens.toLocaleString()} summary tokens`, {
                 fg: MUTED,
               }),
@@ -2477,13 +2465,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         lastInputTokens: 0,
       }));
       persistSessionStats(result.conversation.sessionId);
-      // Pressure has dropped back to zero; re-arm the approach warnings, and
-      // remember this summary's size as the next compaction's 100% estimate.
+      // Pressure has dropped back to zero; re-arm the approach warnings.
       autoCompactWarnedMilestoneRef.current = null;
-      expectedSummaryTokensRef.current = Math.max(
-        1,
-        Math.round(result.summary.length / 4)
-      );
       setStatus('Ready');
       flashCommandNotice('Conversation compacted');
     } catch (caughtError: unknown) {
@@ -4519,6 +4502,19 @@ function autoCompactWarnMilestone(pointsLeft: number): number | null {
   if (pointsLeft > AUTO_COMPACT_WARN_MARGIN) return null;
   if (pointsLeft <= 3) return Math.max(1, Math.ceil(pointsLeft));
   return AUTO_COMPACT_WARN_MARGIN;
+}
+
+/**
+ * Indeterminate compaction bar: a block bouncing left and right, positioned
+ * from wall-clock time so each throttled progress repaint advances it. The
+ * summary's final size isn't knowable while it streams, so there is no honest
+ * percentage to show.
+ */
+function compactSweepBar(now: number, width = 20, span = 4): string {
+  const range = width - span;
+  const step = Math.floor(now / 120) % (2 * range);
+  const pos = step < range ? step : 2 * range - step;
+  return `[${'░'.repeat(pos)}${'█'.repeat(span)}${'░'.repeat(range - pos)}]`;
 }
 
 /** ASCII progress bar for the /context-usage readout, e.g. [████░░░░░░░░]. */

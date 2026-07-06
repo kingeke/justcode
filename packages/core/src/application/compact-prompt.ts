@@ -70,28 +70,6 @@ export function extractCompactSummary(content: string): string {
 export const DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT = 80;
 
 /**
- * Expected summary size (in tokens) used to turn the streamed summary into a
- * progress percentage before any compaction has run. The real total is
- * unknowable until the model stops, so hosts show
- * `min(99, streamed / expected)` and replace the estimate with the previous
- * summary's actual size after each compaction.
- */
-export const DEFAULT_EXPECTED_SUMMARY_TOKENS = 800;
-
-/**
- * Estimated progress percentage for a compaction, from the summary tokens
- * streamed so far against the expected total. Capped at 99 — only the model
- * finishing gets to say 100.
- */
-export function compactProgressPercent(
-  streamedTokens: number,
-  expectedTokens: number
-): number {
-  if (expectedTokens <= 0) return 0;
-  return Math.min(99, Math.round((streamedTokens / expectedTokens) * 100));
-}
-
-/**
  * Opens the flagged user message that seeds a post-compaction conversation,
  * framing the summary as carried-over context rather than a fresh request.
  */

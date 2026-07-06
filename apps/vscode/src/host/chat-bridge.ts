@@ -41,8 +41,6 @@ import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
 import {
   DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT,
   DEFAULT_COMPACT_PROMPT,
-  DEFAULT_EXPECTED_SUMMARY_TOKENS,
-  compactProgressPercent,
 } from '@core/application/compact-prompt';
 import {
   readGlobalConfig,
@@ -190,9 +188,6 @@ export class ChatBridge {
   // so each milestone posts one notice instead of re-warning every turn.
   // Reset when the pressure drops (compaction, metrics reset).
   private autoCompactWarnedMilestone: number | null = null;
-  // Expected summary size for the compaction progress percentage: seeded with
-  // the default, replaced by each compaction's actual summary size.
-  private expectedSummaryTokens = DEFAULT_EXPECTED_SUMMARY_TOKENS;
   private thinkingCollapsed = false;
   // When true (default), local providers refetch their model list every load;
   // when false they use the once-a-day cache. Applied to the live runtime via
@@ -1280,16 +1275,24 @@ export class ChatBridge {
       turnSucceeded = true;
     } catch (error) {
       const aborted = isAbortError(error);
-      if (aborted && this.conversation) {
-        // The service persisted everything the interrupted turn produced — the
-        // user prompt, completed tool rounds, per-step thinking, and the
-        // partial streamed answer — and attached the saved conversation to the
-        // abort error. Adopt it and push the rebuilt transcript to the webview
-        // as a committed turn. Without this the partial lives only in the
-        // webview's transient `liveTurnItems`, which the next submit clears —
-        // so the interrupted answer would vanish the moment a new message is
-        // sent.
-        const interruptedConversation = getInterruptedConversation(error);
+      if (this.conversation) {
+        // On abort, the service persisted everything the interrupted turn
+        // produced — the user prompt, completed tool rounds, per-step
+        // thinking, and the partial streamed answer — and attached the saved
+        // conversation to the abort error. Adopt it and push the rebuilt
+        // transcript to the webview as a committed turn. Without this the
+        // partial lives only in the webview's transient `liveTurnItems`,
+        // which the next submit clears — so the interrupted answer would
+        // vanish the moment a new message is sent.
+        //
+        // A plain failure (e.g. a network error before the stream started)
+        // persists nothing at all, so it takes the same fallback: committing
+        // the prompt gives the webview a real message id in place of its
+        // optimistic `local-` echo, which is what makes the retry/edit
+        // actions available on the failed message.
+        const interruptedConversation = aborted
+          ? getInterruptedConversation(error)
+          : undefined;
         if (interruptedConversation) {
           this.conversation =
             interruptedConversation.title || !this.conversation.title
@@ -1299,8 +1302,9 @@ export class ChatBridge {
                   title: this.conversation.title,
                 };
         } else {
-          // Fallback (e.g. the service's persist failed): rebuild the exchange
-          // from this bridge's streaming buffers and save it ourselves.
+          // Plain failures land here (aborts too, if the service's persist
+          // failed): rebuild the exchange from this bridge's streaming
+          // buffers and save it ourselves.
           const userMessage = createMessage(
             'user',
             content,
@@ -2208,7 +2212,6 @@ export class ChatBridge {
             type: HostMessageType.CompactStatus,
             running: true,
             tokens,
-            percent: compactProgressPercent(tokens, this.expectedSummaryTokens),
           });
         },
       });
@@ -2227,13 +2230,8 @@ export class ChatBridge {
         this.accumulateUsage(result.usage);
       }
       this.lastInputTokens = 0;
-      // Pressure has dropped back to zero; re-arm the approach warnings, and
-      // remember this summary's size as the next compaction's 100% estimate.
+      // Pressure has dropped back to zero; re-arm the approach warnings.
       this.autoCompactWarnedMilestone = null;
-      this.expectedSummaryTokens = Math.max(
-        1,
-        Math.round(result.summary.length / 4)
-      );
       this.persistSessionStats(services);
       this.post({
         type: HostMessageType.TurnComplete,

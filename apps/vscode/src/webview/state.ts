@@ -158,8 +158,6 @@ export interface ChatState {
   compacting: boolean;
   /** Rough size of the summary streamed so far during compaction (chars/4). */
   compactTokens?: number | undefined;
-  /** Estimated compaction progress percent (capped at 99); see protocol note. */
-  compactPercent?: number | undefined;
   /** When true, thinking blocks start collapsed (user must click to expand). */
   thinkingCollapsed: boolean;
   /** When true (default), local providers refetch their model list every load. */
@@ -442,7 +440,6 @@ export function reducer(state: ChatState, action: Action): ChatState {
         ...state,
         compacting: action.running,
         compactTokens: action.running ? action.tokens : undefined,
-        compactPercent: action.running ? action.percent : undefined,
         ...(action.error ? { error: action.error } : {}),
       };
 

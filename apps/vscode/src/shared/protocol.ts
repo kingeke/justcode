@@ -598,13 +598,6 @@ export interface CompactStatusMessage {
   running: boolean;
   /** Rough size of the summary streamed so far (chars/4), pushed periodically. */
   tokens?: number;
-  /**
-   * Estimated progress: streamed tokens against the previous summary's size
-   * (default before any compaction has run), capped at 99 — the real total
-   * isn't knowable until the model stops, so treat this as a good-faith
-   * estimate, not ground truth.
-   */
-  percent?: number;
   error?: string;
 }
 

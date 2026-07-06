@@ -2659,20 +2659,15 @@ textarea:focus {
   animation: compact-progress-sweep 1.2s ease-in-out infinite;
 }
 
-/* Once an estimated percent is known the fill anchors left and grows with it
-   instead of sweeping. */
-.compact-progress-fill-known {
-  left: 0;
-  animation: none;
-  transition: width 0.25s ease-out;
-}
-
+/* The block bounces left and right for the whole compaction — the summary's
+   final size isn't knowable while it streams, so no percent fill is shown. */
 @keyframes compact-progress-sweep {
-  0% {
-    left: -35%;
-  }
+  0%,
   100% {
-    left: 100%;
+    left: 0;
+  }
+  50% {
+    left: 65%;
   }
 }
 
