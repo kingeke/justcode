@@ -52,7 +52,12 @@ const hostBuild = {
   // and crashes extension activation. It is only loaded lazily (dynamic
   // import in @providers/claude-code) and stays external so it is never
   // evaluated inside this bundle; the Claude Code provider is CLI-only today.
-  external: ['vscode', 'undici', 'node:undici', '@anthropic-ai/claude-agent-sdk'],
+  external: [
+    'vscode',
+    'undici',
+    'node:undici',
+    '@anthropic-ai/claude-agent-sdk',
+  ],
 };
 
 // The webview runs in a browser context; bundle React + the UI to an IIFE and
