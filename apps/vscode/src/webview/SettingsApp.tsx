@@ -327,7 +327,10 @@ export function SettingsApp(): React.JSX.Element {
     providerId: string,
     apiKey: string | undefined,
     baseUrl: string | undefined,
-    onResult: (result: { success: boolean; error?: string | undefined }) => void,
+    onResult: (result: {
+      success: boolean;
+      error?: string | undefined;
+    }) => void,
     executablePath?: string | undefined,
     configDir?: string | undefined
   ): void => {

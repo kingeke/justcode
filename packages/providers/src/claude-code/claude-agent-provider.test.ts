@@ -246,7 +246,9 @@ describe('ClaudeAgentProvider', () => {
 
   it('omits env entirely when no config-dir is set', async () => {
     const harness = new FakeQueryHarness();
-    const provider = new ClaudeAgentProvider({ createQuery: harness.createQuery });
+    const provider = new ClaudeAgentProvider({
+      createQuery: harness.createQuery,
+    });
 
     const send = provider.sendChat({
       model: 'claude-sonnet-5',

@@ -65,7 +65,9 @@ export async function detectClaudeConfigDirs(): Promise<string[]> {
   let entries: string[];
   try {
     entries = (await readdir(home, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory() && entry.name.startsWith('.claude'))
+      .filter(
+        (entry) => entry.isDirectory() && entry.name.startsWith('.claude')
+      )
       .map((entry) => entry.name);
   } catch {
     return [];

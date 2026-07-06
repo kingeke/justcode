@@ -46,7 +46,8 @@ export interface Command extends PaletteCommand {
 export const COMMANDS: Command[] = [
   {
     name: CommandName.Usage,
-    description: 'Show plan usage/limits reported by the provider (Claude Code)',
+    description:
+      'Show plan usage/limits reported by the provider (Claude Code)',
   },
   {
     name: CommandName.Connect,

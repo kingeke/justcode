@@ -614,8 +614,7 @@ export class ClaudeAgentProvider implements ProviderClient {
     sessionId?: string
   ): Promise<ProviderUsageSummary> {
     const bridge = sessionId ? this.sessions.get(sessionId) : undefined;
-    const existing =
-      bridge ?? this.sessions.values().next().value ?? undefined;
+    const existing = bridge ?? this.sessions.values().next().value ?? undefined;
     if (existing) {
       return toUsageSummary(await queryUsage(existing.query));
     }
