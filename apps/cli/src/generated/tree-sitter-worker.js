@@ -3253,7 +3253,7 @@ var Parser = class {
   }
 };
 
-// node_modules/.pnpm/@opentui+core@0.4.2_typescript@5.9.3_web-tree-sitter@0.25.10/node_modules/@opentui/core/parser.worker.js
+// node_modules/.pnpm/@opentui+core@0.4.3_typescript@5.9.3_web-tree-sitter@0.25.10/node_modules/@opentui/core/parser.worker.js
 import { mkdir as mkdir3 } from "fs/promises";
 import * as path2 from "path";
 import { mkdir, readFile, writeFile } from "fs/promises";
