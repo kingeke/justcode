@@ -42,6 +42,11 @@ import {
   ToolIcon,
 } from '@ext/webview/components/Icons';
 
+// The Claude Code provider id (matches `ProviderId.ClaudeCode`). Hardcoded here
+// rather than imported from the catalog, which pulls Node-only provider code
+// into this browser-targeted webview bundle.
+const CLAUDE_CODE_PROVIDER_ID = 'claude-code';
+
 /**
  * Reads a pasted image File into the base64 form the wire expects (no `data:`
  * URI prefix). Resolves null if the file can't be read.
@@ -471,12 +476,31 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   const [slashIndex, setSlashIndex] = React.useState(0);
   const [slashDismissed, setSlashDismissed] = React.useState(false);
   const slashQuery = React.useMemo(() => getActiveSlashQuery(value), [value]);
+  // Built-in host commands that live in the same `/` menu as skill commands.
+  // `/usage` reports subscription plan limits, which only Claude Code surfaces,
+  // so it's offered only when that provider is active (mirrors the CLI palette).
+  const hostSlashCommands = React.useMemo<WebviewSkillCommand[]>(
+    () =>
+      props.activeProviderId === CLAUDE_CODE_PROVIDER_ID
+        ? [
+            {
+              name: 'usage',
+              skillName: '',
+              description: 'Show plan usage and limits (Claude Code)',
+            },
+          ]
+        : [],
+    [props.activeProviderId]
+  );
   const slashSuggestions = React.useMemo(
     () =>
       slashQuery !== undefined
-        ? filterSkillCommands(props.skillCommands ?? [], slashQuery)
+        ? filterSkillCommands(
+            [...hostSlashCommands, ...(props.skillCommands ?? [])],
+            slashQuery
+          )
         : [],
-    [slashQuery, props.skillCommands]
+    [slashQuery, props.skillCommands, hostSlashCommands]
   );
   const slashOpen =
     slashQuery !== undefined && !slashDismissed && slashSuggestions.length > 0;

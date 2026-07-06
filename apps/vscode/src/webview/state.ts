@@ -122,6 +122,8 @@ export interface ChatState {
   notice?: string | undefined;
   /** When set, the notice self-dismisses after this many ms (see App effect). */
   noticeTimeoutMs?: number | undefined;
+  /** When true, the notice is a loading state — banner shows a spinner. */
+  noticeLoading?: boolean | undefined;
   messages: WebviewMessage[];
   busy: boolean;
   thinking: string;
@@ -433,6 +435,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         ...state,
         notice: action.notice,
         noticeTimeoutMs: action.timeoutMs,
+        noticeLoading: action.loading,
       };
 
     case HostMessageType.CompactStatus:
@@ -443,12 +446,21 @@ export function reducer(state: ChatState, action: Action): ChatState {
         ...(action.error ? { error: action.error } : {}),
       };
 
-    case HostMessageType.ModelsUpdate:
+    case HostMessageType.ModelsUpdate: {
+      // The initial load shows a "some providers could not be reached" banner
+      // when the active provider's first `listModels` fails — often just a cold
+      // start (e.g. Claude Code spawning its runtime). The background refresh
+      // then re-lists every provider; when that comes back clean, the banner is
+      // stale, so clear it once the errors go away.
+      const clearedStaleBanner =
+        state.providerErrors.length > 0 && action.providerErrors.length === 0;
       return {
         ...state,
         models: action.models,
         providerErrors: action.providerErrors,
+        ...(clearedStaleBanner ? { notice: undefined } : {}),
       };
+    }
 
     case HostMessageType.SteeringConsumed: {
       // The host folded these queued follow-ups into the running turn. Drop their

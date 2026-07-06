@@ -25,6 +25,10 @@ function baseConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       defaultModel: 'gpt-4.1-mini',
       oauth: undefined,
     },
+    claudeCode: {
+      executablePath: undefined,
+      configDir: undefined,
+    },
     anthropic: {
       apiKey: undefined,
       baseUrl: 'https://api.anthropic.com',

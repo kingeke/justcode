@@ -187,7 +187,9 @@ export class SettingsPanel {
           cacheDirectory(),
           message.providerId,
           message.apiKey,
-          message.baseUrl
+          message.baseUrl,
+          message.executablePath,
+          message.configDir
         );
         this.post({
           type: SettingsHostMessageType.ConnectResult,

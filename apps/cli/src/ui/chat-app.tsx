@@ -1045,6 +1045,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const reasoningAvailable = Boolean(
     activeModelInfo?.reasoning?.effortLevels.length
   );
+  // `/usage` reports subscription plan limits, which only the Claude Code
+  // provider surfaces; hide it entirely for every other provider.
+  const usageAvailable =
+    (activeModelInfo?.providerId ?? activeProviderId) === ProviderId.ClaudeCode;
   // Built-ins plus every installed skill command. A skill command lists under
   // its bare name while unique, or its namespaced `skill:command` form when the
   // name is contested (see buildSkillCommandIndex).
@@ -1061,10 +1065,18 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     () =>
       isCommandMode
         ? filterCommands(commandQuery, paletteCommands).filter(
-            (cmd) => reasoningAvailable || cmd.name !== CommandName.Reasoning
+            (cmd) =>
+              (reasoningAvailable || cmd.name !== CommandName.Reasoning) &&
+              (usageAvailable || cmd.name !== CommandName.Usage)
           )
         : [],
-    [isCommandMode, commandQuery, reasoningAvailable, paletteCommands]
+    [
+      isCommandMode,
+      commandQuery,
+      reasoningAvailable,
+      usageAvailable,
+      paletteCommands,
+    ]
   );
   // The argument hint of the skill command the input currently invokes, shown
   // as ghost text right after the cursor once the command name is fully typed
@@ -1325,6 +1337,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const commandNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
+  // True while `/usage` is fetching plan usage from the provider (Claude Code
+  // spawns a probe, which takes a moment), so the notice slot can show a spinner
+  // instead of leaving the user wondering whether the command registered.
+  const [usageLoading, setUsageLoading] = useState(false);
 
   const flashCommandNotice = (text: StyledText | string): void => {
     setCommandNotice(text);
@@ -2070,6 +2086,75 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             ? `Context window set to ${count} items`
             : 'Context window turned off — sending the full conversation'
         );
+        return;
+      }
+
+      case CommandName.Usage: {
+        const usageProviderId = activeModelInfo?.providerId ?? activeProviderId;
+        if (!usageProviderId) {
+          flashCommandNotice('Connect a provider before checking usage');
+          return;
+        }
+        const usageClient = resolveProviderClient(usageProviderId);
+        if (!usageClient.getUsageSummary) {
+          flashCommandNotice(
+            `The ${String(usageProviderId)} provider doesn't report plan usage`
+          );
+          return;
+        }
+        setUsageLoading(true);
+        void usageClient
+          .getUsageSummary(currentSessionId)
+          .then((summary) => {
+            const chunks: TextChunk[] = [];
+            if (summary.plan) {
+              chunks.push(tc(`${summary.plan} `, { fg: 'white' }));
+            }
+            for (const window of summary.windows) {
+              if (chunks.length > 0) chunks.push(tc(' · ', { fg: MUTED }));
+              chunks.push(tc(`${window.label} `, { fg: MUTED }));
+              if (window.utilization != null) {
+                const pct = Math.round(window.utilization);
+                chunks.push(
+                  tc(`${contextBar(pct)} ${pct}%`, {
+                    fg: contextUsageColor(pct),
+                  })
+                );
+              } else {
+                chunks.push(tc('n/a', { fg: MUTED }));
+              }
+              if (window.resetsAt) {
+                const resets = new Date(window.resetsAt);
+                if (!Number.isNaN(resets.getTime())) {
+                  chunks.push(
+                    tc(
+                      ` resets ${resets.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`,
+                      { fg: MUTED }
+                    )
+                  );
+                }
+              }
+            }
+            if (summary.windows.length === 0) {
+              chunks.push(tc('no rate-limit windows reported', { fg: MUTED }));
+            }
+            if (summary.sessionCostUsd != null) {
+              chunks.push(tc(' · ', { fg: MUTED }));
+              chunks.push(
+                tc(`session ≈$${summary.sessionCostUsd.toFixed(4)}`, {
+                  fg: MUTED,
+                })
+              );
+            }
+            setUsageLoading(false);
+            flashCommandNotice(new StyledText(chunks));
+          })
+          .catch((error: unknown) => {
+            setUsageLoading(false);
+            flashCommandNotice(
+              `Usage lookup failed: ${error instanceof Error ? error.message : String(error)}`
+            );
+          });
         return;
       }
 
@@ -4124,6 +4209,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
               usual stats/status content returns when the timer clears it. */}
           {copiedNotice ? (
             <text content={statusLineContent('✓ Copied to clipboard')} />
+          ) : usageLoading ? (
+            <box flexDirection="row">
+              <Spinner fg="cyan" />
+              <text fg={MUTED}> Fetching usage…</text>
+            </box>
           ) : commandNotice ? (
             <text
               content={

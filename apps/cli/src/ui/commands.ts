@@ -23,6 +23,7 @@ export enum CommandName {
   ReadLimit = 'read-limit',
   ContextWindow = 'context-window',
   ContextUsage = 'context-usage',
+  Usage = 'usage',
   Compact = 'compact',
   AutoCompact = 'auto-compact',
   Config = 'config',
@@ -43,6 +44,10 @@ export interface Command extends PaletteCommand {
 }
 
 export const COMMANDS: Command[] = [
+  {
+    name: CommandName.Usage,
+    description: 'Show plan usage/limits reported by the provider (Claude Code)',
+  },
   {
     name: CommandName.Connect,
     description: 'Search providers and connect to one',

@@ -44,6 +44,13 @@ import { ToolName } from '@core/domain/tool-name';
 
 const PRESENT_PLAN_TOOL = ToolName.PresentPlan;
 
+/**
+ * Slash commands the host answers itself (with a transient notice) rather than
+ * running a model turn. They bypass the optimistic-submit path so the webview
+ * never enters the `busy` state for a turn that never starts.
+ */
+const HOST_COMMANDS = new Set(['/usage']);
+
 export function App(): React.JSX.Element {
   const [state, dispatch] = React.useReducer(reducer, initialState);
   // The image (data URL) shown full-size in the preview modal, or null when closed.
@@ -336,6 +343,15 @@ export function App(): React.JSX.Element {
   }, [state.approval, state.input, pinToBottom]);
 
   const sendNow = (content: string, images: WebviewImage[]): void => {
+    // Host-only commands (e.g. `/usage`) aren't model turns: the host answers
+    // them with a transient notice and never runs the agent, so it never sends
+    // `TurnComplete`. Post them straight through without the optimistic submit —
+    // otherwise the webview would flip to `busy` and hang on a turn that never
+    // starts (no streaming, nothing to cancel).
+    if (HOST_COMMANDS.has(content.trim())) {
+      postToHost({ type: WebviewMessageType.Submit, content });
+      return;
+    }
     // Sending a new message should always snap to it, even if the user had
     // scrolled up while reading the previous turn.
     stickToBottomRef.current = true;
@@ -354,6 +370,14 @@ export function App(): React.JSX.Element {
   };
 
   const submit = (content: string, images: WebviewImage[]): void => {
+    // Host-only commands (e.g. `/usage`) run immediately and independently of
+    // the turn — never queued or mirrored into the steering queue (which would
+    // fold them into the running turn as actual model input). `sendNow` routes
+    // them straight to the host.
+    if (HOST_COMMANDS.has(content.trim())) {
+      sendNow(content, images);
+      return;
+    }
     // A turn is in flight — hold this message and send it once the agent is idle
     // instead of erroring. It's shown as a pending pill the user can cancel.
     if (state.busy) {
@@ -1014,7 +1038,7 @@ export function App(): React.JSX.Element {
             {/* Persistent notices render in-flow at the top; transient ones
                 (auto-compact warnings etc.) use the floating banner below so
                 they're visible regardless of scroll position. */}
-            {state.notice && !state.noticeTimeoutMs ? (
+            {state.notice && !state.noticeTimeoutMs && !state.noticeLoading ? (
               <div className="notice">{state.notice}</div>
             ) : null}
 
@@ -1238,7 +1262,10 @@ export function App(): React.JSX.Element {
             and out so it's visible regardless of transcript scroll position. */}
         <FloatingBanner
           show={
-            state.compacting || Boolean(state.notice && state.noticeTimeoutMs)
+            state.compacting ||
+            Boolean(
+              state.notice && (state.noticeTimeoutMs || state.noticeLoading)
+            )
           }
         >
           {state.compacting ? (
@@ -1255,6 +1282,11 @@ export function App(): React.JSX.Element {
                 <div className="compact-progress-fill" />
               </div>
             </div>
+          ) : state.noticeLoading ? (
+            <span className="notice-loading">
+              <span className="notice-loading-spinner" aria-hidden="true" />
+              {state.notice}
+            </span>
           ) : (
             <span>{state.notice}</span>
           )}

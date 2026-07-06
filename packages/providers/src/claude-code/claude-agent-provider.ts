@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type {
   query,
   McpServerConfig,
@@ -18,6 +20,8 @@ import {
   type ChatResult,
   type ModelInfo,
   type ProviderClient,
+  type ProviderUsageSummary,
+  type ProviderUsageWindow,
   type TokenUsage,
 } from '@core/ports/chat-model';
 import { ProviderId } from '@core/ports/provider-catalog';
@@ -220,6 +224,19 @@ export interface ClaudeAgentProviderOptions {
    * the bridge without spawning the real Claude Code runtime.
    */
   createQuery?: typeof query;
+  /**
+   * Custom `claude` executable to spawn instead of the SDK's default
+   * resolution — for users with multiple installs (personal vs work logins).
+   */
+  executablePath?: string | undefined;
+  /**
+   * `CLAUDE_CONFIG_DIR` for the spawned runtime — selects which Claude Code
+   * config/login directory (and therefore which account/subscription) to use.
+   * This is what shell aliases like `claude-w` set (e.g.
+   * `CLAUDE_CONFIG_DIR=~/.claude-work claude`). A leading `~` is expanded to the
+   * home directory. Omitted/blank means the runtime's default (`~/.claude`).
+   */
+  configDir?: string | undefined;
 }
 
 /**
@@ -248,6 +265,60 @@ export function setAgentSdkLoader(
   sdkModulePromise = undefined;
 }
 
+/**
+ * Expands a leading `~` (as used in shell aliases like `~/.claude-work`) to the
+ * home directory, since the spawned subprocess won't do tilde expansion itself.
+ * Other paths pass through unchanged.
+ */
+function expandHome(path: string): string {
+  if (path === '~') return homedir();
+  if (path.startsWith('~/')) return join(homedir(), path.slice(2));
+  return path;
+}
+
+/** How many times {@link ClaudeAgentProvider.listModels} retries the probe. */
+const PROBE_ATTEMPTS = 3;
+/** Delay between probe attempts. */
+const PROBE_RETRY_DELAY_MS = 500;
+/** Per-attempt timeout so a hung runtime can't stall model listing. */
+const PROBE_TIMEOUT_MS = 20_000;
+
+/**
+ * Claude Code's stable model aliases, returned only when the live probe can't
+ * be reached, so the picker is never empty and no "provider unreachable" banner
+ * appears. `default` (the account's own default) leads so it's auto-selected.
+ * Effort/reasoning metadata is intentionally omitted here — the background
+ * refresh fills in the authoritative list (with effort support) once a probe
+ * succeeds.
+ */
+const FALLBACK_MODELS: Omit<ModelInfo, 'providerId'>[] = [
+  { id: 'default', displayName: 'Default (account)' },
+  { id: 'sonnet', displayName: 'Sonnet' },
+  { id: 'opus', displayName: 'Opus' },
+  { id: 'haiku', displayName: 'Haiku' },
+];
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Rejects with {@link message} if {@link promise} doesn't settle within {@link ms}. */
+async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  message: string
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function loadQuery(): Promise<typeof query> {
   sdkModulePromise ??= sdkLoader
     ? sdkLoader()
@@ -271,9 +342,36 @@ export class ClaudeAgentProvider implements ProviderClient {
   public readonly requiresStableToolset = true;
   private readonly sessions = new Map<string, SessionBridge>();
   private readonly injectedCreateQuery: typeof query | undefined;
+  private readonly executablePath: string | undefined;
+  private readonly configDir: string | undefined;
 
   public constructor(options: ClaudeAgentProviderOptions = {}) {
     this.injectedCreateQuery = options.createQuery;
+    this.executablePath = options.executablePath;
+    this.configDir = options.configDir
+      ? expandHome(options.configDir)
+      : undefined;
+  }
+
+  /**
+   * SDK options selecting the executable and config dir. Merged into every query
+   * this provider spawns (sessions, model/usage probes, ephemeral). `env`
+   * REPLACES the subprocess environment, so `process.env` is spread in and only
+   * `CLAUDE_CONFIG_DIR` is overridden; when no config dir is set, `env` is
+   * omitted entirely so the subprocess inherits the environment normally.
+   */
+  private executableOptions(): Pick<
+    Options,
+    'pathToClaudeCodeExecutable' | 'env'
+  > {
+    return {
+      ...(this.executablePath
+        ? { pathToClaudeCodeExecutable: this.executablePath }
+        : {}),
+      ...(this.configDir
+        ? { env: { ...process.env, CLAUDE_CONFIG_DIR: this.configDir } }
+        : {}),
+    };
   }
 
   /** The injected test double, or the lazily-imported real SDK entry point. */
@@ -390,16 +488,65 @@ export class ClaudeAgentProvider implements ProviderClient {
   }
 
   public async listModels(): Promise<ModelInfo[]> {
-    // supportedModels is a control request, so it needs a live session; open a
-    // throwaway streaming-input query (which never sends a prompt) and close it.
+    // Spawning the runtime just to read its model list is occasionally flaky in
+    // some hosts (notably the VS Code extension's Electron process, where the
+    // probe can fail even though the same call succeeds from a plain shell).
+    // Retry a couple of times, then fall back to the known model set rather than
+    // throwing — a throw would dead-end the picker (no models, and the host's
+    // "some providers could not be reached" banner) even though chat itself
+    // works fine. The background model refresh replaces the fallback with the
+    // authoritative list once a probe succeeds.
+    for (let attempt = 0; attempt < PROBE_ATTEMPTS; attempt++) {
+      try {
+        return await this.probeSupportedModels();
+      } catch (error) {
+        if (attempt === PROBE_ATTEMPTS - 1) {
+          await logRequestResponse({
+            request: {
+              url: 'claude-code://listModels',
+              method: 'listModels',
+              body: {},
+            },
+            response: {
+              url: 'claude-code://listModels',
+              status: 0,
+              ok: false,
+              body: error,
+            },
+          });
+          return FALLBACK_MODELS.map((model) => ({
+            ...model,
+            providerId: this.providerId,
+          }));
+        }
+        await delay(PROBE_RETRY_DELAY_MS);
+      }
+    }
+    // Unreachable (the loop always returns), but satisfies the type checker.
+    return FALLBACK_MODELS.map((model) => ({
+      ...model,
+      providerId: this.providerId,
+    }));
+  }
+
+  /**
+   * One `supportedModels` probe: opens a throwaway streaming-input query (which
+   * never sends a prompt), reads the model list, and closes it — bounded by a
+   * timeout so a hung runtime can't stall the caller indefinitely.
+   */
+  private async probeSupportedModels(): Promise<ModelInfo[]> {
     const input = new UserMessageStream();
     const createQuery = await this.resolveCreateQuery();
     const probe = createQuery({
       prompt: input,
-      options: { tools: [], settingSources: [] },
+      options: { tools: [], settingSources: [], ...this.executableOptions() },
     });
     try {
-      const models = await probe.supportedModels();
+      const models = await withTimeout(
+        probe.supportedModels(),
+        PROBE_TIMEOUT_MS,
+        'Timed out reading Claude Code models.'
+      );
       return models.map((model) => ({
         id: model.value,
         displayName: model.displayName,
@@ -440,6 +587,7 @@ export class ClaudeAgentProvider implements ProviderClient {
         tools: [],
         settingSources: [],
         strictMcpConfig: true,
+        ...this.executableOptions(),
         includePartialMessages: true,
         ...(systemMessage ? { systemPrompt: systemMessage.content } : {}),
         ...effortOptions(request.reasoningEffort),
@@ -454,6 +602,35 @@ export class ClaudeAgentProvider implements ProviderClient {
     } finally {
       bridge.input.close();
       await bridge.query.return(undefined).catch(() => {});
+    }
+  }
+
+  /**
+   * Plan usage for `/usage`: session cost plus the claude.ai rate-limit
+   * windows. Uses the chat's live session when one exists (so session cost is
+   * real); otherwise opens a short-lived probe query just for the lookup.
+   */
+  public async getUsageSummary(
+    sessionId?: string
+  ): Promise<ProviderUsageSummary> {
+    const bridge = sessionId ? this.sessions.get(sessionId) : undefined;
+    const existing =
+      bridge ?? this.sessions.values().next().value ?? undefined;
+    if (existing) {
+      return toUsageSummary(await queryUsage(existing.query));
+    }
+
+    const input = new UserMessageStream();
+    const createQuery = await this.resolveCreateQuery();
+    const probe = createQuery({
+      prompt: input,
+      options: { tools: [], settingSources: [], ...this.executableOptions() },
+    });
+    try {
+      return toUsageSummary(await queryUsage(probe));
+    } finally {
+      input.close();
+      await probe.return(undefined).catch(() => {});
     }
   }
 
@@ -481,6 +658,7 @@ export class ClaudeAgentProvider implements ProviderClient {
       // settings/hooks/CLAUDE.md — the engine already provides all context.
       tools: [],
       settingSources: [],
+      ...this.executableOptions(),
       mcpServers: {
         [MCP_SERVER_NAME]: this.createMcpServerConfig(bridge),
       },
@@ -592,20 +770,20 @@ export class ClaudeAgentProvider implements ProviderClient {
       : -1;
     let fresh = conversation.slice(lastSeenIndex + 1);
 
+    // When starting a fresh session over an existing conversation (resumed after
+    // a restart/provider switch, or rebuilt after compaction or a history edit),
+    // the session missed everything up to the final user message. We replay it
+    // as context — but folded INTO that user message rather than sent as its own
+    // `shouldQuery: false` message: the current Agent SDK returns an *empty* turn
+    // when a non-querying message precedes the querying one, so the whole reply
+    // would come back blank ("provider returned an empty response").
+    let contextPreamble = '';
     if (lastSeenIndex === -1 && fresh.length > 1) {
-      // New session over an existing conversation (resumed after a restart or
-      // a provider switch): replay what the session missed as context rather
-      // than dropping it. Only the final user message triggers the turn.
       const lastUserIndex = findLastUserIndex(fresh);
       const preamble = fresh.slice(0, lastUserIndex);
-      fresh = fresh.slice(lastUserIndex);
       if (preamble.length > 0) {
-        bridge.input.push(
-          userMessage(
-            `Conversation so far (for context):\n\n${renderTranscript(preamble)}`,
-            { shouldQuery: false }
-          )
-        );
+        contextPreamble = `Conversation so far (for context):\n\n${renderTranscript(preamble)}\n\n`;
+        fresh = fresh.slice(lastUserIndex);
       }
     }
 
@@ -626,17 +804,26 @@ export class ClaudeAgentProvider implements ProviderClient {
         continue;
       }
       if (message.role !== 'user') continue;
-      bridge.input.push(chatMessageToSdkUserMessage(message));
+      const sdkMessage = chatMessageToSdkUserMessage(message);
+      // Prepend the replayed context to the first user message we forward so it
+      // rides along as a single querying turn.
+      if (contextPreamble) {
+        prependContext(sdkMessage, contextPreamble);
+        contextPreamble = '';
+      }
+      bridge.input.push(sdkMessage);
       advancedSession = true;
     }
 
     // Nothing above moved the session forward (e.g. a restored conversation
-    // whose tail is an orphaned tool result with no matching parked handler).
-    // Push a synthetic user turn so `collectTurn` doesn't wait forever.
-    if (!advancedSession && fresh.length > 0) {
+    // whose tail is an orphaned tool result with no matching parked handler),
+    // or a replay whose fresh slice held no querying user message. Push a
+    // synthetic user turn — carrying any unconsumed context — so `collectTurn`
+    // doesn't wait forever.
+    if (!advancedSession && (fresh.length > 0 || contextPreamble)) {
       bridge.input.push(
         userMessage(
-          `The conversation resumed with these messages:\n\n${renderTranscript(fresh)}\n\nContinue.`
+          `${contextPreamble}The conversation resumed with these messages:\n\n${renderTranscript(fresh)}\n\nContinue.`
         )
       );
     }
@@ -764,6 +951,60 @@ export class ClaudeAgentProvider implements ProviderClient {
   }
 }
 
+/** The SDK's structured /usage payload (experimental control request). */
+interface SdkUsageResponse {
+  session?: { total_cost_usd?: number };
+  subscription_type?: string | null;
+  rate_limits?: Record<
+    string,
+    { utilization?: number | null; resets_at?: string | null } | null
+  > | null;
+}
+
+/**
+ * Calls the SDK's /usage control request. The method name carries an
+ * experimental warning label; isolate it here so the rest of the provider
+ * only deals in the normalized {@link ProviderUsageSummary}.
+ */
+async function queryUsage(target: Query): Promise<SdkUsageResponse> {
+  const experimental = target as unknown as {
+    usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(): Promise<SdkUsageResponse>;
+  };
+  return experimental.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
+}
+
+/** Human labels for the rate-limit windows /usage reports. */
+const USAGE_WINDOW_LABELS: Record<string, string> = {
+  five_hour: '5-hour',
+  seven_day: '7-day',
+  seven_day_oauth_apps: '7-day (apps)',
+  seven_day_opus: '7-day (Opus)',
+  seven_day_sonnet: '7-day (Sonnet)',
+};
+
+function toUsageSummary(usage: SdkUsageResponse): ProviderUsageSummary {
+  const windows: ProviderUsageWindow[] = [];
+  for (const [key, window] of Object.entries(usage.rate_limits ?? {})) {
+    // rate_limits mixes utilization windows with config blobs (extra_usage,
+    // limits, spend, …) — only entries with actual window data are shown.
+    if (!window || (window.utilization == null && !window.resets_at)) continue;
+    windows.push({
+      label: USAGE_WINDOW_LABELS[key] ?? key,
+      ...(window.utilization != null
+        ? { utilization: window.utilization }
+        : {}),
+      ...(window.resets_at ? { resetsAt: window.resets_at } : {}),
+    });
+  }
+  return {
+    ...(usage.subscription_type ? { plan: usage.subscription_type } : {}),
+    windows,
+    ...(usage.session?.total_cost_usd != null
+      ? { sessionCostUsd: usage.session.total_cost_usd }
+      : {}),
+  };
+}
+
 function toolNamesKey(tools: ToolDefinition[] | undefined): string {
   return (tools ?? [])
     .map((tool) => tool.name)
@@ -810,6 +1051,21 @@ function userMessage(
     parent_tool_use_id: null,
     ...extra,
   };
+}
+
+/**
+ * Prepends replayed-history context as a leading text block on a user message,
+ * so it travels as part of that querying turn. Used by the resume/rebuild replay
+ * instead of a separate `shouldQuery: false` message, which the current Agent
+ * SDK answers with an empty turn.
+ */
+function prependContext(message: SDKUserMessage, context: string): void {
+  const content = message.message.content;
+  if (Array.isArray(content)) {
+    content.unshift({ type: 'text', text: context } as never);
+  } else {
+    message.message.content = `${context}${content}` as never;
+  }
 }
 
 /**

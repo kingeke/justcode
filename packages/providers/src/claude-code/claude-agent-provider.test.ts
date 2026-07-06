@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -213,6 +215,72 @@ describe('ClaudeAgentProvider', () => {
     expect(harness.options?.tools).toEqual([]);
   });
 
+  it('passes the executable path and config-dir env to the spawned runtime', async () => {
+    const harness = new FakeQueryHarness();
+    const provider = new ClaudeAgentProvider({
+      createQuery: harness.createQuery,
+      executablePath: '/Users/kingeke/.local/bin/claude',
+      configDir: '~/.claude-work',
+    });
+
+    const send = provider.sendChat({
+      model: 'claude-sonnet-5',
+      sessionId: 's1',
+      messages: [createMessage('user', 'hi')],
+    });
+    await harness.nextPrompt();
+    harness.emit(successResult('hey'));
+    await send;
+
+    expect(harness.options?.pathToClaudeCodeExecutable).toBe(
+      '/Users/kingeke/.local/bin/claude'
+    );
+    // The leading `~` is expanded and CLAUDE_CONFIG_DIR selects the account,
+    // while the rest of process.env is preserved (env REPLACES the subprocess
+    // environment, so PATH etc. must still be present).
+    expect(harness.options?.env?.['CLAUDE_CONFIG_DIR']).toBe(
+      join(homedir(), '.claude-work')
+    );
+    expect(harness.options?.env?.['PATH']).toBe(process.env['PATH']);
+  });
+
+  it('omits env entirely when no config-dir is set', async () => {
+    const harness = new FakeQueryHarness();
+    const provider = new ClaudeAgentProvider({ createQuery: harness.createQuery });
+
+    const send = provider.sendChat({
+      model: 'claude-sonnet-5',
+      sessionId: 's1',
+      messages: [createMessage('user', 'hi')],
+    });
+    await harness.nextPrompt();
+    harness.emit(successResult('hey'));
+    await send;
+
+    // No override → the subprocess inherits process.env untouched.
+    expect(harness.options?.env).toBeUndefined();
+    expect(harness.options?.pathToClaudeCodeExecutable).toBeUndefined();
+  });
+
+  it('falls back to the known model set when the probe cannot be reached', async () => {
+    // The fake Query exposes no `supportedModels`, so every probe attempt fails
+    // — exactly the dead-end that must not surface an empty picker/banner.
+    const harness = new FakeQueryHarness();
+    const provider = new ClaudeAgentProvider({
+      createQuery: harness.createQuery,
+    });
+
+    const models = await provider.listModels();
+
+    expect(models.map((m) => m.id)).toEqual([
+      'default',
+      'sonnet',
+      'opus',
+      'haiku',
+    ]);
+    expect(models.every((m) => m.providerId === 'claude-code')).toBe(true);
+  });
+
   it('round-trips a tool call through the blocking MCP handler', async () => {
     const harness = new FakeQueryHarness();
     const provider = new ClaudeAgentProvider({
@@ -390,8 +458,12 @@ describe('ClaudeAgentProvider', () => {
         createMessage('user', 'and now?'),
       ],
     });
-    await harness.nextPrompt();
-    await harness.nextPrompt();
+    // A single rebuilt turn carries the replayed summary folded into the new
+    // user message (a separate context message would return an empty turn).
+    const turn = await harness.nextPrompt();
+    const turnText = JSON.stringify(turn.message.content);
+    expect(turnText).toContain('Summary of the conversation so far');
+    expect(turnText).toContain('and now?');
     harness.emit(successResult('onward'));
     const result = await second;
     expect(result.content).toBe('onward');
@@ -455,14 +527,16 @@ describe('ClaudeAgentProvider', () => {
       ],
     });
 
-    const context = await harness.nextPrompt();
-    expect(context.shouldQuery).toBe(false);
-    const contextText = JSON.stringify(context.message.content);
-    expect(contextText).toContain('first question');
-    expect(contextText).toContain('first answer');
-
+    // The missed history rides along inside the querying user message rather
+    // than a separate `shouldQuery: false` message (which the SDK answers with
+    // an empty turn), so a single prompt carries both the context and the
+    // follow-up.
     const turn = await harness.nextPrompt();
-    expect(JSON.stringify(turn.message.content)).toContain('follow-up');
+    expect(turn.shouldQuery).not.toBe(false);
+    const text = JSON.stringify(turn.message.content);
+    expect(text).toContain('first question');
+    expect(text).toContain('first answer');
+    expect(text).toContain('follow-up');
 
     harness.emit(successResult('answered'));
     const result = await send;

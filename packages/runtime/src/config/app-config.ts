@@ -67,6 +67,12 @@ export interface AppConfig {
     baseUrl: string;
     oauth: OAuthCredentials | undefined;
   };
+  claudeCode: {
+    /** Custom `claude` executable the Agent SDK spawns (blank = SDK default). */
+    executablePath: string | undefined;
+    /** `CLAUDE_CONFIG_DIR` selecting the account/login dir (blank = ~/.claude). */
+    configDir: string | undefined;
+  };
   copilot: {
     baseUrl: string;
     oauth: OAuthCredentials | undefined;
@@ -170,6 +176,12 @@ export async function loadAppConfig(
         configWithDefaults.providers?.anthropic?.baseUrl ??
         'https://api.anthropic.com',
       oauth: configWithDefaults.providers?.anthropic?.oauth,
+    },
+    claudeCode: {
+      executablePath:
+        configWithDefaults.providers?.[ProviderId.ClaudeCode]?.executablePath,
+      configDir:
+        configWithDefaults.providers?.[ProviderId.ClaudeCode]?.configDir,
     },
     copilot: {
       baseUrl:

@@ -1087,6 +1087,15 @@ export class ChatBridge {
     content: string,
     images?: WebviewImage[]
   ): Promise<void> {
+    // `/usage` is a host command, not a turn: show the provider-reported plan
+    // usage (Claude Code) as a transient notice instead of running the model.
+    // Handled before the turn-in-progress guard so it works even while a turn is
+    // running — it neither starts nor steers the turn.
+    if (content.trim() === '/usage') {
+      await this.showProviderUsage(await this.ensureServices());
+      return;
+    }
+
     if (this.abortController || this.compacting) {
       this.post({
         type: HostMessageType.Error,
@@ -1995,6 +2004,72 @@ export class ChatBridge {
     this.resetMetrics();
 
     await this.sendSessionsList();
+  }
+
+  /** Backs the `/usage` command: plan windows + session cost as a notice. */
+  private async showProviderUsage(services: RuntimeServices): Promise<void> {
+    try {
+      if (!services.providerId) {
+        this.post({
+          type: HostMessageType.Notice,
+          notice: 'Connect a provider before checking usage.',
+          timeoutMs: 6000,
+        });
+        return;
+      }
+      const client = services.createProvider(services.providerId);
+      if (!client.getUsageSummary) {
+        this.post({
+          type: HostMessageType.Notice,
+          notice: `The ${String(services.providerId)} provider doesn't report plan usage.`,
+          timeoutMs: 6000,
+        });
+        return;
+      }
+      // Show a spinner while the provider is queried — Claude Code spawns a
+      // probe, which takes a moment. The result notice below replaces it.
+      this.post({
+        type: HostMessageType.Notice,
+        notice: 'Fetching usage…',
+        loading: true,
+      });
+      const summary = await client.getUsageSummary(
+        this.conversation?.sessionId
+      );
+      const parts: string[] = [];
+      for (const window of summary.windows) {
+        const pct =
+          window.utilization != null
+            ? `${Math.round(window.utilization)}%`
+            : 'n/a';
+        const resets = window.resetsAt
+          ? ` (resets ${new Date(window.resetsAt).toLocaleString(undefined, {
+              month: 'short',
+              day: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+            })})`
+          : '';
+        parts.push(`${window.label} ${pct}${resets}`);
+      }
+      if (parts.length === 0) parts.push('no rate-limit windows reported');
+      const plan = summary.plan ? `${summary.plan} · ` : '';
+      const cost =
+        summary.sessionCostUsd != null
+          ? ` · session ≈$${summary.sessionCostUsd.toFixed(4)}`
+          : '';
+      this.post({
+        type: HostMessageType.Notice,
+        notice: `Usage: ${plan}${parts.join(' · ')}${cost}`,
+        timeoutMs: 15000,
+      });
+    } catch (error) {
+      this.post({
+        type: HostMessageType.Notice,
+        notice: `Usage lookup failed: ${errorMessage(error)}`,
+        timeoutMs: 8000,
+      });
+    }
   }
 
   private async switchToProvider(providerId: string): Promise<void> {

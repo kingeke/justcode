@@ -109,6 +109,28 @@ export interface ChatResult {
   finishReason?: string;
 }
 
+/** One plan rate-limit window in a {@link ProviderUsageSummary}. */
+export interface ProviderUsageWindow {
+  /** Human label, e.g. "5-hour" or "7-day". */
+  label: string;
+  /** Percent of the window used, 0–100; undefined when the API omitted it. */
+  utilization?: number | undefined;
+  /** ISO timestamp when the window resets, when known. */
+  resetsAt?: string | undefined;
+}
+
+/**
+ * Subscription/plan usage as reported by the provider (Claude Code's /usage
+ * data). Only providers with an account-level usage surface implement it.
+ */
+export interface ProviderUsageSummary {
+  /** Plan name, e.g. 'pro' | 'max', when the provider reports one. */
+  plan?: string | undefined;
+  windows: ProviderUsageWindow[];
+  /** API-equivalent cost accumulated by the current session, in USD. */
+  sessionCostUsd?: number | undefined;
+}
+
 export interface ProviderClient {
   readonly providerId: ProviderId;
   /**
@@ -123,6 +145,14 @@ export interface ProviderClient {
   sendChat(request: ChatRequest): Promise<ChatResult>;
   listModels(): Promise<ModelInfo[]>;
   getDefaultModel(): string | undefined;
+  /**
+   * Plan usage for a `/usage`-style display. Optional: only providers with an
+   * account-level usage surface (Claude Code) implement it; absent means the
+   * command isn't supported for this provider.
+   */
+  getUsageSummary?:
+    | ((sessionId?: string) => Promise<ProviderUsageSummary>)
+    | undefined;
 }
 
 /**

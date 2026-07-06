@@ -23,6 +23,10 @@ import {
 } from '@runtime/persistence/global-config';
 import { getOAuthFlow } from '@runtime/auth/oauth-flows';
 import type { OAuthLoginContext } from '@runtime/auth/oauth-flow';
+import {
+  detectClaudeExecutable,
+  detectClaudeConfigDirs,
+} from '@providers/claude-code/detect-claude';
 
 import {
   WebviewProviderKind,
@@ -63,6 +67,19 @@ export async function listProviders(
   const config = await readGlobalConfig(configDir);
   const configured = new Set(Object.keys(config.providers ?? {}));
 
+  // Auto-detect a `claude` install once so direct-connect entries can prefill
+  // their executable-path input (mirrors how base URLs are prefilled). Only the
+  // saved path, if any, overrides it.
+  const hasDirectConnect = (PROVIDERS as readonly ProviderCatalogEntry[]).some(
+    (entry) => entry.directConnect
+  );
+  const detectedClaude = hasDirectConnect
+    ? await detectClaudeExecutable()
+    : undefined;
+  const detectedConfigDirs = hasDirectConnect
+    ? await detectClaudeConfigDirs()
+    : [];
+
   const result: WebviewProvider[] = (
     PROVIDERS as readonly ProviderCatalogEntry[]
   ).map((entry) => {
@@ -81,6 +98,13 @@ export async function listProviders(
       // the extension and loaded via extension.ts registerAgentSdk) uses the
       // user's own `claude /login` session.
       directConnect: entry.directConnect,
+      ...(entry.directConnect
+        ? {
+            executablePath: saved?.executablePath ?? detectedClaude ?? '',
+            configDir: saved?.configDir ?? '',
+            configDirOptions: detectedConfigDirs,
+          }
+        : {}),
     };
   });
 
@@ -114,7 +138,9 @@ export async function testAndConnectProvider(
   configDir: string,
   providerId: string,
   apiKey?: string,
-  baseUrl?: string
+  baseUrl?: string,
+  executablePath?: string,
+  claudeConfigDir?: string
 ): Promise<{ success: boolean; error?: string }> {
   const entry = PROVIDER_BY_ID[providerId as ProviderId];
   if (!entry) {
@@ -122,11 +148,15 @@ export async function testAndConnectProvider(
   }
 
   const resolvedBaseUrl = baseUrl?.trim() || entry.baseUrl || '';
+  const resolvedExecutablePath = executablePath?.trim() || undefined;
+  const resolvedConfigDir = claudeConfigDir?.trim() || undefined;
 
   try {
     const client = entry.create({
       apiKey: apiKey?.trim() || undefined,
       baseUrl: resolvedBaseUrl,
+      executablePath: resolvedExecutablePath,
+      configDir: resolvedConfigDir,
     });
 
     const models = await client.listModels();
@@ -145,6 +175,15 @@ export async function testAndConnectProvider(
     }
     if (entry.baseUrlEnvVar) {
       providerConfig.baseUrl = resolvedBaseUrl;
+    }
+    // Direct-connect providers (Claude Code) persist the chosen `claude`
+    // executable so the same install drives every launch; blank auto-resolves.
+    if (entry.directConnect && resolvedExecutablePath) {
+      providerConfig.executablePath = resolvedExecutablePath;
+    }
+    // The chosen account dir (CLAUDE_CONFIG_DIR); blank = default ~/.claude.
+    if (entry.directConnect && resolvedConfigDir) {
+      providerConfig.configDir = resolvedConfigDir;
     }
 
     const config = await readGlobalConfig(configDir);

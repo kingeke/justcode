@@ -19,6 +19,10 @@ import {
   type ProviderConfig,
   type ProviderConnectionInfo,
 } from '@core/ports/provider-catalog';
+import {
+  detectClaudeExecutable,
+  detectClaudeConfigDirs,
+} from '@providers/claude-code/detect-claude';
 import { getOAuthFlow } from '@runtime/auth/oauth-flows';
 import { openBrowser } from '@runtime/auth/open-browser';
 import {
@@ -40,6 +44,8 @@ type WizardStep =
   | 'auth-method'
   | 'api-key'
   | 'base-url'
+  | 'executable-path'
+  | 'config-dir'
   | 'oauth-connect'
   | 'connecting';
 
@@ -113,6 +119,15 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
     useState<ProviderConnectionInfo | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
+  // The `claude` executable path for direct-connect (Claude Code) providers,
+  // prefilled with the saved value or an auto-detected install so users with
+  // several installs (e.g. `claude` and `claude-w`) can confirm or change it.
+  const [executablePath, setExecutablePath] = useState('');
+  // The CLAUDE_CONFIG_DIR (account/login dir) for direct-connect providers, and
+  // the auto-detected candidates (`~/.claude`, `~/.claude-work`, …) shown as a
+  // hint so the user can pick which account to use.
+  const [configDir, setConfigDir] = useState('');
+  const [detectedConfigDirs, setDetectedConfigDirs] = useState<string[]>([]);
   const [customName, setCustomName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [authMethodIndex, setAuthMethodIndex] = useState(0);
@@ -256,10 +271,24 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       setBaseUrl(existing.baseUrl ?? entry.baseUrl ?? '');
       setError(null);
 
-      // Credential-less providers (Claude Code) connect straight away — there
-      // is no key or URL to collect; auth lives in the user's `claude` login.
+      // Direct-connect providers (Claude Code) have no key or URL to collect —
+      // auth lives in the user's `claude` login — but we do let them confirm or
+      // change which `claude` executable to drive. Prefill with the saved path
+      // or an auto-detected install and route to the executable-path step.
       if ((entry as ProviderConnectionInfo).directConnect) {
-        void connectProvider(entry, undefined, entry.baseUrl ?? '');
+        const savedExe = existing.executablePath ?? '';
+        setExecutablePath(savedExe);
+        setConfigDir(existing.configDir ?? '');
+        setDetectedConfigDirs([]);
+        setStep('executable-path');
+        if (!savedExe) {
+          void detectClaudeExecutable().then((detected) => {
+            // Don't clobber a path the user has already started typing.
+            if (detected) setExecutablePath((prev) => prev || detected);
+          });
+        }
+        // Surface the available account dirs for the config-dir step's hint.
+        void detectClaudeConfigDirs().then(setDetectedConfigDirs);
         return;
       }
 
@@ -354,7 +383,11 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
                     ? `API key - ${selectedProvider?.name ?? ''}`
                     : step === 'base-url'
                       ? `Base URL - ${selectedProvider?.name ?? ''}`
-                      : `Fetching models - ${selectedProvider?.name ?? ''}`}
+                      : step === 'executable-path'
+                        ? `Claude executable - ${selectedProvider?.name ?? ''}`
+                        : step === 'config-dir'
+                          ? `Claude account - ${selectedProvider?.name ?? ''}`
+                          : `Fetching models - ${selectedProvider?.name ?? ''}`}
         </text>
         <text fg={MUTED}>
           {step === 'provider'
@@ -504,7 +537,13 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
                 ? selectedProvider?.apiKeyRequired
                   ? 'Enter the API key for this provider.'
                   : 'Optional API key. Leave blank and press enter to skip.'
-                : `Confirm or edit the base URL for ${selectedProvider?.name ?? ''}.`}
+                : step === 'executable-path'
+                  ? 'Confirm or edit the `claude` executable to use. Leave blank to let the Agent SDK find it.'
+                  : step === 'config-dir'
+                    ? detectedConfigDirs.length > 1
+                      ? `Which account? Found: ${detectedConfigDirs.join(', ')}. Leave blank for the default (~/.claude).`
+                      : 'Config directory (CLAUDE_CONFIG_DIR) selecting the account. Leave blank for the default (~/.claude).'
+                    : `Confirm or edit the base URL for ${selectedProvider?.name ?? ''}.`}
           </text>
 
           <box marginTop={1} flexDirection="row">
@@ -513,7 +552,11 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
                 ? 'name> '
                 : step === 'api-key'
                   ? 'key> '
-                  : 'url> '}
+                  : step === 'executable-path'
+                    ? 'path> '
+                    : step === 'config-dir'
+                      ? 'dir> '
+                      : 'url> '}
             </text>
             <input
               key={step}
@@ -523,14 +566,22 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
                   ? customName
                   : step === 'api-key'
                     ? apiKey
-                    : baseUrl
+                    : step === 'executable-path'
+                      ? executablePath
+                      : step === 'config-dir'
+                        ? configDir
+                        : baseUrl
               }
               placeholder={
                 step === 'name'
                   ? 'provider name...'
                   : step === 'api-key'
                     ? 'paste api key...'
-                    : 'base url...'
+                    : step === 'executable-path'
+                      ? 'claude'
+                      : step === 'config-dir'
+                        ? '~/.claude'
+                        : 'base url...'
               }
               placeholderColor={MUTED}
               textColor="white"
@@ -544,6 +595,10 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
                   setCustomName(nextValue);
                 } else if (step === 'api-key') {
                   setApiKey(nextValue);
+                } else if (step === 'executable-path') {
+                  setExecutablePath(nextValue);
+                } else if (step === 'config-dir') {
+                  setConfigDir(nextValue);
                 } else {
                   setBaseUrl(nextValue);
                 }
@@ -572,6 +627,29 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
                 }
 
                 if (!selectedProvider) return;
+
+                if (step === 'executable-path') {
+                  // Blank means "let the Agent SDK resolve `claude` itself".
+                  // Advance to pick the account (config dir) before connecting.
+                  setExecutablePath(submitted.trim());
+                  setError(null);
+                  setStep('config-dir');
+                  return;
+                }
+
+                if (step === 'config-dir') {
+                  // Blank means the default account (~/.claude).
+                  const dir = submitted.trim();
+                  setConfigDir(dir);
+                  void connectProvider(
+                    selectedProvider,
+                    undefined,
+                    selectedProvider.baseUrl ?? '',
+                    executablePath.trim() || undefined,
+                    dir || undefined
+                  );
+                  return;
+                }
 
                 if (step === 'api-key') {
                   const nextApiKey = submitted.trim();
@@ -625,7 +703,9 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
   async function connectProvider(
     provider: ProviderConnectionInfo,
     nextApiKey: string | undefined,
-    nextBaseUrl: string
+    nextBaseUrl: string,
+    nextExecutablePath?: string | undefined,
+    nextConfigDir?: string | undefined
   ): Promise<void> {
     setStep('connecting');
 
@@ -633,6 +713,8 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       const client = provider.create({
         apiKey: nextApiKey,
         baseUrl: nextBaseUrl,
+        executablePath: nextExecutablePath,
+        configDir: nextConfigDir,
       });
       const models = await client.listModels();
       const firstModel = models[0];
@@ -667,6 +749,16 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
         if (provider.baseUrlEnvVar) {
           config.baseUrl = nextBaseUrl;
         }
+        // Persist the chosen `claude` executable for direct-connect providers so
+        // the same install is used on every launch. Blank means "auto-detect",
+        // so we simply omit it.
+        if (provider.directConnect && nextExecutablePath) {
+          config.executablePath = nextExecutablePath;
+        }
+        // Persist the chosen account dir (CLAUDE_CONFIG_DIR); blank = default.
+        if (provider.directConnect && nextConfigDir) {
+          config.configDir = nextConfigDir;
+        }
       }
 
       props.onComplete({
@@ -681,9 +773,9 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       setError(
         caughtError instanceof Error ? caughtError.message : String(caughtError)
       );
-      // Direct-connect providers have no base-url step to fall back to; show
-      // the error on the provider list instead.
-      setStep(provider.directConnect ? 'provider' : 'base-url');
+      // Direct-connect providers fall back to the executable-path step so the
+      // user can fix a wrong `claude` path; others return to the base-url step.
+      setStep(provider.directConnect ? 'executable-path' : 'base-url');
     }
   }
 

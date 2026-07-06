@@ -327,7 +327,9 @@ export function SettingsApp(): React.JSX.Element {
     providerId: string,
     apiKey: string | undefined,
     baseUrl: string | undefined,
-    onResult: (result: { success: boolean; error?: string | undefined }) => void
+    onResult: (result: { success: boolean; error?: string | undefined }) => void,
+    executablePath?: string | undefined,
+    configDir?: string | undefined
   ): void => {
     connectResultRef.current = onResult;
     postSettingsToHost({
@@ -335,6 +337,8 @@ export function SettingsApp(): React.JSX.Element {
       providerId,
       apiKey,
       baseUrl,
+      executablePath,
+      configDir,
     });
   };
 
@@ -670,7 +674,9 @@ function ConnectWizard({
     providerId: string,
     apiKey: string | undefined,
     baseUrl: string | undefined,
-    onResult: (result: ConnectResult) => void
+    onResult: (result: ConnectResult) => void,
+    executablePath?: string | undefined,
+    configDir?: string | undefined
   ) => void;
   onDone: () => void;
   onCancel: () => void;
@@ -679,6 +685,14 @@ function ConnectWizard({
   const [step, setStep] = React.useState<WizardStep>(first);
   const [apiKey, setApiKey] = React.useState('');
   const [baseUrl, setBaseUrl] = React.useState(provider.defaultBaseUrl ?? '');
+  // Direct-connect (Claude Code) executable path, prefilled with the saved or
+  // auto-detected `claude` install so the user can confirm or change it.
+  const [executablePath, setExecutablePath] = React.useState(
+    provider.executablePath ?? ''
+  );
+  // Direct-connect (Claude Code) account dir (CLAUDE_CONFIG_DIR), prefilled with
+  // the saved value; blank = default (~/.claude).
+  const [configDir, setConfigDir] = React.useState(provider.configDir ?? '');
   const [error, setError] = React.useState<string | null>(null);
   // OAuth-step UI state: the host's latest status line and, when the flow needs
   // the user to paste something, the prompt label + input value.
@@ -739,30 +753,34 @@ function ConnectWizard({
   const startDirectConnect = (): void => {
     setError(null);
     setStep(WizardStep.Connecting);
-    onTestConnect(provider.id, undefined, undefined, (result) => {
-      if (result.success) {
-        onDone();
-      } else {
-        setError(result.error ?? 'Connection failed.');
-        setStep(WizardStep.DirectConnect);
-      }
-    });
+    onTestConnect(
+      provider.id,
+      undefined,
+      undefined,
+      (result) => {
+        if (result.success) {
+          onDone();
+        } else {
+          setError(result.error ?? 'Connection failed.');
+          setStep(WizardStep.DirectConnect);
+        }
+      },
+      executablePath.trim() || undefined,
+      configDir.trim() || undefined
+    );
   };
 
   // OAuth-only providers open straight into the sign-in step; kick the flow off
   // once on mount. The ref guard keeps StrictMode's double-invoked effect (dev)
   // from starting two sign-ins, which would clash on the loopback redirect port.
-  // Direct-connect providers likewise connect immediately — there are no
-  // credentials to collect.
+  // Direct-connect providers instead show an executable-path form first (the
+  // user confirms which `claude` to drive), so they aren't auto-started here.
   const oauthStartedRef = React.useRef(false);
   React.useEffect(() => {
     if (oauthStartedRef.current) return;
     if (first === WizardStep.OAuth) {
       oauthStartedRef.current = true;
       startOAuth();
-    } else if (first === WizardStep.DirectConnect) {
-      oauthStartedRef.current = true;
-      startDirectConnect();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1020,24 +1038,81 @@ function ConnectWizard({
           )}
         </div>
       ) : step === WizardStep.DirectConnect ? (
-        // Only rendered when the immediate connect failed (success closes the
-        // wizard; the attempt itself shows the Connecting step below).
-        <div className="provider-connect-step">
-          <p className="provider-connect-error">
-            {error ?? 'Connection failed.'}
-          </p>
+        <form
+          className="provider-connect-step"
+          onSubmit={(e) => {
+            e.preventDefault();
+            startDirectConnect();
+          }}
+        >
           <p className="provider-connect-hint">
-            {provider.name} uses your own Claude Code sign-in. Make sure Claude
-            Code is installed and signed in (run `claude` and use /login), then
-            try again.
+            {provider.name} uses your own Claude Code sign-in. Confirm or edit
+            the `claude` executable to drive — leave blank to auto-detect. Make
+            sure it's installed and signed in (run `claude` and use /login).
           </p>
+          <div className="provider-connect-field">
+            <label
+              className="provider-connect-label"
+              htmlFor={`exe-${provider.id}`}
+            >
+              Claude executable
+            </label>
+            <input
+              id={`exe-${provider.id}`}
+              className="provider-connect-input"
+              type="text"
+              placeholder="claude"
+              value={executablePath}
+              onChange={(e) => {
+                setExecutablePath(e.target.value);
+                setError(null);
+              }}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+          <div className="provider-connect-field">
+            <label
+              className="provider-connect-label"
+              htmlFor={`cfgdir-${provider.id}`}
+            >
+              Account (config directory)
+            </label>
+            <input
+              id={`cfgdir-${provider.id}`}
+              className="provider-connect-input"
+              type="text"
+              placeholder="~/.claude"
+              value={configDir}
+              onChange={(e) => {
+                setConfigDir(e.target.value);
+                setError(null);
+              }}
+              autoComplete="off"
+              spellCheck={false}
+              {...((provider.configDirOptions?.length ?? 0) > 0
+                ? { list: `cfgdir-opts-${provider.id}` }
+                : {})}
+            />
+            {(provider.configDirOptions?.length ?? 0) > 0 ? (
+              <datalist id={`cfgdir-opts-${provider.id}`}>
+                {provider.configDirOptions?.map((dir) => (
+                  <option key={dir} value={dir} />
+                ))}
+              </datalist>
+            ) : null}
+            <p className="provider-connect-subhint">
+              Selects which Claude login/account to use. Leave blank for the
+              default (~/.claude).
+            </p>
+          </div>
+          {error ? <p className="provider-connect-error">{error}</p> : null}
           <div className="provider-connect-actions">
             <button
-              type="button"
+              type="submit"
               className="provider-action provider-action-primary"
-              onClick={startDirectConnect}
             >
-              Try again
+              Connect
             </button>
             <button
               type="button"
@@ -1047,7 +1122,7 @@ function ConnectWizard({
               Cancel
             </button>
           </div>
-        </div>
+        </form>
       ) : (
         <div className="provider-connect-step provider-connect-connecting">
           <span className="provider-connect-spinner" aria-hidden="true" />

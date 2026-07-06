@@ -139,11 +139,16 @@ class CachingModelsClient implements ProviderClient {
     private readonly autoRefresh: () => boolean = () => true
   ) {
     this.providerId = inner.providerId;
-    // Capability flags must survive the wrapping, or the engine sees a
-    // provider without them (e.g. lazy tool loading would stay on for
-    // Claude Code and strand the model with tools it can't call).
+    // Capability flags and optional surfaces must survive the wrapping, or
+    // the hosts see a provider without them (e.g. lazy tool loading would
+    // stay on for Claude Code, and /usage would report "unsupported").
     this.requiresStableToolset = inner.requiresStableToolset;
+    if (inner.getUsageSummary) {
+      this.getUsageSummary = inner.getUsageSummary.bind(inner);
+    }
   }
+
+  public getUsageSummary?: ProviderClient['getUsageSummary'] | undefined;
 
   public sendChat: ProviderClient['sendChat'] = (request) =>
     this.inner.sendChat(request);

@@ -207,9 +207,26 @@ export interface WebviewProvider {
   authMethods: AuthMethod[];
   /**
    * True for providers that need no credentials at all (Claude Code): the
-   * connect wizard skips the api-key/base-url steps and connects immediately.
+   * connect wizard shows a single executable-path step instead of the
+   * api-key/base-url steps.
    */
   directConnect?: boolean | undefined;
+  /**
+   * Prefill for the direct-connect executable-path input: the saved path if the
+   * user set one, otherwise an auto-detected `claude` install. Blank when none
+   * was found — the field then shows a placeholder and the SDK auto-resolves.
+   */
+  executablePath?: string | undefined;
+  /**
+   * Prefill for the direct-connect config-directory (account) input: the saved
+   * `CLAUDE_CONFIG_DIR` if set, else blank (default `~/.claude`).
+   */
+  configDir?: string | undefined;
+  /**
+   * Auto-detected Claude config directories (`~/.claude`, `~/.claude-work`, …)
+   * shown as pick-able account options in the direct-connect form.
+   */
+  configDirOptions?: string[] | undefined;
 }
 
 /**
@@ -592,6 +609,12 @@ export interface NoticeMessage {
    * replaced or the next snapshot.
    */
   timeoutMs?: number;
+  /**
+   * When true, the notice is an in-progress state (e.g. `/usage` fetching): the
+   * floating banner shows a spinner beside the text and stays up (no self-
+   * dismiss) until the host replaces it with the result.
+   */
+  loading?: boolean;
 }
 
 /**

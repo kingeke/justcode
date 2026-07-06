@@ -49,6 +49,10 @@ export interface ProviderCredentials {
   apiKey?: string | undefined;
   baseUrl: string;
   defaultModel?: string | undefined;
+  /** Claude Code only: custom `claude` executable path (see ProviderConfig). */
+  executablePath?: string | undefined;
+  /** Claude Code only: `CLAUDE_CONFIG_DIR` selecting the account (see ProviderConfig). */
+  configDir?: string | undefined;
   /** Present when the provider was connected via OAuth instead of an API key. */
   oauth?: OAuthCredentials | undefined;
   /**
@@ -93,6 +97,21 @@ export interface ProviderConfig {
   apiKey?: string;
   baseUrl?: string;
   defaultModel?: string;
+  /**
+   * Claude Code only: the `claude` executable the Agent SDK should spawn.
+   * Lets users with multiple installs (e.g. `claude` and `claude-w` for work)
+   * pick which login/profile powers justcode. Blank uses the SDK's default
+   * resolution. Overridable per-run with JUSTCODE_CLAUDE_PATH.
+   */
+  executablePath?: string;
+  /**
+   * Claude Code only: `CLAUDE_CONFIG_DIR` selecting which config/login directory
+   * (and therefore which account/subscription) the runtime uses. This is what a
+   * shell alias like `claude-w` sets (`CLAUDE_CONFIG_DIR=~/.claude-work claude`).
+   * A leading `~` is expanded. Blank uses the default (`~/.claude`). Overridable
+   * per-run with JUSTCODE_CLAUDE_CONFIG_DIR.
+   */
+  configDir?: string;
   /** Display name — persisted only for custom (user-added) providers. */
   name?: string;
   /** How this provider was connected. Defaults to 'apiKey' when absent. */
@@ -184,8 +203,22 @@ export const PROVIDERS = [
     // Claude Code runtime, which authenticates with the user's own
     // `claude /login` session (or CLAUDE_CODE_OAUTH_TOKEN). This is the
     // Anthropic-sanctioned way to power third-party tools with a subscription.
-    credentialsFromConfig: () => ({ baseUrl: '' }),
-    create: () => new ClaudeAgentProvider(),
+    credentialsFromConfig: (config) => ({
+      baseUrl: '',
+      executablePath: config.claudeCode.executablePath,
+      configDir: config.claudeCode.configDir,
+    }),
+    create: (credentials) => {
+      // Env vars win so a shell can flip install/account without editing config.
+      const executablePath =
+        process.env.JUSTCODE_CLAUDE_PATH || credentials.executablePath;
+      const configDir =
+        process.env.JUSTCODE_CLAUDE_CONFIG_DIR || credentials.configDir;
+      return new ClaudeAgentProvider({
+        ...(executablePath ? { executablePath } : {}),
+        ...(configDir ? { configDir } : {}),
+      });
+    },
   },
   {
     id: ProviderId.Copilot,

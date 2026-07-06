@@ -269,6 +269,16 @@ export interface SettingsTestConnectMessage {
   providerId: string;
   apiKey?: string | undefined;
   baseUrl?: string | undefined;
+  /**
+   * The `claude` executable path for direct-connect providers (Claude Code).
+   * Blank/omitted means "let the Agent SDK resolve it".
+   */
+  executablePath?: string | undefined;
+  /**
+   * `CLAUDE_CONFIG_DIR` (account/login dir) for direct-connect providers.
+   * Blank/omitted means the default (`~/.claude`).
+   */
+  configDir?: string | undefined;
 }
 
 /**
