@@ -6,7 +6,7 @@ coverage/
 .DS_Store
 *.tsbuildinfo
 .env
-test-files
+test-files/
 opencode
 debug.log
 .test-cache/
