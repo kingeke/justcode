@@ -2,14 +2,11 @@ name: Pages
 
 # Builds the landing page (apps/web) and deploys it to GitHub Pages. Enable Pages
 # for the repo with "Source: GitHub Actions" (Settings → Pages) for this to work.
+#
+# Deliberately NOT triggered by pushes to main — the site only redeploys when a
+# release is cut (the Version workflow dispatches this on the new tag) or when
+# run manually from the Actions tab.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'apps/web/**'
-      - 'packages/core/src/branding.ts'
-      - 'package.json'
-      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:

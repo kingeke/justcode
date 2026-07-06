@@ -59,3 +59,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.bump.outputs.version }}
         run: gh workflow run release.yml --ref "v${VERSION}"
+
+      # The website deploys per release, not per push to main, so publish it
+      # from the freshly tagged version here (Pages itself has no push trigger).
+      - name: Trigger the Pages deploy for the new version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: gh workflow run pages.yml --ref "v${VERSION}"

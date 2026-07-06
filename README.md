@@ -182,8 +182,10 @@ Found a bug or have an idea? [Open an issue](https://github.com/kingeke/justcode
 The landing page lives in `apps/web` and deploys to GitHub Pages at
 **https://justcodeapp.dev/** via `.github/workflows/pages.yml`. Enable it once
 under **Settings → Pages → Source: GitHub Actions**, and set the custom domain to
-`justcodeapp.dev` (the `apps/web/public/CNAME` file keeps it across deploys);
-after that every push that touches the site republishes it.
+`justcodeapp.dev` (the `apps/web/public/CNAME` file keeps it across deploys).
+The site republishes when a release is cut (the Version workflow deploys it on
+the new tag) or when the Pages workflow is run manually from the Actions tab —
+pushes to `main` alone never deploy it.
 
 ## Support the developer
 
