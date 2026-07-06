@@ -15,4 +15,3 @@ opencode/
 # Large data fixtures
 moby-dick.txt
 *.log
-pnpm-lock.yaml

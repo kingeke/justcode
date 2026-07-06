@@ -13,3 +13,6 @@ debug.log
 .claude
 .agent
 .playwright-mcp
+
+# bun is the package manager; keep stray pnpm runs from re-adding a lockfile
+pnpm-lock.yaml
