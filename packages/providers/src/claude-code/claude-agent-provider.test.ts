@@ -20,6 +20,8 @@ import { ClaudeAgentProvider } from './claude-agent-provider.js';
  */
 class FakeQueryHarness {
   public options: Options | undefined;
+  /** Options of every query started, in order (sessions + ephemeral runs). */
+  public optionsHistory: Options[] = [];
   public prompts: SDKUserMessage[] = [];
   public modelChanges: string[] = [];
   public mcpServerUpdates = 0;
@@ -74,6 +76,7 @@ class FakeQueryHarness {
     options?: Options;
   }): Query => {
     this.options = params.options;
+    if (params.options) this.optionsHistory.push(params.options);
     if (typeof params.prompt !== 'string') {
       void (async () => {
         for await (const message of params.prompt as AsyncIterable<SDKUserMessage>) {
@@ -316,6 +319,122 @@ describe('ClaudeAgentProvider', () => {
 
     expect(harness.modelChanges).toEqual(['claude-opus-4-8']);
     expect(harness.mcpServerUpdates).toBe(1);
+  });
+
+  it('runs ephemeral requests outside the session (title-generation flow)', async () => {
+    const harness = new FakeQueryHarness();
+    const provider = new ClaudeAgentProvider({
+      createQuery: harness.createQuery,
+    });
+
+    // The engine titles a session by awaiting an ephemeral call with the SAME
+    // sessionId *before* the first real turn. It must not become the session.
+    const titleCall = provider.sendChat({
+      model: 'claude-sonnet-5',
+      sessionId: 's1',
+      ephemeral: true,
+      messages: [
+        createMessage('system', 'You generate a short title.'),
+        createMessage('user', 'hey how are u'),
+      ],
+    });
+    await harness.nextPrompt();
+    harness.emit(successResult('Casual Greeting Chat'));
+    const title = await titleCall;
+    expect(title.content).toBe('Casual Greeting Chat');
+
+    const chatCall = provider.sendChat({
+      model: 'claude-sonnet-5',
+      sessionId: 's1',
+      messages: [
+        createMessage('system', 'You are JustCode.'),
+        createMessage('user', 'hey how are u'),
+      ],
+    });
+    await harness.nextPrompt();
+    harness.emit(successResult('Doing great!'));
+    const chat = await chatCall;
+    expect(chat.content).toBe('Doing great!');
+
+    // Two separate queries, and the persistent session carries the chat
+    // system prompt — not the title generator's.
+    expect(harness.optionsHistory).toHaveLength(2);
+    expect(harness.optionsHistory[0]?.systemPrompt).toBe(
+      'You generate a short title.'
+    );
+    expect(harness.optionsHistory[1]?.systemPrompt).toBe('You are JustCode.');
+  });
+
+  it('rebuilds the session when the conversation diverges (e.g. compaction)', async () => {
+    const harness = new FakeQueryHarness();
+    const provider = new ClaudeAgentProvider({
+      createQuery: harness.createQuery,
+    });
+
+    const first = provider.sendChat({
+      model: 'claude-sonnet-5',
+      sessionId: 's1',
+      messages: [createMessage('user', 'hello')],
+    });
+    await harness.nextPrompt();
+    harness.emit(successResult('hi'));
+    await first;
+
+    // Post-compaction the history is replaced wholesale: no message id the
+    // bridge has seen survives, so the stale session must be rebuilt.
+    const second = provider.sendChat({
+      model: 'claude-sonnet-5',
+      sessionId: 's1',
+      messages: [
+        createMessage('user', 'Summary of the conversation so far: greetings.'),
+        createMessage('user', 'and now?'),
+      ],
+    });
+    await harness.nextPrompt();
+    await harness.nextPrompt();
+    harness.emit(successResult('onward'));
+    const result = await second;
+    expect(result.content).toBe('onward');
+    expect(harness.optionsHistory).toHaveLength(2);
+  });
+
+  it('recovers after a user interrupt: drains the aborted turn, answers the next', async () => {
+    const harness = new FakeQueryHarness();
+    const provider = new ClaudeAgentProvider({
+      createQuery: harness.createQuery,
+    });
+
+    const history: ChatMessage[] = [createMessage('user', 'do something big')];
+    const controller = new AbortController();
+    const aborted = provider.sendChat({
+      model: 'claude-sonnet-5',
+      sessionId: 's1',
+      messages: history,
+      signal: controller.signal,
+    });
+    await harness.nextPrompt();
+    harness.emit(textDelta('Working on'));
+
+    // User hits stop: the provider interrupts the runtime; the engine abandons
+    // the promise, and the runtime answers the interrupt with a result that
+    // must be consumed off the stream — not left for the next turn to misread.
+    controller.abort();
+    await Promise.resolve();
+    expect(harness.interrupted).toBe(true);
+    harness.emit(successResult(''));
+    await expect(aborted).rejects.toMatchObject({ name: 'AbortError' });
+
+    // Next message on the same session gets a clean turn and a real answer.
+    history.push(createMessage('user', 'hey'));
+    const next = provider.sendChat({
+      model: 'claude-sonnet-5',
+      sessionId: 's1',
+      messages: history,
+    });
+    await harness.nextPrompt();
+    harness.emit(successResult('hello again'));
+    const result = await next;
+    expect(result.content).toBe('hello again');
   });
 
   it('replays prior history as context when a conversation is resumed', async () => {

@@ -130,6 +130,7 @@ export function withModelsCache(
 
 class CachingModelsClient implements ProviderClient {
   public readonly providerId: ProviderId;
+  public readonly requiresStableToolset: boolean | undefined;
 
   public constructor(
     private readonly inner: ProviderClient,
@@ -138,6 +139,10 @@ class CachingModelsClient implements ProviderClient {
     private readonly autoRefresh: () => boolean = () => true
   ) {
     this.providerId = inner.providerId;
+    // Capability flags must survive the wrapping, or the engine sees a
+    // provider without them (e.g. lazy tool loading would stay on for
+    // Claude Code and strand the model with tools it can't call).
+    this.requiresStableToolset = inner.requiresStableToolset;
   }
 
   public sendChat: ProviderClient['sendChat'] = (request) =>

@@ -16,6 +16,7 @@ import {
   toAnthropicWireRequest,
 } from '@providers/anthropic/anthropic-wire';
 import {
+  requiresAdaptiveThinking,
   supportsThinking,
   thinkingBudgetTokens,
 } from '@providers/http/reasoning';
@@ -67,24 +68,37 @@ export class AnthropicProvider implements ProviderClient {
   public async sendChat(request: ChatRequest): Promise<ChatResult> {
     const { system, messages } = toAnthropicWireRequest(request.messages);
     const tools = toAnthropicToolDefinitions(request.tools);
-    // Extended thinking maps the normalized effort to a token budget. Anthropic
-    // requires max_tokens to exceed budget_tokens, so size the response cap to
-    // the budget plus the default reply allowance. Older Claude models reject
-    // the thinking block, so gate on the model id.
+    // Thinking wire format is model-generation dependent. Fable/Mythos 5,
+    // Opus 4.7+, and Sonnet 5 reject `enabled`/`budget_tokens` with a 400 —
+    // they take `thinking: {type: 'adaptive'}` plus `output_config.effort`
+    // (the effort names match justcode's ReasoningEffort values 1:1). Older
+    // thinking models map effort to a token budget; Anthropic requires
+    // max_tokens to exceed budget_tokens, so size the response cap to the
+    // budget plus the default reply allowance. Models predating thinking
+    // reject the block entirely, so gate on the model id.
     const thinkingEffort =
       request.reasoningEffort && request.reasoningEffort !== 'off'
         ? request.reasoningEffort
         : undefined;
     const thinking =
       thinkingEffort && supportsThinking(request.model)
-        ? {
-            thinking: {
-              type: 'enabled' as const,
-              budget_tokens: thinkingBudgetTokens(thinkingEffort),
-            },
-            max_tokens:
-              thinkingBudgetTokens(thinkingEffort) + DEFAULT_MAX_TOKENS,
-          }
+        ? requiresAdaptiveThinking(request.model)
+          ? {
+              thinking: { type: 'adaptive' as const },
+              output_config: { effort: thinkingEffort },
+              // No budget to add, but thinking output shares max_tokens with
+              // the reply — keep the same headroom the budget path gets.
+              max_tokens:
+                thinkingBudgetTokens(thinkingEffort) + DEFAULT_MAX_TOKENS,
+            }
+          : {
+              thinking: {
+                type: 'enabled' as const,
+                budget_tokens: thinkingBudgetTokens(thinkingEffort),
+              },
+              max_tokens:
+                thinkingBudgetTokens(thinkingEffort) + DEFAULT_MAX_TOKENS,
+            }
         : {};
     const body = {
       model: request.model,

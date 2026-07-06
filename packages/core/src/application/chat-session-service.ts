@@ -562,7 +562,12 @@ export class ChatSessionService {
     // gateway). With it on: the gateway (plus any eagerly advertised tools) is
     // always shown, and only the tools the model has toggled on ride along —
     // each request carries just the schemas in use.
-    const lazyToolLoadingEnabled = this.getLazyToolLoadingEnabled();
+    // Providers with a persistent session (Claude Code) can't change the
+    // advertised tool set mid-turn, so lazy loading would strand the model
+    // with tools it enabled but can't call — advertise everything up front.
+    const lazyToolLoadingEnabled =
+      this.getLazyToolLoadingEnabled() &&
+      this.provider.requiresStableToolset !== true;
     // Drop any tool the user has turned off so the model never sees it (and, in
     // lazy mode, can't load it). Applied both here and when a gateway toggle
     // recomputes the advertised set mid-turn, so a disabled tool never slips
@@ -1230,6 +1235,9 @@ export class ChatSessionService {
       const result = await this.provider.sendChat({
         model: input.model,
         sessionId: input.sessionId,
+        // Not part of the conversation: session-oriented providers must not
+        // let this call's system prompt take over the chat session.
+        ephemeral: true,
         ...(input.disableReasoning ? { reasoningEffort: 'off' as const } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
         messages: [

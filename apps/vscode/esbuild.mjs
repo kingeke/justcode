@@ -1,3 +1,4 @@
+import { cpSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,6 +12,20 @@ const watch = process.argv.includes('--watch');
 // Derive the extension manifest version from the root package.json (the single
 // source of truth) before bundling, so any package/publish ships the right one.
 syncExtensionVersion();
+
+// Vendor the Claude Agent SDK (ESM-only, self-contained — it has no runtime
+// dependencies) next to the CJS host bundle. The host loads it at runtime with
+// a native dynamic import (see extension.ts registerAgentSdk); it cannot be
+// bundled because its module init resolves paths from import.meta.url, which
+// is undefined inside a CJS bundle.
+const sdkSource = resolve(
+  root,
+  '../../node_modules/@anthropic-ai/claude-agent-sdk'
+);
+const sdkTarget = resolve(root, 'dist/vendor/claude-agent-sdk');
+rmSync(sdkTarget, { recursive: true, force: true });
+mkdirSync(sdkTarget, { recursive: true });
+cpSync(sdkSource, sdkTarget, { recursive: true, dereference: true });
 
 // The same path aliases the CLI build uses, so the extension reuses the core /
 // runtime / providers packages straight from source. `@ext` is the extension's

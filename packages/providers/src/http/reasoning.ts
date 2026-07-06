@@ -45,10 +45,23 @@ export function openAiReasoningCapability(
  * Older Claude models reject the `thinking` block, so gate on this.
  */
 const ANTHROPIC_THINKING_MODEL =
-  /claude-(3-7|sonnet-4|opus-4|haiku-4|sonnet-5|opus-5|fable)/i;
+  /claude-(3-7|sonnet-4|opus-4|haiku-4|sonnet-5|opus-5|fable|mythos)/i;
 
 export function supportsThinking(model: string): boolean {
   return ANTHROPIC_THINKING_MODEL.test(model);
+}
+
+/**
+ * Claude models on which `thinking: {type: 'enabled', budget_tokens}` returns
+ * a 400 — Fable/Mythos 5, Opus 4.7+, and Sonnet 5 accept only adaptive
+ * thinking, with depth controlled via `output_config.effort`. Older thinking
+ * models (3.7, Sonnet/Opus/Haiku 4.x through Opus 4.6) keep the budget form.
+ */
+const ANTHROPIC_ADAPTIVE_THINKING_MODEL =
+  /claude-(fable|mythos|sonnet-5|opus-5|opus-4-[7-9])/i;
+
+export function requiresAdaptiveThinking(model: string): boolean {
+  return ANTHROPIC_ADAPTIVE_THINKING_MODEL.test(model);
 }
 
 /** Canonical low→high order for displaying effort levels. */

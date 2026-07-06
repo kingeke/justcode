@@ -34,6 +34,7 @@ function providerKind(
   entry: ProviderCatalogEntry,
   saved?: ProviderConfig
 ): WebviewProviderKind {
+  if (entry.directConnect) return WebviewProviderKind.Subscription;
   if (entry.local) return WebviewProviderKind.Local;
   // For connected providers, show the method they actually used, not what's available.
   if (saved) {
@@ -64,26 +65,24 @@ export async function listProviders(
 
   const result: WebviewProvider[] = (
     PROVIDERS as readonly ProviderCatalogEntry[]
-  )
-    // Direct-connect providers (Claude Code) run on the ESM-only Claude Agent
-    // SDK, which the extension's CJS bundle cannot load — the published
-    // extension ships without node_modules. Offering them here would only
-    // collect a meaningless "API key" and fail; they are CLI-only for now.
-    .filter((entry) => !entry.directConnect)
-    .map((entry) => {
-      const saved = config.providers?.[entry.id as ProviderId];
-      return {
-        id: entry.id,
-        name: entry.name,
-        description: entry.description,
-        connected: configured.has(entry.id),
-        kind: providerKind(entry, saved),
-        apiKeyRequired: entry.apiKeyRequired,
-        defaultBaseUrl: entry.baseUrl,
-        local: entry.local,
-        authMethods: entry.authMethods ?? [AuthMethod.ApiKey],
-      };
-    });
+  ).map((entry) => {
+    const saved = config.providers?.[entry.id as ProviderId];
+    return {
+      id: entry.id,
+      name: entry.name,
+      description: entry.description,
+      connected: configured.has(entry.id),
+      kind: providerKind(entry, saved),
+      apiKeyRequired: entry.apiKeyRequired,
+      defaultBaseUrl: entry.baseUrl,
+      local: entry.local,
+      authMethods: entry.authMethods ?? [AuthMethod.ApiKey],
+      // Claude Code connects with no credentials: the Agent SDK (vendored into
+      // the extension and loaded via extension.ts registerAgentSdk) uses the
+      // user's own `claude /login` session.
+      directConnect: entry.directConnect,
+    };
+  });
 
   // Custom (user-added) providers aren't in the static catalog; surface each as
   // a connected entry so the user can see and disconnect it.

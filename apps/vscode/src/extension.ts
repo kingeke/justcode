@@ -1,10 +1,34 @@
 import * as dns from 'node:dns';
 import * as net from 'node:net';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import * as vscode from 'vscode';
 
 import { setDebugLoggingEnabled } from '@core/application/debug-log';
+import { setAgentSdkLoader } from '@providers/claude-code/claude-agent-provider';
 import { ChatViewProvider } from '@ext/host/chat-view-provider';
+
+/**
+ * Points the Claude Code provider at the Agent SDK copy vendored into
+ * `dist/vendor/claude-agent-sdk` (see esbuild.mjs). The SDK is ESM-only and
+ * relies on `import.meta.url`, so it can't live inside this CJS bundle; a
+ * native dynamic import of the vendored file works because the extension
+ * host's Node can import ES modules from CJS. The `Function` constructor stops
+ * esbuild from rewriting the `import()` into a `require()`.
+ */
+function registerAgentSdk(extensionPath: string): void {
+  const sdkEntry = pathToFileURL(
+    join(extensionPath, 'dist', 'vendor', 'claude-agent-sdk', 'sdk.mjs')
+  ).href;
+  const dynamicImport = new Function(
+    'specifier',
+    'return import(specifier)'
+  ) as (
+    specifier: string
+  ) => ReturnType<Parameters<typeof setAgentSdkLoader>[0]>;
+  setAgentSdkLoader(() => dynamicImport(sdkEntry));
+}
 
 /**
  * Make the extension host's `fetch` (Node/undici) behave like the CLI's (Bun) on
@@ -62,6 +86,7 @@ function hardenNetworkForBrokenIpv6(): void {
 
 export function activate(context: vscode.ExtensionContext): void {
   hardenNetworkForBrokenIpv6();
+  registerAgentSdk(context.extensionUri.fsPath);
 
   // Only write the request/response debug log (which includes auth headers) when
   // running from source in the Extension Development Host. A packaged/installed

@@ -30,6 +30,7 @@ const KIND_LABELS: Record<WebviewProviderKind, string> = {
   [WebviewProviderKind.OAuth]: 'Sign-in',
   [WebviewProviderKind.Local]: 'Local',
   [WebviewProviderKind.Custom]: 'Custom',
+  [WebviewProviderKind.Subscription]: 'Subscription',
 };
 
 /** Result shape shared by the inline connect and OAuth flows. */
@@ -625,6 +626,8 @@ enum WizardStep {
   BaseUrl = 'base-url',
   Connecting = 'connecting',
   OAuth = 'oauth',
+  /** Credential-less connect (Claude Code): only surfaces errors + retry. */
+  DirectConnect = 'direct-connect',
 }
 
 enum AuthChoice {
@@ -633,6 +636,11 @@ enum AuthChoice {
 }
 
 function initialStep(provider: WebviewProvider): WizardStep {
+  // Credential-less providers (Claude Code) have nothing to collect; the
+  // wizard connects immediately on mount.
+  if (provider.directConnect) {
+    return WizardStep.DirectConnect;
+  }
   // Providers that support both OAuth AND API key offer an auth-method picker.
   if (
     provider.authMethods.includes(AuthMethod.OAuth) &&
@@ -728,14 +736,33 @@ function ConnectWizard({
     onCancel();
   };
 
+  const startDirectConnect = (): void => {
+    setError(null);
+    setStep(WizardStep.Connecting);
+    onTestConnect(provider.id, undefined, undefined, (result) => {
+      if (result.success) {
+        onDone();
+      } else {
+        setError(result.error ?? 'Connection failed.');
+        setStep(WizardStep.DirectConnect);
+      }
+    });
+  };
+
   // OAuth-only providers open straight into the sign-in step; kick the flow off
   // once on mount. The ref guard keeps StrictMode's double-invoked effect (dev)
   // from starting two sign-ins, which would clash on the loopback redirect port.
+  // Direct-connect providers likewise connect immediately — there are no
+  // credentials to collect.
   const oauthStartedRef = React.useRef(false);
   React.useEffect(() => {
-    if (first === WizardStep.OAuth && !oauthStartedRef.current) {
+    if (oauthStartedRef.current) return;
+    if (first === WizardStep.OAuth) {
       oauthStartedRef.current = true;
       startOAuth();
+    } else if (first === WizardStep.DirectConnect) {
+      oauthStartedRef.current = true;
+      startDirectConnect();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -991,6 +1018,35 @@ function ConnectWizard({
               </div>
             </>
           )}
+        </div>
+      ) : step === WizardStep.DirectConnect ? (
+        // Only rendered when the immediate connect failed (success closes the
+        // wizard; the attempt itself shows the Connecting step below).
+        <div className="provider-connect-step">
+          <p className="provider-connect-error">
+            {error ?? 'Connection failed.'}
+          </p>
+          <p className="provider-connect-hint">
+            {provider.name} uses your own Claude Code sign-in. Make sure Claude
+            Code is installed and signed in (run `claude` and use /login), then
+            try again.
+          </p>
+          <div className="provider-connect-actions">
+            <button
+              type="button"
+              className="provider-action provider-action-primary"
+              onClick={startDirectConnect}
+            >
+              Try again
+            </button>
+            <button
+              type="button"
+              className="provider-action"
+              onClick={onCancel}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       ) : (
         <div className="provider-connect-step provider-connect-connecting">
@@ -1347,17 +1403,22 @@ function SkillsTab({
       </p>
 
       <div className="skill-add-form">
-        <input
-          type="text"
-          className="skill-add-input"
-          placeholder="owner/repo or a git URL"
-          value={source}
-          disabled={busy}
-          onChange={(event) => setSource(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') submitAdd();
-          }}
-        />
+        <div className="skill-add-input-wrap">
+          <input
+            type="text"
+            className="skill-add-input"
+            placeholder="owner/repo or a git URL"
+            value={source}
+            disabled={busy}
+            onChange={(event) => setSource(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') submitAdd();
+            }}
+          />
+          {busy ? (
+            <span className="skill-add-spinner" aria-hidden="true" />
+          ) : null}
+        </div>
         <select
           className="skill-add-scope"
           value={scope}

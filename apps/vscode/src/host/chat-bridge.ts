@@ -1206,7 +1206,15 @@ export class ChatBridge {
             usage: this.usageSnapshot(),
           });
         },
-        onToolActivity: (event) => this.postToolActivity(event),
+        onToolActivity: (event) => {
+          // A tool call is the model's first output for turns that act before
+          // they speak (no streamed prose/thinking — common on the Claude Code
+          // provider). Mark first-token here too, so TTFT settles instead of
+          // climbing for the whole turn and tok/s isn't divided by a
+          // milliseconds-long window (mirrors the CLI).
+          if (event.phase === 'start') markFirstToken();
+          this.postToolActivity(event);
+        },
         // Auto-approve runs approval-gated tools without prompting. Express that
         // as an explicit `allowUnattended` opt-in — the engine fails closed when
         // neither an approver nor this flag is present, so simply omitting

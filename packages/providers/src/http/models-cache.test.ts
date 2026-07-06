@@ -205,3 +205,20 @@ describe('models cache', () => {
     expect(fetches).toBe(1);
   });
 });
+
+describe('capability forwarding', () => {
+  it('preserves requiresStableToolset through the caching wrapper', () => {
+    const inner: ProviderClient = {
+      providerId: ProviderId.ClaudeCode,
+      requiresStableToolset: true,
+      sendChat: async () => ({ content: '' }),
+      getDefaultModel: () => undefined,
+      listModels: async () => [],
+    };
+    // The engine reads capability flags off the wrapped client; losing them
+    // here re-enables lazy tool loading for Claude Code (which breaks tools).
+    expect(withModelsCache(inner, { local: false }).requiresStableToolset).toBe(
+      true
+    );
+  });
+});

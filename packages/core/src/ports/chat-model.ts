@@ -91,6 +91,14 @@ export interface ChatRequest {
    * the same upstream provider and its prompt cache. Others ignore it.
    */
   sessionId?: string;
+  /**
+   * True for out-of-band utility calls (e.g. session title generation) whose
+   * messages are not part of the session's conversation. Stateless providers
+   * ignore this; session-oriented providers (Claude Code) must run these as
+   * throwaway one-shots instead of feeding them into the persistent session —
+   * otherwise the utility prompt would poison the conversation's context.
+   */
+  ephemeral?: boolean;
 }
 
 export interface ChatResult {
@@ -103,6 +111,15 @@ export interface ChatResult {
 
 export interface ProviderClient {
   readonly providerId: ProviderId;
+  /**
+   * True for providers that hold a persistent model session whose advertised
+   * tool set cannot change mid-turn (Claude Code: the runtime's in-flight turn
+   * doesn't re-list MCP tools). The engine then advertises the full toolset
+   * from the first request instead of lazy-loading tools through the gateway —
+   * cheap for these providers, since their session prompt (tool schemas
+   * included) is cached across the conversation.
+   */
+  readonly requiresStableToolset?: boolean | undefined;
   sendChat(request: ChatRequest): Promise<ChatResult>;
   listModels(): Promise<ModelInfo[]>;
   getDefaultModel(): string | undefined;

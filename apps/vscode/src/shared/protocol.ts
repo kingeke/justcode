@@ -183,6 +183,8 @@ export enum WebviewProviderKind {
   OAuth = 'oauth',
   Local = 'local',
   Custom = 'custom',
+  /** Uses the user's own Claude Code login via the Agent SDK — no credentials. */
+  Subscription = 'subscription',
 }
 
 /** A provider shown in the settings list, flattened from the catalog + config. */
@@ -203,6 +205,11 @@ export interface WebviewProvider {
   local?: boolean | undefined;
   /** Auth methods accepted; determines whether inline connect is possible. */
   authMethods: AuthMethod[];
+  /**
+   * True for providers that need no credentials at all (Claude Code): the
+   * connect wizard skips the api-key/base-url steps and connects immediately.
+   */
+  directConnect?: boolean | undefined;
 }
 
 /**

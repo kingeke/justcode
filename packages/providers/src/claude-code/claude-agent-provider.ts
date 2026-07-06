@@ -14,7 +14,6 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import {
-  ReasoningEffort,
   type ChatRequest,
   type ChatResult,
   type ModelInfo,
@@ -28,6 +27,8 @@ import {
   type ToolCall,
 } from '@core/domain/message';
 import type { ToolDefinition, ToolResult } from '@core/ports/tool';
+import { logRequestResponse } from '@core/application/debug-log';
+import { normalizeEffortLevels } from '@providers/http/reasoning';
 
 /**
  * Claude subscription provider backed by the official Claude Agent SDK.
@@ -60,10 +61,16 @@ interface PendingToolCall {
   resolve: (result: ToolResult) => void;
 }
 
+/** What `nextEvent` yielded: stream progress, or a parked tool invocation. */
+enum TurnEventKind {
+  Message = 'message',
+  Tool = 'tool',
+}
+
 /** One value pulled from the session's SDK stream, or a parked tool call. */
 type TurnEvent =
-  | { kind: 'message'; message: SDKMessage | undefined }
-  | { kind: 'tool'; pending: PendingToolCall };
+  | { kind: TurnEventKind.Message; message: SDKMessage | undefined }
+  | { kind: TurnEventKind.Tool; pending: PendingToolCall };
 
 /**
  * An unbounded push queue exposed as the AsyncIterable the SDK consumes as its
@@ -129,8 +136,38 @@ class SessionBridge {
   /** Latest definitions served by the MCP server's ListTools handler. */
   public toolDefinitions: ToolDefinition[] = [];
 
+  /**
+   * Serializes turns: an aborted turn's collector keeps running (the engine
+   * abandons the promise, but the interrupt's result still has to be consumed
+   * off the stream) and the next turn must not race it for events.
+   */
+  private turnChain: Promise<void> = Promise.resolve();
+
   public constructor(model: string) {
     this.model = model;
+  }
+
+  /** Runs `turn` after every previously started turn has fully settled. */
+  public runExclusive<T>(turn: () => Promise<T>): Promise<T> {
+    const result = this.turnChain.then(turn, turn);
+    this.turnChain = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
+  }
+
+  /**
+   * Fails every tool call the engine hasn't answered (user interrupt, or a
+   * conversation that moved on without the results). Unblocks the runtime's
+   * MCP handlers so the session can process the interrupt / next message.
+   */
+  public failPendingToolCalls(reason: string): void {
+    for (const pending of this.pendingTools.values()) {
+      pending.resolve({ content: reason, isError: true });
+    }
+    this.pendingTools.clear();
+    this.parkedToolCalls.length = 0;
   }
 
   /** Called by the MCP tool handler: park the call and wake `nextEvent`. */
@@ -150,7 +187,7 @@ class SessionBridge {
    */
   public async nextEvent(): Promise<TurnEvent> {
     const parked = this.parkedToolCalls.shift();
-    if (parked) return { kind: 'tool', pending: parked };
+    if (parked) return { kind: TurnEventKind.Tool, pending: parked };
 
     this.inflightNext ??= this.query.next();
     const toolArrival = new Promise<void>((resolve) => {
@@ -158,7 +195,7 @@ class SessionBridge {
     });
     const streamArrival = this.inflightNext.then(
       (result): TurnEvent => ({
-        kind: 'message',
+        kind: TurnEventKind.Message,
         message: result.done ? undefined : result.value,
       })
     );
@@ -166,8 +203,8 @@ class SessionBridge {
     const event = await Promise.race([toolArrival, streamArrival]);
     this.toolWake = null;
     const arrived = this.parkedToolCalls.shift();
-    if (arrived) return { kind: 'tool', pending: arrived };
-    if (event && event.kind === 'message') {
+    if (arrived) return { kind: TurnEventKind.Tool, pending: arrived };
+    if (event && event.kind === TurnEventKind.Message) {
       this.inflightNext = null;
       return event;
     }
@@ -193,12 +230,28 @@ export interface ClaudeAgentProviderOptions {
  * the catalog importable everywhere; environments that can't load the SDK
  * only fail if the user actually connects the Claude Code provider.
  */
-let sdkModulePromise:
-  | Promise<typeof import('@anthropic-ai/claude-agent-sdk')>
-  | undefined;
+let sdkModulePromise: Promise<{ query: typeof query }> | undefined;
+
+/** Host-supplied SDK loader, taking precedence over the bare-specifier import. */
+let sdkLoader: (() => Promise<{ query: typeof query }>) | undefined;
+
+/**
+ * Lets a host that cannot resolve the bare `@anthropic-ai/claude-agent-sdk`
+ * specifier (the VS Code extension, whose CJS bundle ships without
+ * node_modules) supply its own loader — e.g. a native dynamic import of a
+ * vendored copy of the SDK's ESM entry point.
+ */
+export function setAgentSdkLoader(
+  loader: () => Promise<{ query: typeof query }>
+): void {
+  sdkLoader = loader;
+  sdkModulePromise = undefined;
+}
 
 async function loadQuery(): Promise<typeof query> {
-  sdkModulePromise ??= import('@anthropic-ai/claude-agent-sdk');
+  sdkModulePromise ??= sdkLoader
+    ? sdkLoader()
+    : import('@anthropic-ai/claude-agent-sdk');
   try {
     return (await sdkModulePromise).query;
   } catch (error) {
@@ -213,6 +266,9 @@ async function loadQuery(): Promise<typeof query> {
 
 export class ClaudeAgentProvider implements ProviderClient {
   public readonly providerId = ProviderId.ClaudeCode;
+  // The Claude Code runtime's in-flight turn doesn't pick up MCP tool-list
+  // changes, so the engine must advertise the full toolset from turn one.
+  public readonly requiresStableToolset = true;
   private readonly sessions = new Map<string, SessionBridge>();
   private readonly injectedCreateQuery: typeof query | undefined;
 
@@ -226,8 +282,86 @@ export class ClaudeAgentProvider implements ProviderClient {
   }
 
   public async sendChat(request: ChatRequest): Promise<ChatResult> {
+    // Out-of-band utility calls (title generation) never touch the persistent
+    // session: their system prompt would otherwise become the session's.
+    if (request.ephemeral) {
+      return this.logged(request, 'ephemeral', () =>
+        this.runEphemeral(request)
+      );
+    }
+    return this.logged(request, 'session', () => this.sessionSendChat(request));
+  }
+
+  /**
+   * Writes each round to the debug log like the HTTP providers do, so a dev
+   * run (`JUSTCODE_DEBUG=1` / extension Development mode) captures Claude Code
+   * traffic too. There is no real URL — the "request" is what justcode handed
+   * the bridge; the "response" is the round's result or error. A no-op in
+   * production: `logRequestResponse` only writes when the host enabled it.
+   */
+  private async logged(
+    request: ChatRequest,
+    mode: 'session' | 'ephemeral',
+    run: () => Promise<ChatResult>
+  ): Promise<ChatResult> {
+    const url = `claude-code://${mode}/${request.sessionId ?? 'default'}`;
+    const body = {
+      model: request.model,
+      reasoningEffort: request.reasoningEffort,
+      tools: (request.tools ?? []).map((tool) => tool.name),
+      messages: request.messages,
+    };
+    try {
+      const result = await run();
+      await logRequestResponse({
+        request: { url, method: 'sendChat', body },
+        response: { url, status: 200, ok: true, body: result },
+      });
+      return result;
+    } catch (error) {
+      await logRequestResponse({
+        request: { url, method: 'sendChat', body },
+        response: { url, status: 0, ok: false, body: error },
+      });
+      throw error;
+    }
+  }
+
+  private async sessionSendChat(request: ChatRequest): Promise<ChatResult> {
     const sessionKey = request.sessionId ?? 'default';
     let bridge = this.sessions.get(sessionKey);
+    // A request that no longer contains the last message we forwarded is a
+    // different conversation under the same id (history edited, compacted, or
+    // reset). The live session's context is stale — rebuild from scratch; the
+    // replay in forwardNewMessages carries the new history across.
+    if (bridge && bridge.lastSeenMessageId) {
+      const anchored = request.messages.some(
+        (message) => message.id === bridge?.lastSeenMessageId
+      );
+      if (!anchored) {
+        this.dropBridge(bridge);
+        bridge = undefined;
+      }
+    }
+    // An interrupted turn can leave tool calls the engine will never answer
+    // (it aborted while the model was waiting on them). If this request opens
+    // a new human turn without resolving them, the live session is wedged
+    // mid-turn — rebuild it; the replay carries the history across.
+    if (bridge && bridge.pendingTools.size > 0) {
+      const answered = new Set(
+        request.messages
+          .filter((message) => message.role === 'tool')
+          .map((message) => message.toolCallId)
+      );
+      const orphaned = [...bridge.pendingTools.keys()].some(
+        (id) => !answered.has(id)
+      );
+      if (orphaned) {
+        bridge.failPendingToolCalls('Interrupted by user.');
+        this.dropBridge(bridge);
+        bridge = undefined;
+      }
+    }
     if (!bridge) {
       bridge = this.startSession(request, await this.resolveCreateQuery());
       this.sessions.set(sessionKey, bridge);
@@ -235,18 +369,24 @@ export class ClaudeAgentProvider implements ProviderClient {
       await this.syncSessionOptions(bridge, request);
     }
 
-    this.forwardNewMessages(bridge, request);
+    const activeBridge = bridge;
+    // Serialize with any still-draining previous turn (see runExclusive).
+    return activeBridge.runExclusive(async () => {
+      this.forwardNewMessages(activeBridge, request);
 
-    const abort = (): void => {
-      // Interrupt the in-flight turn; the session stays alive for resumption.
-      void bridge.query.interrupt().catch(() => {});
-    };
-    request.signal?.addEventListener('abort', abort, { once: true });
-    try {
-      return await this.collectTurn(bridge, request);
-    } finally {
-      request.signal?.removeEventListener('abort', abort);
-    }
+      const abort = (): void => {
+        // Fail unanswered tool calls first — the runtime may be blocked on
+        // them — then interrupt the turn; the session stays alive to resume.
+        activeBridge.failPendingToolCalls('Interrupted by user.');
+        void activeBridge.query.interrupt().catch(() => {});
+      };
+      request.signal?.addEventListener('abort', abort, { once: true });
+      try {
+        return await this.collectTurn(activeBridge, request);
+      } finally {
+        request.signal?.removeEventListener('abort', abort);
+      }
+    });
   }
 
   public async listModels(): Promise<ModelInfo[]> {
@@ -267,9 +407,9 @@ export class ClaudeAgentProvider implements ProviderClient {
         ...(model.supportsEffort && model.supportedEffortLevels?.length
           ? {
               reasoning: {
-                effortLevels: model.supportedEffortLevels.map(
-                  (level) => level as ReasoningEffort
-                ),
+                effortLevels: normalizeEffortLevels([
+                  ...model.supportedEffortLevels,
+                ]),
                 mandatory: false,
               },
             }
@@ -283,6 +423,38 @@ export class ClaudeAgentProvider implements ProviderClient {
 
   public getDefaultModel(): string | undefined {
     return undefined;
+  }
+
+  /**
+   * Runs a request in a throwaway session that is never registered in the
+   * session map: fresh query, no tools, closed as soon as the result arrives.
+   */
+  private async runEphemeral(request: ChatRequest): Promise<ChatResult> {
+    const createQuery = await this.resolveCreateQuery();
+    const bridge = new SessionBridge(request.model);
+    const systemMessage = request.messages.find((m) => m.role === 'system');
+    bridge.query = createQuery({
+      prompt: bridge.input,
+      options: {
+        model: request.model,
+        tools: [],
+        settingSources: [],
+        strictMcpConfig: true,
+        includePartialMessages: true,
+        ...(systemMessage ? { systemPrompt: systemMessage.content } : {}),
+        ...effortOptions(request.reasoningEffort),
+      },
+    });
+    try {
+      for (const message of request.messages) {
+        if (message.role !== 'user') continue;
+        bridge.input.push(chatMessageToSdkUserMessage(message));
+      }
+      return await this.collectTurn(bridge, request);
+    } finally {
+      bridge.input.close();
+      await bridge.query.return(undefined).catch(() => {});
+    }
   }
 
   /** Tears down every live Claude Code session this provider started. */
@@ -312,6 +484,10 @@ export class ClaudeAgentProvider implements ProviderClient {
       mcpServers: {
         [MCP_SERVER_NAME]: this.createMcpServerConfig(bridge),
       },
+      // Without this, the runtime also mounts the user's other MCP servers —
+      // including claude.ai account connectors (Gmail, Drive, …) — which
+      // justcode never asked for and whose calls would bypass its approval UI.
+      strictMcpConfig: true,
       // The engine approves tool calls with the user before dispatching them,
       // so the CLI-side permission gate would only double-prompt.
       canUseTool: async (_toolName, input) => ({
@@ -366,6 +542,11 @@ export class ClaudeAgentProvider implements ProviderClient {
           type: 'object';
           [key: string]: unknown;
         },
+        // Advertise every tool in the prompt up front. Without this the
+        // runtime defers MCP tools behind its tool-search discovery, and the
+        // model reports it has no tools. justcode already has its own lazy
+        // tool loading, so double-deferral only hides the toolset.
+        _meta: { 'anthropic/alwaysLoad': true },
       })),
     }));
     server.setRequestHandler(CallToolRequestSchema, async (call) => {
@@ -477,12 +658,14 @@ export class ClaudeAgentProvider implements ProviderClient {
     let usage: TokenUsage | undefined;
 
     for (;;) {
-      if (request.signal?.aborted) {
-        throw new DOMException('The operation was aborted.', 'AbortError');
-      }
+      // Deliberately no early exit on abort here: the loop must keep draining
+      // until the turn's result message arrives (the interrupt produces one),
+      // or a stale result would sit on the shared stream and be misread as
+      // the *next* turn's answer. The abort check on the result path below is
+      // what turns the drained result into an AbortError.
       const event = await bridge.nextEvent();
 
-      if (event.kind === 'tool') {
+      if (event.kind === TurnEventKind.Tool) {
         return {
           content,
           toolCalls: [
@@ -629,9 +812,20 @@ function userMessage(
   };
 }
 
+/**
+ * The Claude Code runtime intercepts user messages that start with `/` as its
+ * own slash commands and answers "Unknown command" without ever running the
+ * turn. justcode's skill commands (e.g. `/firecrawl <url>`) are resolved by
+ * justcode itself and must reach the model as literal text — a leading space
+ * defeats the runtime's command parsing without changing what the model reads.
+ */
+function escapeSlashCommand(text: string): string {
+  return text.startsWith('/') ? ` ${text}` : text;
+}
+
 function chatMessageToSdkUserMessage(message: ChatMessage): SDKUserMessage {
   const blocks: Array<Record<string, unknown>> = [];
-  const text = renderMessageContentForModel(message);
+  const text = escapeSlashCommand(renderMessageContentForModel(message));
   if (text.trim()) blocks.push({ type: 'text', text });
   for (const image of message.images ?? []) {
     blocks.push({
@@ -643,7 +837,9 @@ function chatMessageToSdkUserMessage(message: ChatMessage): SDKUserMessage {
       },
     });
   }
-  if (blocks.length === 0) blocks.push({ type: 'text', text: message.content });
+  if (blocks.length === 0) {
+    blocks.push({ type: 'text', text: escapeSlashCommand(message.content) });
+  }
   return {
     type: 'user',
     message: {
