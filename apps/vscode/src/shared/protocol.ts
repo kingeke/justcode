@@ -25,6 +25,8 @@ export enum HostMessageType {
   McpStatus = 'mcpStatus',
   /** The mode list or active mode changed (select/create), without a full reload. */
   ModeUpdate = 'modeUpdate',
+  /** The installed skills changed (via Settings); refresh the `/` completions. */
+  SkillCommandsUpdate = 'skillCommandsUpdate',
   /** A transient status line shown above the transcript (no full reload). */
   Notice = 'notice',
   /** A compaction started or finished; drives the busy state and error surface. */
@@ -310,6 +312,20 @@ export interface WebviewTool {
   summary: string;
 }
 
+/**
+ * A slash command contributed by an installed skill, for the composer's `/`
+ * completions. `name` is the invocable form — the bare command name while
+ * unique, or `skill:command` when the name is contested. Execution happens
+ * host-side: the webview submits the typed text and the host resolves it.
+ */
+export interface WebviewSkillCommand {
+  name: string;
+  skillName: string;
+  description?: string | undefined;
+  /** Short usage hint, e.g. "<resume> [job-description]". */
+  argumentHint?: string | undefined;
+}
+
 /** A chat mode for the mode picker. The active one is `activeModeId`. */
 export interface WebviewMode {
   id: string;
@@ -374,6 +390,11 @@ export interface ReadyMessage {
   modes: WebviewMode[];
   /** Id of the active chat mode. */
   activeModeId: string;
+  /**
+   * Slash commands from installed skills, for the composer's `/` completions.
+   * Absent/empty when no skills are installed.
+   */
+  skillCommands?: WebviewSkillCommand[];
   /**
    * The user's chosen reasoning effort per model, nested by provider id, e.g.
    * `{ openrouter: { "openai/gpt-5": "high" } }`. A model absent from the map
@@ -545,6 +566,15 @@ export interface ModeUpdateMessage {
   activeModeId: string;
 }
 
+/**
+ * Sent after the user adds/updates/removes a skill in Settings, so the
+ * composer's `/` completions refresh without reloading the chat panel.
+ */
+export interface SkillCommandsUpdateMessage {
+  type: HostMessageType.SkillCommandsUpdate;
+  skillCommands: WebviewSkillCommand[];
+}
+
 /** A transient status line shown above the transcript (e.g. after "Edit plan"). */
 export interface NoticeMessage {
   type: HostMessageType.Notice;
@@ -633,6 +663,7 @@ export type HostToWebview =
   | ModelsUpdateMessage
   | McpStatusMessage
   | ModeUpdateMessage
+  | SkillCommandsUpdateMessage
   | NoticeMessage
   | CompactStatusMessage
   | SessionsListMessage
@@ -786,6 +817,7 @@ export enum SettingsSection {
   Providers = 'providers',
   Mcp = 'mcp',
   Prompts = 'prompts',
+  Skills = 'skills',
 }
 
 /** The user opened Settings; the host reveals the settings editor tab. */

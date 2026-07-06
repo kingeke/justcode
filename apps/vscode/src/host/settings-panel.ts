@@ -39,6 +39,14 @@ import {
 } from '@ext/host/provider-settings';
 import { resetAppState } from '@runtime/persistence/reset-app-state';
 import { ensureMcpConfigFile } from '@runtime/mcp/mcp-config';
+import {
+  discoverSkills,
+  installSkill,
+  localSkillsDirectory,
+  removeSkill,
+  skillsDirectory,
+  updateSkill,
+} from '@runtime/skills/skill-store';
 
 const APP_INFO: SettingsAppInfo = {
   name: APP_NAME,
@@ -82,7 +90,13 @@ export class SettingsPanel {
      * Notifies the host that a system prompt changed, so the live chat session
      * re-reads the mode prompts from config and re-applies the active one.
      */
-    private readonly onPromptsChanged: () => void
+    private readonly onPromptsChanged: () => void,
+    /**
+     * Notifies the host that the installed skills changed (add/update/remove),
+     * so the live chat session re-discovers them and refreshes the composer's
+     * `/` completions without a panel reload.
+     */
+    private readonly onSkillsChanged: () => void
   ) {}
 
   /**
@@ -252,7 +266,117 @@ export class SettingsPanel {
       case SettingsWebviewMessageType.OpenConfigFile:
         await this.openConfigFile();
         return;
+      case SettingsWebviewMessageType.GetSkills:
+        await this.sendSkills();
+        return;
+      case SettingsWebviewMessageType.AddSkill:
+        await this.runSkillAction('add', () =>
+          this.addSkill(message.source, message.scope)
+        );
+        return;
+      case SettingsWebviewMessageType.UpdateSkill:
+        await this.runSkillAction('update', async () => {
+          const updated = await updateSkill(
+            message.name,
+            this.skillsDirFor(message.scope)
+          );
+          return `Updated ${updated.manifest.name} to v${updated.manifest.version}.`;
+        });
+        return;
+      case SettingsWebviewMessageType.RemoveSkill:
+        await this.runSkillAction('remove', async () => {
+          await removeSkill(message.name, this.skillsDirFor(message.scope));
+          return `Removed ${message.name}.`;
+        });
+        return;
     }
+  }
+
+  /** The first workspace folder, which local skill installs anchor to. */
+  private workspaceRoot(): string | undefined {
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  }
+
+  /** The on-disk skills directory for a scope. Throws for local w/o workspace. */
+  private skillsDirFor(scope: 'local' | 'global'): string {
+    if (scope === 'local') {
+      const root = this.workspaceRoot();
+      if (!root) {
+        throw new Error('Open a workspace folder to manage local skills.');
+      }
+      return localSkillsDirectory(root);
+    }
+    return skillsDirectory(cacheDirectory());
+  }
+
+  /** Sends the installed skills of both scopes to the Skills tab. */
+  private async sendSkills(): Promise<void> {
+    const root = this.workspaceRoot();
+    const local = root
+      ? await discoverSkills(localSkillsDirectory(root), 'local')
+      : { skills: [], errors: [] };
+    const global = await discoverSkills(
+      skillsDirectory(cacheDirectory()),
+      'global'
+    );
+    this.post({
+      type: SettingsHostMessageType.Skills,
+      skills: [...local.skills, ...global.skills].map((skill) => ({
+        name: skill.manifest.name,
+        version: skill.manifest.version,
+        description: skill.manifest.description,
+        author: skill.manifest.author,
+        source: skill.source,
+        scope: skill.scope ?? 'global',
+        commands: skill.commands.map((command) => ({
+          name: command.name,
+          description: command.description,
+          argumentHint: command.argumentHint,
+        })),
+        errors: skill.errors,
+      })),
+      errors: [...local.errors, ...global.errors],
+      workspaceOpen: root !== undefined,
+    });
+  }
+
+  private async addSkill(
+    source: string,
+    scope: 'local' | 'global'
+  ): Promise<string> {
+    const installed = await installSkill(source, this.skillsDirFor(scope));
+    const commandNames = installed.commands
+      .map((command) => `/${command.name}`)
+      .join(', ');
+    return `Installed ${installed.manifest.name} v${installed.manifest.version} (${scope}) — ${commandNames}`;
+  }
+
+  /**
+   * Runs a skill action, reports its outcome, re-sends the fresh list, and
+   * tells the live chat session to refresh its `/` completions.
+   */
+  private async runSkillAction(
+    action: 'add' | 'update' | 'remove',
+    run: () => Promise<string>
+  ): Promise<void> {
+    try {
+      const message = await run();
+      this.post({
+        type: SettingsHostMessageType.SkillActionResult,
+        action,
+        success: true,
+        message,
+      });
+      this.onSkillsChanged();
+    } catch (error) {
+      this.post({
+        type: SettingsHostMessageType.SkillActionResult,
+        action,
+        success: false,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    await this.sendSkills();
   }
 
   /** Reads config and sends every mode's (effective) system prompt. */

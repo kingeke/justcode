@@ -1950,6 +1950,26 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
+/* Skill slash-command rows: the /name leads, its argument hint and description
+   trail in a muted tone (same dropdown chrome as the mention list). */
+.composer-command-name {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.composer-command-hint {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.composer-command-desc {
+  opacity: 0.7;
+  font-family: var(--vscode-font-family, sans-serif);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* While a turn is in flight, a bright blue arc travels around the composer's
    edge — a "thinking" affordance. The arc is a conic gradient rotated via the
    --composer-angle custom property, clipped to a 1.5px ring with a mask, and
@@ -2868,6 +2888,176 @@ textarea:focus {
   text-decoration: underline;
 }
 
+/* --- Skills settings tab --------------------------------------------------- */
+
+.skill-add-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0 12px 12px;
+}
+
+.skill-add-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, #555));
+  border-radius: 5px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+}
+
+.skill-add-input:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder);
+}
+
+.skill-add-scope {
+  flex-shrink: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, #555));
+  border-radius: 5px;
+  background: var(--vscode-dropdown-background, var(--vscode-input-background));
+  color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+  font-size: 12px;
+}
+
+.skill-scope-heading {
+  margin: 16px 12px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+
+.skill-card {
+  padding: 10px 12px;
+  margin: 0 12px 8px;
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.35));
+  border-radius: 6px;
+  background: var(--vscode-editorWidget-background, transparent);
+}
+
+.skill-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.skill-card-header-toggle {
+  cursor: pointer;
+  user-select: none;
+}
+
+.skill-card-header-toggle:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.skill-card-chevron {
+  flex-shrink: 0;
+  font-size: 11px;
+  opacity: 0.7;
+  transition: transform 0.12s ease;
+}
+
+.skill-card-chevron.open {
+  transform: rotate(90deg);
+}
+
+.skill-card-count {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.skill-card-name {
+  font-weight: 600;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.skill-card-version {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.skill-card-shadowed {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--vscode-badge-background, #4d4d4d);
+  color: var(--vscode-badge-foreground, #fff);
+}
+
+.skill-card-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.skill-remove {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.skill-card-description {
+  margin: 6px 0 0;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.skill-card-commands {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.skill-card-commands li {
+  margin: 2px 0;
+}
+
+.skill-command-hint {
+  opacity: 0.6;
+}
+
+.skill-command-desc {
+  opacity: 0.75;
+}
+
+.skill-card-source {
+  margin: 6px 0 0;
+  font-size: 11px;
+  opacity: 0.55;
+  font-family: var(--vscode-editor-font-family, monospace);
+  overflow-wrap: anywhere;
+}
+
+.skill-card-source-link {
+  color: var(--vscode-textLink-foreground, #3794ff);
+  text-decoration: none;
+}
+
+.skill-card-source-link:hover {
+  text-decoration: underline;
+}
+
+.skill-action-success {
+  margin: 4px 12px 8px;
+  font-size: 12px;
+  color: var(--vscode-testing-iconPassed, #2ea043);
+}
+
+/* Top-level error lines on a settings section (skill action failures, broken
+   installs) share the same 12px text gutter as the title/hint. Errors nested
+   in forms/cards keep their own layout. */
+.settings-section > .provider-connect-error {
+  margin-left: 12px;
+  margin-right: 12px;
+}
+
 /* --- MCP servers settings tab --------------------------------------------- */
 
 .mcp-intro {
@@ -2875,103 +3065,28 @@ textarea:focus {
   margin-bottom: 12px;
 }
 
-/* Overlay editor: a transparent <textarea> stacked on a highlighted <pre>.
-   Both share identical box, font, and wrapping so their text lines up exactly. */
-.mcp-editor-wrap {
-  position: relative;
+/* The CodeMirror JSON editor (see JsonEditor.tsx). The editor's own chrome —
+   gutters, folding, selection, lint squiggles — is themed inline with VS Code
+   variables via EditorView.theme; this wrapper just sizes it. The 12px side
+   margins line it up with the section title/hint text, which carry the same
+   indent as padding. */
+.mcp-editor-cm {
+  margin: 0 12px;
 }
 
-.mcp-editor,
-.mcp-editor-highlight {
-  box-sizing: border-box;
-  padding: 10px 12px;
-  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.4));
-  border-radius: 6px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 12px;
-  line-height: 1.5;
-  tab-size: 2;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: break-word;
-}
-
-.mcp-editor-highlight {
-  position: absolute;
-  inset: 0;
-  margin: 0;
-  overflow: hidden;
-  pointer-events: none;
-  background: var(--vscode-input-background, rgba(0, 0, 0, 0.2));
-  color: var(--vscode-input-foreground, inherit);
-  z-index: 0;
-}
-
-/* Clear the webview's default inline-code styling — otherwise its per-line
-   background paints grey boxes hugging the highlighted text. */
-.mcp-editor-highlight code,
-.mcp-editor-highlight code span {
-  font: inherit;
-  white-space: inherit;
-  background: none;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-}
-
-.mcp-editor-placeholder {
-  opacity: 0.5;
-}
-
-.mcp-editor {
-  position: relative;
-  display: block;
+.mcp-editor-cm .cm-editor {
   width: 100%;
-  min-height: 260px;
-  resize: vertical;
-  margin: 0;
-  background: transparent;
-  color: transparent;
-  caret-color: var(--vscode-input-foreground, #fff);
-  z-index: 1;
-}
-
-.mcp-editor:focus {
-  outline: none;
-  border-color: var(--vscode-focusBorder, #3b82f6);
-}
-
-/* JSON token colours — VS Code debug token vars adapt to the active theme. */
-.json-key {
-  color: var(--vscode-debugTokenExpression-name, #9cdcfe);
-}
-
-.json-string {
-  color: var(--vscode-debugTokenExpression-string, #ce9178);
-}
-
-.json-number {
-  color: var(--vscode-debugTokenExpression-number, #b5cea8);
-}
-
-.json-boolean {
-  color: var(--vscode-debugTokenExpression-boolean, #569cd6);
-}
-
-.json-null {
-  color: var(--vscode-debugTokenExpression-boolean, #569cd6);
 }
 
 .mcp-parse-error {
-  margin-top: 8px;
-  margin-bottom: 0;
+  margin: 8px 12px 0;
 }
 
 .mcp-actions {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 10px;
+  margin: 10px 12px 0;
 }
 
 .mcp-dirty-hint {
@@ -2980,7 +3095,7 @@ textarea:focus {
 }
 
 .mcp-result {
-  margin-top: 14px;
+  margin: 14px 12px 0;
 }
 
 /* Mode picker footer: "+ Create mode" on the left, prompt settings gear right. */

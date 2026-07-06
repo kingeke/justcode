@@ -892,6 +892,7 @@ export function App(): React.JSX.Element {
     maxReadLines: state.maxReadLines,
     maxHistoryMessages: state.maxHistoryMessages,
     onCancel: cancel,
+    skillCommands: state.skillCommands,
     workspaceFiles: state.workspaceFiles,
     fileSymbols: state.fileSymbols,
     onRequestWorkspaceFiles: requestWorkspaceFiles,

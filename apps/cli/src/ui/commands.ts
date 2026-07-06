@@ -29,9 +29,17 @@ export enum CommandName {
   Reset = 'reset',
 }
 
-export interface Command {
-  name: CommandName;
+/**
+ * Anything the command palette can list and run: the built-in commands below
+ * plus dynamic entries (e.g. installed skill commands) merged in by the host.
+ */
+export interface PaletteCommand {
+  name: string;
   description: string;
+}
+
+export interface Command extends PaletteCommand {
+  name: CommandName;
 }
 
 export const COMMANDS: Command[] = [
@@ -160,15 +168,19 @@ export const COMMANDS: Command[] = [
  * hyphen-segment prefix, then any substring. Ties keep declaration order. An
  * empty query lists everything.
  */
-export function filterCommands(query: string): Command[] {
+export function filterCommands<T extends PaletteCommand>(
+  query: string,
+  commands: readonly T[] = COMMANDS as readonly Command[] as readonly T[]
+): T[] {
   const lower = query.toLowerCase().trim();
-  if (!lower) return COMMANDS;
+  if (!lower) return [...commands];
 
-  return COMMANDS.map((cmd, index) => ({
-    cmd,
-    index,
-    score: scoreCommand(cmd.name, lower),
-  }))
+  return commands
+    .map((cmd, index) => ({
+      cmd,
+      index,
+      score: scoreCommand(cmd.name, lower),
+    }))
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .map((entry) => entry.cmd);
@@ -177,9 +189,12 @@ export function filterCommands(query: string): Command[] {
 function scoreCommand(name: string, query: string): number {
   if (name === query) return 1000;
   if (name.startsWith(query)) return 500;
-  // A hyphen-delimited segment starts with the query ("lazy" in
-  // "toggle-lazy-tool-loading"), the most useful fuzzy hit for these names.
-  if (name.split('-').some((segment) => segment.startsWith(query))) return 300;
+  // A hyphen- or colon-delimited segment starts with the query ("lazy" in
+  // "toggle-lazy-tool-loading", "review" in "test-skill:review" — skill
+  // commands namespace with ':'), the most useful fuzzy hit for these names.
+  if (name.split(/[-:]/).some((segment) => segment.startsWith(query))) {
+    return 300;
+  }
   if (name.includes(query)) return 200;
   return 0;
 }

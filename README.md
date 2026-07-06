@@ -95,6 +95,32 @@ prompt with ~23 slash commands (`/connect`, `/models`, `/mode`, `/sessions`,
 The full, always-current list of tools and commands is on the
 **[website](https://justcodeapp.dev/)**.
 
+## Skills
+
+Skills are installable packs of slash commands, distributed as plain GitHub
+repositories. Installing one registers its commands in the CLI and the VS Code
+extension automatically — and it doesn't have to be built for JustCode:
+repos following the shared ecosystem conventions (Claude plugins, `SKILL.md`
+skills, `commands/*.md`) install and work as-is:
+
+```bash
+justcode skill add test/skill            # asks: [l]ocal / [g]lobal?
+justcode skill add test/skill --local    # this project only (.justcode/skills/)
+justcode skill add test/skill --global   # every project (~/.cache/justcode/skills/)
+justcode skill list                      # installed skills, labelled (local)/(global)
+justcode skill update test-skill
+justcode skill remove test-skill
+```
+
+A local skill shadows a global one of the same name, so a project can pin its
+own version of a shared skill.
+
+Each command is a markdown file whose body runs as the system prompt for that
+turn — e.g. installing a skill that ships `commands/explain.md` gives you
+`/explain` in the chat. See **[docs/skills.md](docs/skills.md)** for a
+five-step walkthrough of creating your own skill, plus the manifest reference,
+command authoring, and publishing.
+
 ## Develop locally
 
 Building requires [Bun](https://bun.sh) (`curl -fsSL https://bun.sh/install | bash`).

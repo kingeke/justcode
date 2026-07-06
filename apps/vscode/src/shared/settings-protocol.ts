@@ -32,6 +32,10 @@ export enum SettingsHostMessageType {
   Prompts = 'prompts',
   /** Outcome of a SavePrompt attempt. */
   PromptSaveResult = 'promptSaveResult',
+  /** The installed skills of both scopes, in response to GetSkills / actions. */
+  Skills = 'skills',
+  /** Outcome of an AddSkill / UpdateSkill / RemoveSkill action. */
+  SkillActionResult = 'skillActionResult',
 }
 
 /** Discriminator for messages sent from the settings webview to the host. */
@@ -61,6 +65,14 @@ export enum SettingsWebviewMessageType {
   CreateMode = 'createMode',
   /** Open the raw `config.json` in a VS Code editor tab. */
   OpenConfigFile = 'openConfigFile',
+  /** Ask the host for the installed skills (both scopes). */
+  GetSkills = 'getSkills',
+  /** Install a skill from a git repository into a scope. */
+  AddSkill = 'addSkill',
+  /** Uninstall a skill from a scope. */
+  RemoveSkill = 'removeSkill',
+  /** Update an installed skill from its repository. */
+  UpdateSkill = 'updateSkill',
 }
 
 /** Per-server outcome of loading MCP, shown after a save. */
@@ -87,6 +99,30 @@ export interface SettingsPromptInfo {
   prompt: string;
   /** True when a built-in's prompt is overridden in config (reset available). */
   overridden: boolean;
+}
+
+/** Where a skill is installed; mirrors `@core` SkillScope. */
+export type SettingsSkillScope = 'local' | 'global';
+
+/** One slash command a skill contributes, as shown on the Skills tab. */
+export interface SettingsSkillCommand {
+  name: string;
+  description?: string | undefined;
+  argumentHint?: string | undefined;
+}
+
+/** An installed skill, as listed on the Skills tab. */
+export interface SettingsSkill {
+  name: string;
+  version: string;
+  description?: string | undefined;
+  author?: string | undefined;
+  /** Where the skill was installed from (git URL), when known. */
+  source?: string | undefined;
+  scope: SettingsSkillScope;
+  commands: SettingsSkillCommand[];
+  /** Command files that failed to parse; the rest of the skill still works. */
+  errors: string[];
 }
 
 /** Static product details rendered on the About tab. */
@@ -173,6 +209,28 @@ export interface SettingsPromptSaveResultMessage {
   error?: string | undefined;
 }
 
+/**
+ * The installed skills of both scopes, sent in response to GetSkills and after
+ * every add/update/remove so the list is always fresh.
+ */
+export interface SettingsSkillsMessage {
+  type: SettingsHostMessageType.Skills;
+  skills: SettingsSkill[];
+  /** Skills that failed to load entirely (broken installs). */
+  errors: string[];
+  /** False when no workspace folder is open, so local installs are disabled. */
+  workspaceOpen: boolean;
+}
+
+/** Outcome of an AddSkill / UpdateSkill / RemoveSkill action. */
+export interface SettingsSkillActionResultMessage {
+  type: SettingsHostMessageType.SkillActionResult;
+  action: 'add' | 'update' | 'remove';
+  success: boolean;
+  /** Success summary or failure reason, shown under the form/list. */
+  message: string;
+}
+
 export type SettingsHostToWebview =
   | SettingsSnapshotMessage
   | SettingsProvidersUpdateMessage
@@ -184,7 +242,9 @@ export type SettingsHostToWebview =
   | SettingsMcpSaveResultMessage
   | SettingsFocusSectionMessage
   | SettingsPromptsMessage
-  | SettingsPromptSaveResultMessage;
+  | SettingsPromptSaveResultMessage
+  | SettingsSkillsMessage
+  | SettingsSkillActionResultMessage;
 
 // --- Webview -> Host -------------------------------------------------------
 
@@ -291,6 +351,36 @@ export interface SettingsOpenConfigFileMessage {
   type: SettingsWebviewMessageType.OpenConfigFile;
 }
 
+/** Ask the host for the installed skills of both scopes. */
+export interface SettingsGetSkillsMessage {
+  type: SettingsWebviewMessageType.GetSkills;
+}
+
+/**
+ * Install a skill from a git repository (owner/repo shorthand or a URL) into
+ * the given scope. The host replies with SkillActionResult and a fresh Skills
+ * list.
+ */
+export interface SettingsAddSkillMessage {
+  type: SettingsWebviewMessageType.AddSkill;
+  source: string;
+  scope: SettingsSkillScope;
+}
+
+/** Uninstall a skill from a scope. Replies like AddSkill. */
+export interface SettingsRemoveSkillMessage {
+  type: SettingsWebviewMessageType.RemoveSkill;
+  name: string;
+  scope: SettingsSkillScope;
+}
+
+/** Update an installed skill from its repository. Replies like AddSkill. */
+export interface SettingsUpdateSkillMessage {
+  type: SettingsWebviewMessageType.UpdateSkill;
+  name: string;
+  scope: SettingsSkillScope;
+}
+
 export type SettingsWebviewToHost =
   | SettingsInitMessage
   | SettingsListProvidersMessage
@@ -307,4 +397,8 @@ export type SettingsWebviewToHost =
   | SettingsGetPromptsMessage
   | SettingsSavePromptMessage
   | SettingsCreateModeMessage
-  | SettingsOpenConfigFileMessage;
+  | SettingsOpenConfigFileMessage
+  | SettingsGetSkillsMessage
+  | SettingsAddSkillMessage
+  | SettingsRemoveSkillMessage
+  | SettingsUpdateSkillMessage;

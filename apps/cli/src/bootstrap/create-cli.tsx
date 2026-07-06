@@ -130,6 +130,8 @@ export function createCli(): Command {
       }
     });
 
+  registerSkillCommands(program);
+
   program
     .command('reset')
     .description(
@@ -148,6 +150,284 @@ export function createCli(): Command {
     });
 
   return program;
+}
+
+/** The `--local` / `--global` scope flags shared by the skill subcommands. */
+interface SkillScopeOptions {
+  local?: boolean;
+  global?: boolean;
+}
+
+/**
+ * The `justcode skill …` subcommands: install skill packs from git
+ * repositories, whose commands then appear as slash commands in the chat UI.
+ * Plain-stdout management commands — nothing here touches the TUI.
+ *
+ * Skills install into one of two scopes: local (`.justcode/skills/` in the
+ * current project) or global (`<configDirectory>/skills/`, shared everywhere).
+ * `add` asks interactively when neither `--local` nor `--global` is given;
+ * `remove`/`update`/`info` resolve local-first, matching how a local skill
+ * shadows a global one at runtime.
+ */
+function registerSkillCommands(program: Command): void {
+  const skill = program
+    .command('skill')
+    // `skills` is a natural slip; without the alias the root command swallows
+    // it as a chat argument and errors confusingly on the scope flags.
+    .alias('skills')
+    .description('Manage installed skills (slash-command packs)');
+
+  const configDir = (): Promise<string> =>
+    loadAppConfig().then((config) => config.configDirectory);
+
+  const scopeDirs = async (): Promise<{ local: string; global: string }> => {
+    const { skillsDirectory, localSkillsDirectory } =
+      await import('@runtime/skills/skill-store');
+    return {
+      local: localSkillsDirectory(process.cwd()),
+      global: skillsDirectory(await configDir()),
+    };
+  };
+
+  // Skill management is scriptable (used in CI/setup scripts), so failures
+  // print one clean line and exit 1 instead of an unhandled-rejection stack.
+  const run =
+    <TArgs extends unknown[]>(action: (...args: TArgs) => Promise<void>) =>
+    async (...args: TArgs): Promise<void> => {
+      try {
+        await action(...args);
+      } catch (error) {
+        process.stderr.write(
+          `Error: ${error instanceof Error ? error.message : String(error)}\n`
+        );
+        process.exitCode = 1;
+      }
+    };
+
+  const getScopeOptions = (args: unknown[]): SkillScopeOptions => {
+    const options = getActionOptions<SkillScopeOptions>(args);
+    if (options.local && options.global) {
+      throw new Error('Pass either --local or --global, not both.');
+    }
+    return options;
+  };
+
+  /**
+   * Which scope `add` installs into: an explicit flag wins; otherwise ask
+   * interactively. Without a terminal to ask in (CI, pipes), default to
+   * global — the safe, previous behavior.
+   */
+  const resolveAddScope = async (
+    options: SkillScopeOptions
+  ): Promise<'local' | 'global'> => {
+    if (options.local) return 'local';
+    if (options.global) return 'global';
+    if (!process.stdin.isTTY) return 'global';
+    // No output stream on the readline: with one set it would re-echo typed
+    // characters. But that also means question() never prints its prompt, so
+    // both lines are written to stdout directly and question('') just waits.
+    const readline = createInterface({
+      input: process.stdin,
+      output: undefined,
+    });
+    try {
+      process.stdout.write(
+        `Install locally (this project's .justcode/skills) or globally (all projects)?\n[l]ocal / [g]lobal: `
+      );
+      const answer = await readline.question('');
+      return answer.trim().toLowerCase().startsWith('l') ? 'local' : 'global';
+    } finally {
+      readline.close();
+    }
+  };
+
+  /**
+   * Where an already-installed skill lives, for remove/update/info: an
+   * explicit flag pins the scope; otherwise local wins (mirroring runtime
+   * shadowing), falling back to global.
+   */
+  const resolveInstalledDir = async (
+    name: string,
+    options: SkillScopeOptions
+  ): Promise<string> => {
+    const { isSkillInstalled } = await import('@runtime/skills/skill-store');
+    const dirs = await scopeDirs();
+    if (options.local) return dirs.local;
+    if (options.global) return dirs.global;
+    if (await isSkillInstalled(name, dirs.local)) return dirs.local;
+    return dirs.global;
+  };
+
+  skill
+    .command('add <repository>')
+    .description(
+      'Install a skill from a GitHub repository (owner/repo or a git URL)'
+    )
+    .option('--local', 'Install into this project (.justcode/skills)')
+    .option('--global', 'Install for all projects')
+    .action(
+      run(async (repository: string, ...rest: unknown[]) => {
+        const options = getScopeOptions([repository, ...rest]);
+        const scope = await resolveAddScope(options);
+        const { installSkill } = await import('@runtime/skills/skill-store');
+        const dirs = await scopeDirs();
+        const installed = await installSkill(repository, dirs[scope]);
+        process.stdout.write(
+          `Installed ${installed.manifest.name} v${installed.manifest.version} (${scope})\n`
+        );
+        for (const command of installed.commands) {
+          process.stdout.write(
+            `  /${command.name}${command.description ? ` — ${command.description}` : ''}\n`
+          );
+        }
+        for (const problem of installed.errors) {
+          process.stdout.write(`  warning: ${problem}\n`);
+        }
+      })
+    );
+
+  skill
+    .command('remove <skill-name>')
+    .description('Uninstall a skill and its slash commands')
+    .option('--local', 'Remove the project-local install')
+    .option('--global', 'Remove the global install')
+    .action(
+      run(async (name: string, ...rest: unknown[]) => {
+        const options = getScopeOptions([name, ...rest]);
+        const { removeSkill } = await import('@runtime/skills/skill-store');
+        await removeSkill(name, await resolveInstalledDir(name, options));
+        process.stdout.write(`Removed ${name}.\n`);
+      })
+    );
+
+  skill
+    .command('update <skill-name>')
+    .description('Update an installed skill from its repository')
+    .option('--local', 'Update the project-local install')
+    .option('--global', 'Update the global install')
+    .action(
+      run(async (name: string, ...rest: unknown[]) => {
+        const options = getScopeOptions([name, ...rest]);
+        const { updateSkill } = await import('@runtime/skills/skill-store');
+        const updated = await updateSkill(
+          name,
+          await resolveInstalledDir(name, options)
+        );
+        process.stdout.write(
+          `Updated ${updated.manifest.name} to v${updated.manifest.version}\n`
+        );
+        for (const problem of updated.errors) {
+          process.stdout.write(`  warning: ${problem}\n`);
+        }
+      })
+    );
+
+  skill
+    .command('list')
+    .description('List installed skills (local and global) and their commands')
+    .action(
+      run(async () => {
+        const { discoverAllSkills } =
+          await import('@runtime/skills/skill-store');
+        const { buildSkillCommandIndex } = await import('@core/domain/skill');
+        const { COMMANDS } = await import('@cli/ui/commands');
+        const { skills, errors } = await discoverAllSkills({
+          configDirectory: await configDir(),
+          workspaceRoot: process.cwd(),
+        });
+        if (skills.length === 0 && errors.length === 0) {
+          process.stdout.write(
+            `No skills installed. Add one with \`${APP_NAME_LOWERED} skill add <owner/repo>\`.\n`
+          );
+          return;
+        }
+        const index = buildSkillCommandIndex(
+          skills,
+          COMMANDS.map((command) => command.name)
+        );
+        for (const installed of skills) {
+          process.stdout.write(
+            `${installed.manifest.name} v${installed.manifest.version}${
+              installed.scope ? ` (${installed.scope})` : ''
+            }${
+              installed.manifest.description
+                ? ` — ${installed.manifest.description}`
+                : ''
+            }\n`
+          );
+          for (const ref of index.commands.filter(
+            (entry) => entry.skillName === installed.manifest.name
+          )) {
+            const invocation = ref.bareName
+              ? `/${ref.bareName}`
+              : `/${ref.qualifiedName}`;
+            process.stdout.write(
+              `  ${invocation}${ref.command.description ? ` — ${ref.command.description}` : ''}\n`
+            );
+          }
+          for (const problem of installed.errors) {
+            process.stdout.write(`  warning: ${problem}\n`);
+          }
+        }
+        for (const collision of index.collisions) {
+          process.stdout.write(
+            `warning: /${collision.name} is defined by ${collision.claimedBy.join(
+              ' and '
+            )}; use the /<skill>${':'}${collision.name} form.\n`
+          );
+        }
+        for (const problem of errors) {
+          process.stdout.write(`warning: ${problem}\n`);
+        }
+      })
+    );
+
+  skill
+    .command('info <skill-name>')
+    .description('Show a skill’s manifest, commands, and install source')
+    .option('--local', 'Inspect the project-local install')
+    .option('--global', 'Inspect the global install')
+    .action(
+      run(async (name: string, ...rest: unknown[]) => {
+        const options = getScopeOptions([name, ...rest]);
+        const { getInstalledSkill } =
+          await import('@runtime/skills/skill-store');
+        const installed = await getInstalledSkill(
+          name,
+          await resolveInstalledDir(name, options)
+        );
+        const { manifest } = installed;
+        process.stdout.write(`${manifest.name} v${manifest.version}\n`);
+        if (manifest.description) {
+          process.stdout.write(`${manifest.description}\n`);
+        }
+        if (manifest.author)
+          process.stdout.write(`Author: ${manifest.author}\n`);
+        if (installed.source) {
+          process.stdout.write(`Source: ${installed.source}\n`);
+        }
+        if (installed.installedAt) {
+          process.stdout.write(`Installed: ${installed.installedAt}\n`);
+        }
+        process.stdout.write(`Location: ${installed.directory}\n`);
+        process.stdout.write('Commands:\n');
+        for (const command of installed.commands) {
+          const hint = command.argumentHint ? ` ${command.argumentHint}` : '';
+          process.stdout.write(
+            `  /${command.name}${hint}${command.description ? ` — ${command.description}` : ''}\n`
+          );
+          if (command.tools?.length) {
+            process.stdout.write(`      tools: ${command.tools.join(', ')}\n`);
+          }
+          if (command.model && command.model !== 'auto') {
+            process.stdout.write(`      model: ${command.model}\n`);
+          }
+        }
+        for (const problem of installed.errors) {
+          process.stdout.write(`  warning: ${problem}\n`);
+        }
+      })
+    );
 }
 
 export function normalizeArgv(argv: readonly string[]): string[] {
@@ -266,6 +546,28 @@ async function runChat(options: SharedOptions): Promise<void> {
   // run (fast file read) and refreshes the cache in the background for next time.
   const updateNotice = await getUpdateNotice(appVersion);
 
+  // Discover installed skills once at startup so their commands appear in the
+  // slash-command palette — the project's local `.justcode/skills` plus the
+  // global scope, local shadowing global. Discovery is fast (local reads) and
+  // fail-soft: a broken skill is skipped; any failure means no skill commands.
+  const skillCommands = await (async () => {
+    try {
+      const { discoverAllSkills } = await import('@runtime/skills/skill-store');
+      const { buildSkillCommandIndex } = await import('@core/domain/skill');
+      const { COMMANDS } = await import('@cli/ui/commands');
+      const { skills } = await discoverAllSkills({
+        configDirectory: appConfig.configDirectory,
+        workspaceRoot: process.cwd(),
+      });
+      return buildSkillCommandIndex(
+        skills,
+        COMMANDS.map((command) => command.name)
+      );
+    } catch {
+      return undefined;
+    }
+  })();
+
   // Point OpenTUI at our embedded, self-contained tree-sitter worker before it
   // ever spawns one, so markdown highlights in the compiled binary (see
   // configure-tree-sitter.ts). Must run before the first <markdown> renders.
@@ -308,6 +610,7 @@ async function runChat(options: SharedOptions): Promise<void> {
       configDirectory: appConfig.configDirectory,
       chatSessionService: runtime.chatSessionService,
       promptAttachmentService: runtime.promptAttachmentService,
+      ...(skillCommands?.commands.length ? { skillCommands } : {}),
       sessionId: options.session ?? randomUUID(),
       requestedModel: options.model ?? savedConfig.lastModel,
       allProviders: runtime.allProviders,

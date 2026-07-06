@@ -12,6 +12,8 @@ import {
   type SettingsAppInfo,
   type SettingsMcpServerStatus,
   type SettingsPromptInfo,
+  type SettingsSkill,
+  type SettingsSkillScope,
 } from '@ext/shared/settings-protocol';
 import {
   logoUri,
@@ -19,6 +21,7 @@ import {
   postSettingsToHost,
 } from '@ext/webview/vscode-api';
 import { PlusIcon } from '@ext/webview/components/Icons';
+import { JsonEditor } from '@ext/webview/components/JsonEditor';
 import { APP_NAME } from '@core/branding';
 import { CRYPTO_WALLETS, KOFI_URL } from '@core/support';
 
@@ -52,6 +55,7 @@ interface OAuthControls {
 enum Tab {
   Providers = 'providers',
   Mcp = 'mcp',
+  Skills = 'skills',
   Prompts = 'prompts',
   About = 'about',
 }
@@ -59,6 +63,7 @@ enum Tab {
 const TABS: { id: Tab; label: string }[] = [
   { id: Tab.Providers, label: 'Providers' },
   { id: Tab.Mcp, label: 'MCP Servers' },
+  { id: Tab.Skills, label: 'Skills' },
   { id: Tab.Prompts, label: 'System Prompts' },
   { id: Tab.About, label: `About ${APP_NAME}` },
 ];
@@ -75,6 +80,27 @@ interface McpSaveState {
   success: boolean;
   error?: string | undefined;
   servers?: SettingsMcpServerStatus[];
+}
+
+/** Outcome of the most recent skill add/update/remove, shown on the tab. */
+interface SkillActionState {
+  action: 'add' | 'update' | 'remove';
+  success: boolean;
+  message: string;
+}
+
+/**
+ * A browser-openable URL for a skill's install source, or undefined for
+ * sources that have no web page (local paths). `git@host:owner/repo(.git)`
+ * remotes are rewritten to their https equivalent so they're clickable too.
+ */
+function skillSourceHref(source: string): string | undefined {
+  if (source.startsWith('https://') || source.startsWith('http://')) {
+    return source.replace(/\.git$/, '');
+  }
+  const scpLike = source.match(/^git@([^:]+):(.+?)(?:\.git)?$/);
+  if (scpLike) return `https://${scpLike[1]}/${scpLike[2]}`;
+  return undefined;
 }
 
 function matchesSearch(provider: WebviewProvider, query: string): boolean {
@@ -105,6 +131,15 @@ export function SettingsApp(): React.JSX.Element {
   const [promptSaving, setPromptSaving] = React.useState(false);
   const [promptSaveState, setPromptSaveState] = React.useState<
     PromptSaveState | undefined
+  >();
+  // Skills tab state: the installed skills (both scopes), whether an action is
+  // in flight, and the most recent action's outcome.
+  const [skills, setSkills] = React.useState<SettingsSkill[] | undefined>();
+  const [skillErrors, setSkillErrors] = React.useState<string[]>([]);
+  const [skillWorkspaceOpen, setSkillWorkspaceOpen] = React.useState(true);
+  const [skillBusy, setSkillBusy] = React.useState(false);
+  const [skillActionState, setSkillActionState] = React.useState<
+    SkillActionState | undefined
   >();
 
   // Callback ref: set by ConnectWizard when it fires TestConnectProvider so
@@ -165,20 +200,66 @@ export function SettingsApp(): React.JSX.Element {
             ...(message.error !== undefined ? { error: message.error } : {}),
           });
           break;
+        case SettingsHostMessageType.Skills:
+          setSkills(message.skills);
+          setSkillErrors(message.errors);
+          setSkillWorkspaceOpen(message.workspaceOpen);
+          break;
+        case SettingsHostMessageType.SkillActionResult:
+          setSkillBusy(false);
+          setSkillActionState({
+            action: message.action,
+            success: message.success,
+            message: message.message,
+          });
+          break;
         case SettingsHostMessageType.FocusSection:
           if (message.section === SettingsSection.Mcp) setTab(Tab.Mcp);
           else if (message.section === SettingsSection.Providers)
             setTab(Tab.Providers);
           else if (message.section === SettingsSection.Prompts)
             setTab(Tab.Prompts);
+          else if (message.section === SettingsSection.Skills)
+            setTab(Tab.Skills);
           break;
       }
     });
     postSettingsToHost({ type: SettingsWebviewMessageType.Init });
     postSettingsToHost({ type: SettingsWebviewMessageType.GetMcpConfig });
     postSettingsToHost({ type: SettingsWebviewMessageType.GetPrompts });
+    postSettingsToHost({ type: SettingsWebviewMessageType.GetSkills });
     return unsubscribe;
   }, []);
+
+  const addSkill = (source: string, scope: SettingsSkillScope): void => {
+    setSkillBusy(true);
+    setSkillActionState(undefined);
+    postSettingsToHost({
+      type: SettingsWebviewMessageType.AddSkill,
+      source,
+      scope,
+    });
+  };
+
+  const updateSkill = (name: string, scope: SettingsSkillScope): void => {
+    setSkillBusy(true);
+    setSkillActionState(undefined);
+    postSettingsToHost({
+      type: SettingsWebviewMessageType.UpdateSkill,
+      name,
+      scope,
+    });
+  };
+
+  const removeSkill = (name: string, scope: SettingsSkillScope): void => {
+    setSkillBusy(true);
+    setSkillActionState(undefined);
+    postSettingsToHost({
+      type: SettingsWebviewMessageType.RemoveSkill,
+      name,
+      scope,
+    });
+  };
 
   const savePrompt = (modeId: string, prompt: string): void => {
     setPromptSaving(true);
@@ -307,6 +388,17 @@ export function SettingsApp(): React.JSX.Element {
               saving={mcpSaving}
               saveState={mcpSaveState}
               onSave={saveMcpConfig}
+            />
+          ) : tab === Tab.Skills ? (
+            <SkillsTab
+              skills={skills}
+              errors={skillErrors}
+              workspaceOpen={skillWorkspaceOpen}
+              busy={skillBusy}
+              actionState={skillActionState}
+              onAdd={addSkill}
+              onUpdate={updateSkill}
+              onRemove={removeSkill}
             />
           ) : tab === Tab.Prompts ? (
             <PromptsTab
@@ -1077,6 +1169,264 @@ function CustomProviderForm({
 }
 
 // ---------------------------------------------------------------------------
+// Skills tab — install/update/remove skill packs (slash-command repos)
+// ---------------------------------------------------------------------------
+
+function SkillsTab({
+  skills,
+  errors,
+  workspaceOpen,
+  busy,
+  actionState,
+  onAdd,
+  onUpdate,
+  onRemove,
+}: {
+  skills: SettingsSkill[] | undefined;
+  errors: string[];
+  workspaceOpen: boolean;
+  busy: boolean;
+  actionState: SkillActionState | undefined;
+  onAdd: (source: string, scope: SettingsSkillScope) => void;
+  onUpdate: (name: string, scope: SettingsSkillScope) => void;
+  onRemove: (name: string, scope: SettingsSkillScope) => void;
+}): React.JSX.Element {
+  const [source, setSource] = React.useState('');
+  const [scope, setScope] = React.useState<SettingsSkillScope>('global');
+  // Two-step remove: the first click arms the button, the second removes.
+  const [confirmingRemove, setConfirmingRemove] = React.useState<string | null>(
+    null
+  );
+  // Cards start collapsed (some skills ship dozens of commands); clicking the
+  // header toggles one open. Keyed by scope:name so the two scopes' copies of
+  // a same-named skill fold independently.
+  const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
+  const toggleExpanded = (key: string): void => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const canAdd = !busy && source.trim().length > 0;
+  const submitAdd = (): void => {
+    if (!canAdd) return;
+    onAdd(source.trim(), scope);
+    setSource('');
+  };
+
+  const local = (skills ?? []).filter((skill) => skill.scope === 'local');
+  const global = (skills ?? []).filter((skill) => skill.scope === 'global');
+  const localNames = new Set(local.map((skill) => skill.name));
+
+  const renderSkill = (skill: SettingsSkill): React.JSX.Element => {
+    const key = `${skill.scope}:${skill.name}`;
+    const open = expanded.has(key);
+    return (
+      <div key={key} className="skill-card">
+        {/* The whole header row toggles the card; the action buttons stop the
+            click so Update/Remove never double as a fold. */}
+        <div
+          className="skill-card-header skill-card-header-toggle"
+          role="button"
+          aria-expanded={open}
+          tabIndex={0}
+          onClick={() => toggleExpanded(key)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleExpanded(key);
+            }
+          }}
+        >
+          <span className={`skill-card-chevron ${open ? 'open' : ''}`}>▸</span>
+          <span className="skill-card-name">{skill.name}</span>
+          <span className="skill-card-version">v{skill.version}</span>
+          {!open ? (
+            <span className="skill-card-count">
+              {skill.commands.length}{' '}
+              {skill.commands.length === 1 ? 'command' : 'commands'}
+            </span>
+          ) : null}
+          {skill.scope === 'global' && localNames.has(skill.name) ? (
+            <span className="skill-card-shadowed">
+              shadowed by the local install
+            </span>
+          ) : null}
+          <span
+            className="skill-card-actions"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="provider-action"
+              disabled={busy}
+              onClick={() => onUpdate(skill.name, skill.scope)}
+            >
+              Update
+            </button>
+            <button
+              type="button"
+              className="provider-action skill-remove"
+              disabled={busy}
+              onClick={() => {
+                if (confirmingRemove === key) {
+                  setConfirmingRemove(null);
+                  onRemove(skill.name, skill.scope);
+                } else {
+                  setConfirmingRemove(key);
+                }
+              }}
+            >
+              {confirmingRemove === key ? 'Confirm remove' : 'Remove'}
+            </button>
+          </span>
+        </div>
+        {open ? (
+          <>
+            {skill.description ? (
+              <p className="skill-card-description">{skill.description}</p>
+            ) : null}
+            <ul className="skill-card-commands">
+              {skill.commands.map((command) => (
+                <li key={command.name}>
+                  <code>/{command.name}</code>
+                  {command.argumentHint ? (
+                    <span className="skill-command-hint">
+                      {' '}
+                      {command.argumentHint}
+                    </span>
+                  ) : null}
+                  {command.description ? (
+                    <span className="skill-command-desc">
+                      {' '}
+                      — {command.description}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+            {skill.errors.map((problem) => (
+              <p key={problem} className="provider-connect-error">
+                {problem}
+              </p>
+            ))}
+            {skill.source ? (
+              <p className="skill-card-source">
+                {skillSourceHref(skill.source) ? (
+                  <a
+                    className="skill-card-source-link"
+                    href={skillSourceHref(skill.source)}
+                    title="Open the skill's repository"
+                  >
+                    {skill.source}
+                  </a>
+                ) : (
+                  skill.source
+                )}
+              </p>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    );
+  };
+
+  return (
+    <div className="settings-section">
+      <h2 className="settings-section-title">Skills</h2>
+      <p className="settings-hint">
+        Skills are packs of slash commands installed from git repositories —
+        built for {APP_NAME} or following the shared ecosystem conventions
+        (Claude plugins, SKILL.md, commands/*.md). Local skills live in this
+        project&apos;s <code>.justcode/skills</code>; global ones are available
+        in every project.
+      </p>
+
+      <div className="skill-add-form">
+        <input
+          type="text"
+          className="skill-add-input"
+          placeholder="owner/repo or a git URL"
+          value={source}
+          disabled={busy}
+          onChange={(event) => setSource(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') submitAdd();
+          }}
+        />
+        <select
+          className="skill-add-scope"
+          value={scope}
+          disabled={busy}
+          onChange={(event) =>
+            setScope(event.target.value as SettingsSkillScope)
+          }
+        >
+          <option value="global">Global (all projects)</option>
+          <option value="local" disabled={!workspaceOpen}>
+            Local (this project)
+          </option>
+        </select>
+        <button
+          type="button"
+          className="provider-action provider-action-primary"
+          disabled={!canAdd}
+          onClick={submitAdd}
+        >
+          {busy ? 'Working…' : 'Add skill'}
+        </button>
+      </div>
+
+      {actionState ? (
+        <p
+          className={
+            actionState.success
+              ? 'skill-action-success'
+              : 'provider-connect-error'
+          }
+        >
+          {actionState.message}
+        </p>
+      ) : null}
+
+      {skills === undefined ? (
+        <p className="settings-hint">Loading skills…</p>
+      ) : skills.length === 0 ? (
+        <p className="settings-hint">
+          No skills installed yet. Add one with its GitHub{' '}
+          <code>owner/repo</code> above.
+        </p>
+      ) : (
+        <>
+          {local.length > 0 ? (
+            <>
+              <h3 className="skill-scope-heading">Local — this project</h3>
+              {local.map(renderSkill)}
+            </>
+          ) : null}
+          {global.length > 0 ? (
+            <>
+              <h3 className="skill-scope-heading">Global — all projects</h3>
+              {global.map(renderSkill)}
+            </>
+          ) : null}
+        </>
+      )}
+
+      {errors.map((problem) => (
+        <p key={problem} className="provider-connect-error">
+          {problem}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // MCP servers tab — edit mcp.json in a textarea and save (reconnects live)
 // ---------------------------------------------------------------------------
 
@@ -1092,116 +1442,6 @@ const MCP_PLACEHOLDER = `{
     }
   }
 }`;
-
-// Matches the JSON tokens we colour: (1) a string literal, (2) an optional
-// trailing colon that marks the string as an object key, (3) a keyword, and
-// (4) a number. Everything else (braces, commas, whitespace) is left plain.
-const JSON_TOKEN_RE =
-  /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
-
-/** Splits JSON source into React nodes with syntax-highlighting spans. */
-function highlightJson(source: string): React.ReactNode[] {
-  const nodes: React.ReactNode[] = [];
-  let last = 0;
-  let key = 0;
-  for (const match of source.matchAll(JSON_TOKEN_RE)) {
-    const index = match.index ?? 0;
-    if (index > last) nodes.push(source.slice(last, index));
-
-    if (match[1] !== undefined) {
-      const isKey = match[2] !== undefined;
-      nodes.push(
-        <span key={key++} className={isKey ? 'json-key' : 'json-string'}>
-          {match[1]}
-        </span>
-      );
-      // The colon (group 2) stays plain text so only the key string is tinted.
-      if (match[2]) nodes.push(match[2]);
-    } else if (match[3] !== undefined) {
-      nodes.push(
-        <span
-          key={key++}
-          className={match[3] === 'null' ? 'json-null' : 'json-boolean'}
-        >
-          {match[3]}
-        </span>
-      );
-    } else if (match[4] !== undefined) {
-      nodes.push(
-        <span key={key++} className="json-number">
-          {match[4]}
-        </span>
-      );
-    }
-    last = index + match[0].length;
-  }
-  if (last < source.length) nodes.push(source.slice(last));
-  return nodes;
-}
-
-/**
- * A JSON editor with live syntax highlighting: a transparent <textarea> sits on
- * top of a highlighted <pre> that mirrors its text, kept aligned by matching
- * their box/font and syncing scroll. Tab inserts two spaces.
- */
-function McpJsonEditor({
-  value,
-  placeholder,
-  onChange,
-}: {
-  value: string;
-  placeholder: string;
-  onChange: (value: string) => void;
-}): React.JSX.Element {
-  const preRef = React.useRef<HTMLPreElement>(null);
-
-  const syncScroll = (e: React.UIEvent<HTMLTextAreaElement>): void => {
-    const pre = preRef.current;
-    if (!pre) return;
-    pre.scrollTop = e.currentTarget.scrollTop;
-    pre.scrollLeft = e.currentTarget.scrollLeft;
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (e.key !== 'Tab') return;
-    e.preventDefault();
-    const target = e.currentTarget;
-    const { selectionStart, selectionEnd } = target;
-    const next = `${value.slice(0, selectionStart)}  ${value.slice(selectionEnd)}`;
-    onChange(next);
-    // Restore the caret just past the inserted spaces on the next tick.
-    requestAnimationFrame(() => {
-      target.selectionStart = target.selectionEnd = selectionStart + 2;
-    });
-  };
-
-  return (
-    <div className="mcp-editor-wrap">
-      <pre className="mcp-editor-highlight" aria-hidden="true" ref={preRef}>
-        {value ? (
-          <code>
-            {highlightJson(value)}
-            {'\n'}
-          </code>
-        ) : (
-          <code className="mcp-editor-placeholder">{placeholder}</code>
-        )}
-      </pre>
-      <textarea
-        className="mcp-editor"
-        spellCheck={false}
-        autoComplete="off"
-        autoCorrect="off"
-        autoCapitalize="off"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onScroll={syncScroll}
-        onKeyDown={handleKeyDown}
-        aria-label="mcp.json contents"
-      />
-    </div>
-  );
-}
 
 function McpTab({
   content,
@@ -1257,10 +1497,11 @@ function McpTab({
         Changes apply immediately.
       </p>
 
-      <McpJsonEditor
+      <JsonEditor
         value={draft}
         placeholder={MCP_PLACEHOLDER}
         onChange={setDraft}
+        ariaLabel="mcp.json contents"
       />
 
       {parseError ? (

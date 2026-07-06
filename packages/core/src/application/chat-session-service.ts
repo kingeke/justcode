@@ -114,6 +114,20 @@ export interface SubmitMessageInput {
    */
   reasoningMandatory?: boolean;
   content: string;
+  /**
+   * Replaces the session's system prompt for this turn only. Used by skill
+   * slash commands, whose markdown body runs as the system prompt for the turn
+   * without disturbing the active mode. Still wrapped with the workspace root
+   * and project instructions by `buildSystemPrompt`, like any mode prompt.
+   */
+  systemPromptOverride?: string;
+  /**
+   * Tool names to advertise eagerly for this turn only, on top of whatever the
+   * host advertises per mode. Used by skill commands' `tools` frontmatter so
+   * the tools a command needs are callable from its first model request even
+   * under lazy loading. Names not in the registry are ignored.
+   */
+  eagerToolNames?: string[];
   attachments?: MessageAttachment[];
   /** Images attached to this message (e.g. pasted from the clipboard). */
   images?: MessageImage[];
@@ -513,9 +527,10 @@ export class ChatSessionService {
     // even under lazy loading (e.g. `present_plan` in Plan mode). Those are
     // pulled from the full set so the model can call them on the first turn
     // without loading everything; anything not in the full set is ignored.
-    const eagerlyAdvertisedNames = new Set(
-      this.getEagerlyAdvertisedToolNames()
-    );
+    const eagerlyAdvertisedNames = new Set([
+      ...this.getEagerlyAdvertisedToolNames(),
+      ...(input.eagerToolNames ?? []),
+    ]);
     const alreadyGatewayed = new Set(
       gatewayToolDefinitions.map((definition) => definition.name)
     );
@@ -701,7 +716,7 @@ export class ChatSessionService {
         const omittedCount = working.length - history.length;
 
         const systemPrompt = buildSystemPrompt(
-          this.getSystemPrompt(),
+          input.systemPromptOverride ?? this.getSystemPrompt(),
           this.workspaceRoot,
           toolsEnabled && this.describeToolsInSystemPrompt
             ? toolDefinitions

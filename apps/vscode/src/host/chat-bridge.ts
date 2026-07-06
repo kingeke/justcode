@@ -58,6 +58,12 @@ import {
   sessionMessagesFilePath,
 } from '@runtime/persistence/file-conversation-repository';
 import type { McpServerLoadInfo } from '@runtime/mcp/load-mcp-tools';
+import { discoverAllSkills } from '@runtime/skills/skill-store';
+import {
+  buildSkillCommandIndex,
+  renderSkillCommandPrompt,
+  type SkillCommandIndex,
+} from '@core/domain/skill';
 import { clearModelsCache } from '@providers/http/models-cache';
 
 import { parseRemovedPaths } from '@ext/host/parse-removed-paths';
@@ -93,6 +99,7 @@ import {
   type WebviewToolView,
   type WebviewUsage,
   type WebviewMode,
+  type WebviewSkillCommand,
   type TokenMessage,
   type ThinkingMessage,
   type ToolActivityMessage,
@@ -119,6 +126,11 @@ const RESULT_PREVIEW_LIMIT = 2000;
 export class ChatBridge {
   private services: RuntimeServices | undefined;
   private conversation: Conversation | undefined;
+  // The installed skills' slash commands, discovered per snapshot in sendReady.
+  // The index resolves a typed `/name` to its command host-side; the flattened
+  // list rides every Ready message to drive the composer's `/` completions.
+  private skillCommands: SkillCommandIndex | undefined;
+  private webviewSkillCommands: WebviewSkillCommand[] = [];
   private activeModel: string | undefined;
   private models: ModelInfo[] = [];
   // Providers whose last model-list fetch failed, mirrored to the picker so an
@@ -510,10 +522,91 @@ export class ChatBridge {
     return this.services;
   }
 
+  /**
+   * Discovers installed skills — the workspace's `.justcode/skills` plus the
+   * global scope, local shadowing global — and rebuilds the slash-command
+   * index. Fail-soft: any error just means no skill commands this session.
+   * Re-run per snapshot so skills installed via the CLI appear after a reload
+   * without restarting.
+   */
+  private async loadSkillCommands(): Promise<void> {
+    try {
+      const { skills } = await discoverAllSkills({
+        configDirectory: cacheDirectory(),
+        workspaceRoot: this.workspaceRoot,
+      });
+      this.skillCommands = buildSkillCommandIndex(skills);
+      this.webviewSkillCommands = this.skillCommands.commands.map((ref) => ({
+        name: ref.bareName ?? ref.qualifiedName,
+        skillName: ref.skillName,
+        description: ref.command.description,
+        argumentHint: ref.command.argumentHint,
+      }));
+    } catch {
+      this.skillCommands = undefined;
+      this.webviewSkillCommands = [];
+    }
+  }
+
+  /**
+   * Re-discovers installed skills (after a Settings-tab add/update/remove) and
+   * pushes the fresh command list so the composer's `/` completions update
+   * without reloading the panel.
+   */
+  public async refreshSkillCommands(): Promise<void> {
+    await this.loadSkillCommands();
+    this.post({
+      type: HostMessageType.SkillCommandsUpdate,
+      skillCommands: this.webviewSkillCommands,
+    });
+  }
+
+  /**
+   * When the submitted text invokes a skill command (`/name args…`), the
+   * per-turn overrides that run it: the command's markdown body as the system
+   * prompt, its frontmatter tools advertised eagerly, and its model when the
+   * active provider lists it. Text that doesn't resolve is just a message.
+   */
+  private resolveSkillTurn(content: string):
+    | {
+        systemPrompt: string;
+        tools?: string[];
+        model?: string;
+      }
+    | undefined {
+    if (!content.startsWith('/') || !this.skillCommands) return undefined;
+    const invocation = content.slice(1);
+    const spaceIndex = invocation.search(/\s/);
+    const name =
+      spaceIndex === -1 ? invocation : invocation.slice(0, spaceIndex);
+    const args = spaceIndex === -1 ? '' : invocation.slice(spaceIndex + 1);
+    const ref = this.skillCommands.resolve(name);
+    if (!ref) return undefined;
+    const overrides: {
+      systemPrompt: string;
+      tools?: string[];
+      model?: string;
+    } = {
+      systemPrompt: renderSkillCommandPrompt(ref.command, args),
+    };
+    if (ref.command.tools?.length) overrides.tools = ref.command.tools;
+    const wantedModel = ref.command.model;
+    if (
+      wantedModel &&
+      wantedModel !== 'auto' &&
+      this.models.some((model) => model.id === wantedModel)
+    ) {
+      overrides.model = wantedModel;
+    }
+    return overrides;
+  }
+
   /** Loads the session and pushes a full state snapshot to the webview. */
   private async sendReady(): Promise<void> {
     // Load persisted settings so the webview always starts in sync.
     const configDir = cacheDirectory();
+    // Refresh the skill slash commands with each snapshot (cheap local reads).
+    await this.loadSkillCommands();
     const globalConfig = await readGlobalConfig(configDir);
     this.autoApprove = globalConfig.autoApprove ?? false;
     this.expandTools = globalConfig.expandTools ?? false;
@@ -585,6 +678,7 @@ export class ChatBridge {
         mcpLoading: this.mcpLoading,
         modes: this.modes,
         activeModeId: this.activeModeId,
+        skillCommands: this.webviewSkillCommands,
         reasoningEffortByModel: this.reasoningEffortByModel,
         workspaceRoot: this.workspaceRoot,
         resolvedFiles: {},
@@ -648,6 +742,7 @@ export class ChatBridge {
         mcpLoading: this.mcpLoading,
         modes: this.modes,
         activeModeId: this.activeModeId,
+        skillCommands: this.webviewSkillCommands,
         reasoningEffortByModel: this.reasoningEffortByModel,
         workspaceRoot: this.workspaceRoot,
         resolvedFiles: {},
@@ -713,6 +808,7 @@ export class ChatBridge {
         mcpLoading: this.mcpLoading,
         modes: this.modes,
         activeModeId: this.activeModeId,
+        skillCommands: this.webviewSkillCommands,
         reasoningEffortByModel: this.reasoningEffortByModel,
         workspaceRoot: this.workspaceRoot,
         resolvedFiles,
@@ -779,6 +875,7 @@ export class ChatBridge {
         mcpLoading: this.mcpLoading,
         modes: this.modes,
         activeModeId: this.activeModeId,
+        skillCommands: this.webviewSkillCommands,
         reasoningEffortByModel: this.reasoningEffortByModel,
         workspaceRoot: this.workspaceRoot,
         resolvedFiles,
@@ -1050,6 +1147,10 @@ export class ChatBridge {
 
     try {
       const reasoningEffort = this.effectiveEffortForActiveModel();
+      // A leading `/skill-command` runs with the command's markdown body as
+      // this turn's system prompt (plus its frontmatter tools/model). Text that
+      // doesn't resolve to an installed command is just a normal message.
+      const skillTurn = this.resolveSkillTurn(content);
       // Resolve any `@file` / `@path::method` mentions into file-content
       // attachments before the turn, so the model sees the referenced code
       // (matches the CLI). Failures here shouldn't sink the turn.
@@ -1064,8 +1165,10 @@ export class ChatBridge {
       }
       const result = await services.chatSessionService.submitMessage({
         conversation: this.conversation,
-        model: this.activeModel,
+        model: skillTurn?.model ?? this.activeModel,
         content,
+        ...(skillTurn ? { systemPromptOverride: skillTurn.systemPrompt } : {}),
+        ...(skillTurn?.tools ? { eagerToolNames: skillTurn.tools } : {}),
         ...(attachments?.length ? { attachments } : {}),
         ...(images?.length
           ? {
@@ -1738,6 +1841,7 @@ export class ChatBridge {
           mcpLoading: this.mcpLoading,
           modes: this.modes,
           activeModeId: this.activeModeId,
+          skillCommands: this.webviewSkillCommands,
           reasoningEffortByModel: this.reasoningEffortByModel,
           workspaceRoot: this.workspaceRoot,
           resolvedFiles,
@@ -2557,6 +2661,7 @@ export class ChatBridge {
         mcpLoading: this.mcpLoading,
         modes: this.modes,
         activeModeId: this.activeModeId,
+        skillCommands: this.webviewSkillCommands,
         reasoningEffortByModel: this.reasoningEffortByModel,
         workspaceRoot: this.workspaceRoot,
         resolvedFiles: {},

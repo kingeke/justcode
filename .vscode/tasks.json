@@ -45,6 +45,20 @@
       "problemMatcher": []
     },
     {
+      "label": "Update local binary",
+      "type": "shell",
+      "command": "npm run update:local",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "build extension",
       "type": "shell",
       "command": "node esbuild.mjs",

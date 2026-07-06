@@ -54,4 +54,20 @@ describe('commands', () => {
     expect(parseCommandInput('/reset')).toBe('reset');
     expect(parseCommandInput('reset')).toBeNull();
   });
+
+  it('filters a caller-provided command list (e.g. built-ins + skill commands)', () => {
+    const palette = [
+      { name: CommandName.Models as string, description: 'built-in' },
+      { name: 'scan', description: 'Review a resume' },
+      { name: 'test-skill:review', description: 'Namespaced skill command' },
+    ];
+    expect(filterCommands('scan', palette).map((c) => c.name)).toEqual([
+      'scan',
+    ]);
+    // "review" matches the command segment after the skill namespace.
+    expect(filterCommands('review', palette).map((c) => c.name)).toEqual([
+      'test-skill:review',
+    ]);
+    expect(filterCommands('', palette)).toHaveLength(palette.length);
+  });
 });

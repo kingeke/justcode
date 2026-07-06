@@ -16,6 +16,7 @@ import {
   type WebviewUsage,
   type WebviewStats,
   type WebviewMode,
+  type WebviewSkillCommand,
 } from '@ext/shared/protocol';
 import type { ResolvedFile } from '@ext/webview/changes';
 
@@ -177,6 +178,8 @@ export interface ChatState {
   modes: WebviewMode[];
   /** Id of the active chat mode. */
   activeModeId: string;
+  /** Slash commands from installed skills, for the composer's `/` completions. */
+  skillCommands: WebviewSkillCommand[];
   /**
    * The user's chosen reasoning effort per model, nested by provider id. A model
    * absent from the map uses its default effort; `'off'` disables reasoning.
@@ -245,6 +248,7 @@ export const initialState: ChatState = {
   mcpLoading: false,
   modes: [],
   activeModeId: 'build',
+  skillCommands: [],
   reasoningEffortByModel: {},
   resolvedFiles: {},
   queuedMessages: [],
@@ -396,6 +400,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         mcpLoading: action.mcpLoading,
         modes: action.modes,
         activeModeId: action.activeModeId,
+        skillCommands: action.skillCommands ?? [],
         reasoningEffortByModel: action.reasoningEffortByModel,
         sessionTitle: action.sessionTitle,
         workspaceRoot: action.workspaceRoot,
@@ -414,6 +419,9 @@ export function reducer(state: ChatState, action: Action): ChatState {
         manageableTools: action.manageableTools,
         disabledTools: action.disabledTools,
       };
+
+    case HostMessageType.SkillCommandsUpdate:
+      return { ...state, skillCommands: action.skillCommands };
 
     case HostMessageType.ModeUpdate:
       return {

@@ -31,7 +31,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       () => this.bridge?.reloadMcp() ?? Promise.resolve(undefined),
       // A system-prompt edit in the Settings tab re-applies to the live session
       // so the next turn runs under the new prompt.
-      () => void this.bridge?.refreshPrompts()
+      () => void this.bridge?.refreshPrompts(),
+      // A skill add/update/remove in the Settings tab re-discovers skills so
+      // the composer's `/` completions update without reloading the panel.
+      () => void this.bridge?.refreshSkillCommands()
     );
   }
 

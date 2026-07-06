@@ -65,6 +65,28 @@ describe('chat app method autocomplete', () => {
   });
 });
 
+describe('chat app skill command argument hint', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'apps/cli/src/ui/chat-app.tsx'),
+    'utf8'
+  );
+
+  it('shows the hint only while the command is typed and args are empty', () => {
+    expect(source).toContain('if (args.trim()) return null;');
+    expect(source).toContain(
+      'props.skillCommands?.resolve(name)?.command.argumentHint ?? null'
+    );
+  });
+
+  it('content-sizes the textarea so the ghost hint sits after the caret', () => {
+    expect(source).toContain('flexGrow={skillArgumentHint ? 0 : 1}');
+    expect(source).toContain(
+      '{...(skillArgumentHint ? { width: input.length + 3 } : {})}'
+    );
+    expect(source).toContain('{skillArgumentHint}');
+  });
+});
+
 describe('chat app markdown rendering', () => {
   const source = readFileSync(
     join(process.cwd(), 'apps/cli/src/ui/chat-app.tsx'),

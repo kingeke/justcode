@@ -17,11 +17,16 @@ import {
   clampComposerHeight,
   COMPOSER_MIN_ROWS,
 } from '@ext/webview/composer-autosize';
+import {
+  filterSkillCommands,
+  getActiveSlashQuery,
+} from '@ext/webview/skill-command-completions';
 import type {
   WebviewImage,
   WebviewMode,
   WebviewModel,
   WebviewReasoningChoice,
+  WebviewSkillCommand,
   WebviewStats,
   WebviewTool,
   WebviewUsage,
@@ -93,6 +98,8 @@ export interface ComposerProps {
   initialImages?: WebviewImage[];
   /** Mirror the live draft up so it persists while a full-screen view is open. */
   onDraftChange?: (draft: string, images: WebviewImage[]) => void;
+  /** Slash commands from installed skills, for the `/` completions dropdown. */
+  skillCommands?: WebviewSkillCommand[];
   /** Workspace files for `@file` completions (fetched lazily, filtered locally). */
   workspaceFiles: string[];
   /** A file's symbols for `@path::method` completions, cached by path. */
@@ -457,6 +464,36 @@ export function Composer(props: ComposerProps): React.JSX.Element {
     setImages([]);
   };
 
+  // --- /command completions (skill commands) --------------------------------
+  // A draft that is a single leading `/token` completes against the installed
+  // skills' commands. Selecting one inserts `/name ` so the user can type the
+  // arguments; execution happens host-side when the message is submitted.
+  const [slashIndex, setSlashIndex] = React.useState(0);
+  const [slashDismissed, setSlashDismissed] = React.useState(false);
+  const slashQuery = React.useMemo(() => getActiveSlashQuery(value), [value]);
+  const slashSuggestions = React.useMemo(
+    () =>
+      slashQuery !== undefined
+        ? filterSkillCommands(props.skillCommands ?? [], slashQuery)
+        : [],
+    [slashQuery, props.skillCommands]
+  );
+  const slashOpen =
+    slashQuery !== undefined && !slashDismissed && slashSuggestions.length > 0;
+  const activeSlashIndex = Math.min(
+    slashIndex,
+    Math.max(0, slashSuggestions.length - 1)
+  );
+  React.useEffect(() => {
+    setSlashIndex(0);
+  }, [slashQuery]);
+
+  const applySlashCommand = (name: string): void => {
+    setValue(`/${name} `);
+    setSlashDismissed(false);
+    textareaRef.current?.focus();
+  };
+
   // --- @file / @path::method completions ----------------------------------
   // A trailing `@path::query` switches completion from files to that file's
   // symbols; otherwise a trailing `@query` completes file paths. Both are
@@ -531,6 +568,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
     setValue(next);
     // Any edit re-opens a dropdown the user had dismissed with Esc.
     setMentionDismissed(false);
+    setSlashDismissed(false);
   };
 
   const applyMention = (suggestion: string): void => {
@@ -542,6 +580,41 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    // While the `/` command dropdown is open it owns the arrow keys, Tab
+    // (apply), and Esc (dismiss). Enter applies the highlighted command —
+    // unless the draft already names it exactly, in which case it submits, so
+    // a fully-typed `/scan` doesn't need a second Enter.
+    if (slashOpen) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setSlashIndex((i) => (i + 1) % slashSuggestions.length);
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setSlashIndex(
+          (i) => (i - 1 + slashSuggestions.length) % slashSuggestions.length
+        );
+        return;
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        const choice = slashSuggestions[activeSlashIndex];
+        if (!choice) return;
+        if (event.key === 'Enter' && choice.name === slashQuery) {
+          submit();
+        } else {
+          applySlashCommand(choice.name);
+        }
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setSlashDismissed(true);
+        return;
+      }
+    }
+
     // While the completions dropdown is open it owns the arrow keys, Enter/Tab
     // (apply), and Esc (dismiss) — so they don't submit or cancel the turn.
     if (mentionOpen) {
@@ -734,6 +807,37 @@ export function Composer(props: ComposerProps): React.JSX.Element {
               );
             })}
           </div>
+        ) : null}
+        {slashOpen ? (
+          <ul className="composer-mentions" role="listbox">
+            {slashSuggestions.map((command, index) => (
+              <li
+                key={command.name}
+                role="option"
+                aria-selected={index === activeSlashIndex}
+                className={`composer-mention ${
+                  index === activeSlashIndex ? 'composer-mention-active' : ''
+                }`}
+                // onMouseDown (not onClick) so the textarea keeps focus and the
+                // blur doesn't fire before the selection is applied.
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  applySlashCommand(command.name);
+                }}
+                onMouseEnter={() => setSlashIndex(index)}
+              >
+                <span className="composer-command-name">/{command.name}</span>
+                {command.argumentHint ? (
+                  <span className="composer-command-hint">
+                    {command.argumentHint}
+                  </span>
+                ) : null}
+                <span className="composer-command-desc">
+                  {command.description ?? `${command.skillName} skill`}
+                </span>
+              </li>
+            ))}
+          </ul>
         ) : null}
         {mentionOpen ? (
           <ul className="composer-mentions" role="listbox">

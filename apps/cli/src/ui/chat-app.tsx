@@ -88,7 +88,13 @@ import {
   filterCommands,
   isCommandName,
   parseCommandInput,
+  type PaletteCommand,
 } from '@cli/ui/commands.js';
+import {
+  renderSkillCommandPrompt,
+  type SkillCommandIndex,
+  type SkillCommandRef,
+} from '@core/domain/skill';
 import { formatTime } from '@cli/ui/format-message-timing.js';
 import { openFileInEditor } from '@cli/ui/open-file.js';
 import { KeyName } from '@cli/ui/key-name.js';
@@ -157,6 +163,12 @@ interface ChatAppProps {
   configDirectory: string;
   chatSessionService: ChatSessionService;
   promptAttachmentService: PromptAttachmentService;
+  /**
+   * The installed skills' slash commands, merged into the command palette.
+   * Running one submits a turn whose system prompt is the command's markdown
+   * body (see `justcode skill add`). Absent when no skills are installed.
+   */
+  skillCommands?: SkillCommandIndex;
   sessionId: string;
   requestedModel: string | undefined;
   allProviders: ProviderClient[];
@@ -378,7 +390,7 @@ function effectiveEffort(
 }
 
 function commandLineContent(
-  cmd: (typeof COMMANDS)[number],
+  cmd: PaletteCommand,
   isSelected: boolean,
   state: {
     thinkingCollapsed: boolean;
@@ -1041,15 +1053,41 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const reasoningAvailable = Boolean(
     activeModelInfo?.reasoning?.effortLevels.length
   );
+  // Built-ins plus every installed skill command. A skill command lists under
+  // its bare name while unique, or its namespaced `skill:command` form when the
+  // name is contested (see buildSkillCommandIndex).
+  const paletteCommands = useMemo<PaletteCommand[]>(() => {
+    const skillEntries =
+      props.skillCommands?.commands.map((ref) => ({
+        name: ref.bareName ?? ref.qualifiedName,
+        description:
+          ref.command.description ?? `${ref.skillName} skill command`,
+      })) ?? [];
+    return [...COMMANDS, ...skillEntries];
+  }, [props.skillCommands]);
   const filteredCommands = useMemo(
     () =>
       isCommandMode
-        ? filterCommands(commandQuery).filter(
+        ? filterCommands(commandQuery, paletteCommands).filter(
             (cmd) => reasoningAvailable || cmd.name !== CommandName.Reasoning
           )
         : [],
-    [isCommandMode, commandQuery, reasoningAvailable]
+    [isCommandMode, commandQuery, reasoningAvailable, paletteCommands]
   );
+  // The argument hint of the skill command the input currently invokes, shown
+  // as ghost text right after the cursor once the command name is fully typed
+  // (e.g. "/deploy ▏[staging | production]") and until real arguments start.
+  const skillArgumentHint = useMemo(() => {
+    if (!input.startsWith('/') || input.includes('\n')) return null;
+    const invocation = input.slice(1);
+    const spaceIndex = invocation.indexOf(' ');
+    const name =
+      spaceIndex === -1 ? invocation : invocation.slice(0, spaceIndex);
+    const args = spaceIndex === -1 ? '' : invocation.slice(spaceIndex + 1);
+    if (args.trim()) return null;
+    return props.skillCommands?.resolve(name)?.command.argumentHint ?? null;
+  }, [input, props.skillCommands]);
+
   // Only MAX_COMMAND_ITEMS rows fit at once, so scroll a window over the full
   // list rather than truncating it — otherwise selection can't move past the
   // last visible row. The window slides down once the selection reaches the
@@ -2493,6 +2531,45 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       return;
     }
 
+    // Set when the submitted input runs a skill command: the turn then proceeds
+    // through the normal send path below, with the command's markdown body as
+    // the system prompt (and its frontmatter tools/model applied) for this turn
+    // only. Built-in commands always win a name clash and return early instead.
+    let skillTurn: {
+      systemPrompt: string;
+      tools?: string[];
+      model?: string;
+    } | null = null;
+    // Turns a resolved skill command + typed arguments into the per-turn
+    // overrides. A frontmatter model is honoured only when the active provider
+    // actually lists it; otherwise the active model quietly stays.
+    const buildSkillTurn = (
+      ref: SkillCommandRef,
+      args: string
+    ): typeof skillTurn => {
+      const overrides: NonNullable<typeof skillTurn> = {
+        systemPrompt: renderSkillCommandPrompt(ref.command, args),
+      };
+      if (ref.command.tools?.length) overrides.tools = ref.command.tools;
+      const wantedModel = ref.command.model;
+      if (wantedModel && wantedModel !== 'auto') {
+        const match = allModels.find(
+          (model) =>
+            model.id === wantedModel &&
+            (!activeModelInfo ||
+              model.providerId === activeModelInfo.providerId)
+        );
+        if (match) {
+          overrides.model = match.id;
+        } else {
+          setStatus(
+            `Model '${wantedModel}' is not available; using the active model`
+          );
+        }
+      }
+      return overrides;
+    };
+
     const commandInput = parseCommandInput(value);
     if (commandInput !== null) {
       const spaceIndex = commandInput.indexOf(' ');
@@ -2504,8 +2581,13 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
       if (hasArg) {
         // Explicit name + argument (e.g. "/read-limit 64").
+        const skillRef = isCommandName(commandName)
+          ? undefined
+          : props.skillCommands?.resolve(commandName);
         if (isCommandName(commandName)) {
           executeCommand(commandName, arg);
+        } else if (skillRef) {
+          skillTurn = buildSkillTurn(skillRef, arg ?? '');
         } else {
           setError(`Unknown command '/${commandName}'.`);
         }
@@ -2517,12 +2599,23 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         // entry (e.g. "/models").
         const exact = isCommandName(commandName)
           ? COMMANDS.find((c) => c.name === commandName)
-          : undefined;
+          : props.skillCommands?.resolve(commandName)
+            ? { name: commandName, description: '' }
+            : undefined;
         const selected = filteredCommands[selectedCommandIndex] ?? exact;
-        if (selected) executeCommand(selected.name);
+        if (selected) {
+          if (isCommandName(selected.name)) {
+            executeCommand(selected.name);
+          } else {
+            const skillRef = props.skillCommands?.resolve(selected.name);
+            if (skillRef) skillTurn = buildSkillTurn(skillRef, '');
+          }
+        }
       }
-      setInput('');
-      return;
+      if (!skillTurn) {
+        setInput('');
+        return;
+      }
     }
 
     if (!conversation || !session) return;
@@ -2779,7 +2872,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       );
       const result = await props.chatSessionService.submitMessage({
         conversation: baseConversation,
-        model: turnModel,
+        model: skillTurn?.model ?? turnModel,
+        ...(skillTurn ? { systemPromptOverride: skillTurn.systemPrompt } : {}),
+        ...(skillTurn?.tools ? { eagerToolNames: skillTurn.tools } : {}),
         ...(turnEffort ? { reasoningEffort: turnEffort } : {}),
         ...(activeModelInfo?.reasoning?.mandatory
           ? { reasoningMandatory: true }
@@ -3855,7 +3950,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           <textarea
             key={inputKey}
             initialValue={input}
-            flexGrow={1}
+            // While a skill command's argument hint is showing, size the
+            // textarea to its content (+1 cell for the cursor) so the ghost
+            // hint rendered next to it sits right after the caret, like an
+            // inline placeholder. Otherwise fill the row as usual.
+            flexGrow={skillArgumentHint ? 0 : 1}
+            {...(skillArgumentHint ? { width: input.length + 3 } : {})}
             flexShrink={1}
             minHeight={1}
             maxHeight={6}
@@ -3962,6 +4062,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
               promptAreaRef.current = next;
             }}
           />
+          {skillArgumentHint ? (
+            // Ghost argument hint, sitting right after the caret (the textarea
+            // above is content-sized while this shows). Muted and clipped to
+            // one line — it's a preview, not part of the input.
+            <text fg={MUTED} flexShrink={1} wrapMode="none">
+              {skillArgumentHint}
+            </text>
+          ) : null}
         </box>
 
         {!isCommandMode && showSymbolSuggestions ? (
