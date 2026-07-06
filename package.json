@@ -51,6 +51,13 @@
     "prepare": "git config core.hooksPath .githooks || true"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.10.4",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/lint": "^6.9.7",
+    "@codemirror/state": "^6.7.1",
+    "@codemirror/view": "^6.43.6",
+    "@lezer/highlight": "^1.2.3",
     "@opentui/core": "^0.4.2",
     "@opentui/react": "^0.4.2",
     "@shikijs/cli": "^4.2.0",
