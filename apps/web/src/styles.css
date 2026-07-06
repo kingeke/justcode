@@ -249,6 +249,12 @@ main {
   max-width: 720px;
   margin: 0 auto 36px;
 }
+
+/* An .install block inside a content section (e.g. the skills one-liners)
+   sits below a card grid, so it needs its own breathing room on top. */
+.section .install {
+  margin: 28px auto 0;
+}
 /* Compact square action (e.g. open in Marketplace) sitting beside Copy. */
 .icon-btn {
   flex-shrink: 0;

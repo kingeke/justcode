@@ -219,6 +219,48 @@ export const commands: Item[] = [
   },
 ];
 
+/** The skills system: installable packs of slash commands. */
+export const skills: Item[] = [
+  {
+    name: 'Install from GitHub',
+    description:
+      'justcode skill add <owner/repo> clones the repository and its commands join the chat instantly — in the terminal and VS Code.',
+  },
+  {
+    name: 'Local or global',
+    description:
+      'Install per project (.justcode/skills) or for every project — a local skill shadows the global copy, so a project can pin its own version.',
+  },
+  {
+    name: 'No special format required',
+    description:
+      'Repos built for other agent CLIs — Claude plugins, SKILL.md skills, commands/*.md collections — install and work as-is.',
+  },
+  {
+    name: 'Commands are just markdown',
+    description:
+      'Each command is a markdown file whose body runs as the system prompt for that turn; frontmatter declares its description, tools, and argument hint.',
+  },
+  {
+    name: 'Manage from VS Code',
+    description:
+      'Settings → Skills lists everything installed — add, update, and remove skills without touching a terminal.',
+  },
+  {
+    name: 'Author and publish your own',
+    description:
+      'A manifest plus markdown files in a git repository — push it and anyone can install it with one command.',
+  },
+];
+
+/** Copyable one-liners for the skills section. */
+export const skillCommands: { label: string; command: string }[] = [
+  { label: 'add', command: 'justcode skill add <owner/repo>' },
+  { label: 'local', command: 'justcode skill add <owner/repo> --local' },
+  { label: 'list', command: 'justcode skill list' },
+  { label: 'update', command: 'justcode skill update <skill-name>' },
+];
+
 /** Supported providers. */
 export const providers: Item[] = [
   { name: 'OpenAI', description: 'GPT models via the OpenAI API.' },

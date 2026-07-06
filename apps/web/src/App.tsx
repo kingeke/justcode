@@ -13,6 +13,8 @@ import {
   privacyUrl,
   providers,
   repoUrl,
+  skillCommands,
+  skills,
   surfaces,
   termsUrl,
   tools,
@@ -26,6 +28,7 @@ const NAV = [
   { href: '#platforms', label: 'Platforms' },
   { href: '#tools', label: 'Tools' },
   { href: '#commands', label: 'Commands' },
+  { href: '#skills', label: 'Skills' },
   { href: '#providers', label: 'Providers' },
   { href: '#support', label: 'Support' },
 ];
@@ -304,6 +307,32 @@ export function App() {
               <div key={c.name} className="command">
                 <code>{c.name}</code>
                 <span>{c.description}</span>
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        {/* Skills */}
+        <Section
+          id="skills"
+          eyebrow="Skills"
+          title="Install new slash commands"
+          lead="Skills are packs of slash commands distributed as plain git repositories — install one and its commands join the chat, in the terminal and VS Code."
+        >
+          <div className="grid cards">
+            {skills.map((s) => (
+              <article key={s.name} className="card">
+                <h3>{s.name}</h3>
+                <p>{s.description}</p>
+              </article>
+            ))}
+          </div>
+          <div className="install">
+            {skillCommands.map((c) => (
+              <div key={c.label} className="cmd">
+                <span className="cmd-label">{c.label}</span>
+                <code>{c.command}</code>
+                <CopyButton value={c.command} />
               </div>
             ))}
           </div>
