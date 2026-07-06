@@ -283,21 +283,6 @@ const PROBE_RETRY_DELAY_MS = 500;
 /** Per-attempt timeout so a hung runtime can't stall model listing. */
 const PROBE_TIMEOUT_MS = 20_000;
 
-/**
- * Claude Code's stable model aliases, returned only when the live probe can't
- * be reached, so the picker is never empty and no "provider unreachable" banner
- * appears. `default` (the account's own default) leads so it's auto-selected.
- * Effort/reasoning metadata is intentionally omitted here — the background
- * refresh fills in the authoritative list (with effort support) once a probe
- * succeeds.
- */
-const FALLBACK_MODELS: Omit<ModelInfo, 'providerId'>[] = [
-  { id: 'default', displayName: 'Default (account)' },
-  { id: 'sonnet', displayName: 'Sonnet' },
-  { id: 'opus', displayName: 'Opus' },
-  { id: 'haiku', displayName: 'Haiku' },
-];
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -488,45 +473,22 @@ export class ClaudeAgentProvider implements ProviderClient {
   }
 
   public async listModels(): Promise<ModelInfo[]> {
-    // Spawning the runtime just to read its model list is occasionally flaky in
-    // some hosts (notably the VS Code extension's Electron process, where the
-    // probe can fail even though the same call succeeds from a plain shell).
-    // Retry a couple of times, then fall back to the known model set rather than
-    // throwing — a throw would dead-end the picker (no models, and the host's
-    // "some providers could not be reached" banner) even though chat itself
-    // works fine. The background model refresh replaces the fallback with the
-    // authoritative list once a probe succeeds.
+    // Spawning the runtime to read its model list is occasionally flaky in some
+    // hosts (notably the VS Code extension's Electron process, where a probe can
+    // fail even though the same call succeeds moments later), so retry a couple
+    // of times. But if it still fails, let the error surface — the picker then
+    // shows the real reason (e.g. Claude Code isn't installed or isn't signed
+    // in) instead of a misleading model list that makes it look connected.
+    let lastError: unknown;
     for (let attempt = 0; attempt < PROBE_ATTEMPTS; attempt++) {
       try {
         return await this.probeSupportedModels();
       } catch (error) {
-        if (attempt === PROBE_ATTEMPTS - 1) {
-          await logRequestResponse({
-            request: {
-              url: 'claude-code://listModels',
-              method: 'listModels',
-              body: {},
-            },
-            response: {
-              url: 'claude-code://listModels',
-              status: 0,
-              ok: false,
-              body: error,
-            },
-          });
-          return FALLBACK_MODELS.map((model) => ({
-            ...model,
-            providerId: this.providerId,
-          }));
-        }
-        await delay(PROBE_RETRY_DELAY_MS);
+        lastError = error;
+        if (attempt < PROBE_ATTEMPTS - 1) await delay(PROBE_RETRY_DELAY_MS);
       }
     }
-    // Unreachable (the loop always returns), but satisfies the type checker.
-    return FALLBACK_MODELS.map((model) => ({
-      ...model,
-      providerId: this.providerId,
-    }));
+    throw lastError;
   }
 
   /**

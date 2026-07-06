@@ -264,23 +264,16 @@ describe('ClaudeAgentProvider', () => {
     expect(harness.options?.pathToClaudeCodeExecutable).toBeUndefined();
   });
 
-  it('falls back to the known model set when the probe cannot be reached', async () => {
-    // The fake Query exposes no `supportedModels`, so every probe attempt fails
-    // — exactly the dead-end that must not surface an empty picker/banner.
+  it('surfaces the error when the model probe cannot be reached', async () => {
+    // The fake Query exposes no `supportedModels`, so every probe attempt fails.
+    // listModels must reject (so the picker shows the real reason, e.g. Claude
+    // Code not installed/signed in) rather than returning a misleading list.
     const harness = new FakeQueryHarness();
     const provider = new ClaudeAgentProvider({
       createQuery: harness.createQuery,
     });
 
-    const models = await provider.listModels();
-
-    expect(models.map((m) => m.id)).toEqual([
-      'default',
-      'sonnet',
-      'opus',
-      'haiku',
-    ]);
-    expect(models.every((m) => m.providerId === 'claude-code')).toBe(true);
+    await expect(provider.listModels()).rejects.toBeDefined();
   });
 
   it('round-trips a tool call through the blocking MCP handler', async () => {
