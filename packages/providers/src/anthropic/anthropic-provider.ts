@@ -21,22 +21,17 @@ import {
 } from '@providers/http/reasoning';
 
 const ANTHROPIC_VERSION = '2023-06-01';
-/** Beta flag required for Claude Pro/Max OAuth access tokens. */
-const OAUTH_BETA = 'oauth-2025-04-20';
-/**
- * Anthropic requires this exact identity as the first system block when a
- * request is authenticated with a Claude Pro/Max OAuth token; without it the
- * subscription token is rejected.
- */
-const CLAUDE_CODE_IDENTITY =
-  "You are Claude Code, Anthropic's official CLI for Claude.";
 const DEFAULT_MAX_TOKENS = 8192;
 
+/**
+ * API-key access only. Claude Pro/Max subscription (OAuth) auth is deliberately
+ * not supported here: Anthropic's Consumer Terms prohibit consumer OAuth tokens
+ * outside the official Claude Code client. Subscription users go through the
+ * Agent SDK-backed provider in `@providers/claude-code` instead.
+ */
 export interface AnthropicProviderOptions {
   baseUrl: string;
   apiKey?: string;
-  /** Resolves a fresh OAuth access token per request (Claude Pro/Max sign-in). */
-  getAccessToken?: () => Promise<string>;
 }
 
 interface AnthropicModelsResponse {
@@ -101,7 +96,7 @@ export class AnthropicProvider implements ProviderClient {
       // last cacheable block (the prefix shared across the agentic loop). Other
       // providers don't accept this field — applied here only.
       cache_control: { type: 'ephemeral' as const },
-      ...(this.buildSystem(system) ? { system: this.buildSystem(system) } : {}),
+      ...(system ? { system } : {}),
       messages,
       ...(tools ? { tools } : {}),
     };
@@ -267,32 +262,12 @@ export class AnthropicProvider implements ProviderClient {
     return result;
   }
 
-  /**
-   * Builds the system param. OAuth (subscription) requests must lead with the
-   * Claude Code identity block; API-key requests pass the user's prompt as-is.
-   */
-  private buildSystem(
-    system: string | undefined
-  ): string | Array<{ type: 'text'; text: string }> | undefined {
-    if (!this.options.getAccessToken) {
-      return system;
-    }
-    const blocks: Array<{ type: 'text'; text: string }> = [
-      { type: 'text', text: CLAUDE_CODE_IDENTITY },
-    ];
-    if (system?.trim()) blocks.push({ type: 'text', text: system });
-    return blocks;
-  }
-
   private async createHeaders(): Promise<Record<string, string>> {
     const headers: Record<string, string> = {
       'anthropic-version': ANTHROPIC_VERSION,
     };
 
-    if (this.options.getAccessToken) {
-      headers.authorization = `Bearer ${await this.options.getAccessToken()}`;
-      headers['anthropic-beta'] = OAUTH_BETA;
-    } else if (this.options.apiKey) {
+    if (this.options.apiKey) {
       headers['x-api-key'] = this.options.apiKey;
     }
 

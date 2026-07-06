@@ -2,6 +2,7 @@ import { type ProviderClient } from '@core/ports/chat-model';
 import { appUserAgent } from '@core/version';
 import { AlibabaProvider } from '@providers/alibaba/alibaba-provider';
 import { AnthropicProvider } from '@providers/anthropic/anthropic-provider';
+import { ClaudeAgentProvider } from '@providers/claude-code/claude-agent-provider';
 import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
 import { OllamaProvider } from '@providers/ollama/ollama-provider';
 import { OpenAiProvider } from '@providers/openai/openai-provider';
@@ -70,6 +71,13 @@ export interface ProviderCatalogEntry {
   /** Auth methods this provider accepts. Defaults to API key only. */
   authMethods?: AuthMethod[];
   /**
+   * True for providers that need no credentials or base URL from the user —
+   * selecting them in the connect picker connects immediately, skipping the
+   * api-key and base-url steps (e.g. Claude Code, which reads the user's own
+   * `claude /login` session).
+   */
+  directConnect?: boolean;
+  /**
    * True for providers that run on the user's own machine (Ollama, LM Studio).
    * Used to label models as "local" rather than inferring it from the absence
    * of pricing/OAuth, which misclassifies hosted API-key providers.
@@ -96,6 +104,7 @@ export interface ProviderConfig {
 export enum ProviderId {
   Openai = 'openai',
   Anthropic = 'anthropic',
+  ClaudeCode = 'claude-code',
   Copilot = 'copilot',
   Ollama = 'ollama',
   LmStudio = 'lmstudio',
@@ -147,26 +156,36 @@ export const PROVIDERS = [
     apiKeyEnvVar: 'ANTHROPIC_API_KEY',
     baseUrl: 'https://api.anthropic.com',
     baseUrlEnvVar: 'ANTHROPIC_BASE_URL',
-    // Subscription (Pro/Max) OAuth is intentionally disabled: as of Jan 2026
-    // Anthropic rejects Claude subscription OAuth tokens used outside the
-    // official Claude Code client ("This credential is only authorized for use
-    // with Claude Code") and may restrict the account. The OAuth flow code is
-    // kept in @runtime/auth/anthropic-oauth in case the policy changes; to
-    // re-enable, restore 'oauth' here.
+    // Subscription (Pro/Max) OAuth against the raw API is prohibited by
+    // Anthropic's Consumer Terms (tokens are rejected outside the official
+    // Claude Code client and the account may be restricted). Subscription
+    // users connect through the 'claude-code' provider below instead, which
+    // runs on the official Claude Agent SDK.
     authMethods: [AuthMethod.ApiKey],
     credentialsFromConfig: (config) => ({
       apiKey: config.anthropic.apiKey,
       baseUrl: config.anthropic.baseUrl,
-      oauth: config.anthropic.oauth,
     }),
     create: (credentials) =>
       new AnthropicProvider({
         baseUrl: credentials.baseUrl,
         ...(credentials.apiKey ? { apiKey: credentials.apiKey } : {}),
-        ...(credentials.getAccessToken
-          ? { getAccessToken: credentials.getAccessToken }
-          : {}),
       }),
+  },
+  {
+    id: ProviderId.ClaudeCode,
+    name: 'Claude Code',
+    description:
+      'Claude Pro/Max subscription via the official Claude Agent SDK',
+    apiKeyRequired: false,
+    directConnect: true,
+    baseUrl: '',
+    // No credentials pass through justcode: the Agent SDK spawns the official
+    // Claude Code runtime, which authenticates with the user's own
+    // `claude /login` session (or CLAUDE_CODE_OAUTH_TOKEN). This is the
+    // Anthropic-sanctioned way to power third-party tools with a subscription.
+    credentialsFromConfig: () => ({ baseUrl: '' }),
+    create: () => new ClaudeAgentProvider(),
   },
   {
     id: ProviderId.Copilot,

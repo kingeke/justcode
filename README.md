@@ -40,6 +40,13 @@ rules.
 - **A system prompt you can read and edit** — no black box.
 - **Bring your own provider & key** — OpenAI, Anthropic, OpenRouter, Qwen
   (Alibaba Cloud), Ollama, LM Studio, or any OpenAI-compatible endpoint.
+- **Claude subscription support** — connect the "Claude Code" provider to use
+  your Claude Pro/Max plan through the official
+  [Claude Agent SDK](https://code.claude.com/docs/en/sdk). JustCode never
+  handles your Anthropic credentials: the SDK runs the official Claude Code
+  runtime, which authenticates with your own `claude /login` session, and usage
+  draws from your plan's limits. Requires
+  [Claude Code](https://claude.com/claude-code) installed and signed in.
 - **Self-contained binary** — ships with its runtime embedded; end users need
   no Node, no Bun, and no `node_modules`.
 - **File-backed sessions** — conversations are saved under `~/.cache/justcode/sessions`

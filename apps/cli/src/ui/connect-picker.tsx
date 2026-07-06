@@ -49,6 +49,7 @@ const AUTH_METHOD_OPTIONS = [
 ] as const;
 
 function authMethodLabel(entry: ProviderConnectionInfo): string {
+  if (entry.directConnect) return 'subscription · claude login';
   const methods = (entry as ProviderConnectionInfo).authMethods;
   if (!methods) return 'api key';
   const hasApiKey = methods.includes(AuthMethod.ApiKey);
@@ -254,6 +255,13 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       setApiKey(existing.apiKey ?? '');
       setBaseUrl(existing.baseUrl ?? entry.baseUrl ?? '');
       setError(null);
+
+      // Credential-less providers (Claude Code) connect straight away — there
+      // is no key or URL to collect; auth lives in the user's `claude` login.
+      if ((entry as ProviderConnectionInfo).directConnect) {
+        void connectProvider(entry, undefined, entry.baseUrl ?? '');
+        return;
+      }
 
       const authMethods = (entry as ProviderConnectionInfo).authMethods ?? [
         AuthMethod.ApiKey,
@@ -673,7 +681,9 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       setError(
         caughtError instanceof Error ? caughtError.message : String(caughtError)
       );
-      setStep('base-url');
+      // Direct-connect providers have no base-url step to fall back to; show
+      // the error on the provider list instead.
+      setStep(provider.directConnect ? 'provider' : 'base-url');
     }
   }
 

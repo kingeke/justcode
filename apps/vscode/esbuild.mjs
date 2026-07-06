@@ -47,7 +47,12 @@ const hostBuild = {
   // `undici` / `node:undici` are left external so the bundle resolves to the
   // version embedded in VS Code's Electron/Node runtime — required to call
   // setGlobalDispatcher. node:undici is the reliable path on Node 18+.
-  external: ['vscode', 'undici', 'node:undici'],
+  // The Claude Agent SDK is ESM-only and resolves its bundled CLI via
+  // import.meta.url, which a CJS bundle evaluates as undefined at module init
+  // and crashes extension activation. It is only loaded lazily (dynamic
+  // import in @providers/claude-code) and stays external so it is never
+  // evaluated inside this bundle; the Claude Code provider is CLI-only today.
+  external: ['vscode', 'undici', 'node:undici', '@anthropic-ai/claude-agent-sdk'],
 };
 
 // The webview runs in a browser context; bundle React + the UI to an IIFE and

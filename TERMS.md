@@ -74,6 +74,12 @@ governed by **their** terms and privacy policies, and we are not responsible or
 liable for their availability, output, data handling, costs, security, or
 conduct. We do not endorse any third-party provider or its models.
 
+When you connect the "Claude Code" provider, the Software runs the official
+Claude Agent SDK / Claude Code runtime on your machine, authenticated by your
+own Claude account sign-in. The Software never collects or transmits your
+Anthropic credentials. Such usage draws from your Claude plan's usage limits
+and is governed by Anthropic's Consumer Terms and Usage Policy.
+
 ## 6. Acceptable use
 
 You agree not to use the Software to:
