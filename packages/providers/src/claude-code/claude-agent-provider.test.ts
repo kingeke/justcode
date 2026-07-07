@@ -348,6 +348,73 @@ describe('ClaudeAgentProvider', () => {
     expect(round2.toolCalls).toBeUndefined();
   });
 
+  it('batches concurrently dispatched task calls into one round', async () => {
+    const harness = new FakeQueryHarness();
+    const provider = new ClaudeAgentProvider({
+      createQuery: harness.createQuery,
+    });
+
+    const TASK_TOOL = {
+      name: 'task',
+      description: 'Delegate to a sub agent',
+      parameters: { type: 'object' },
+    };
+    const history: ChatMessage[] = [
+      createMessage('user', 'build it with sub agents'),
+    ];
+    const send = provider.sendChat({
+      model: 'claude-sonnet-5',
+      sessionId: 's1',
+      messages: history,
+      tools: [TASK_TOOL, READ_TOOL],
+    });
+    await harness.nextPrompt();
+
+    // The model dispatches two parallel task tool_use blocks: both MCP
+    // invocations park before the engine answers either.
+    const client = await harness.connectMcpClient();
+    const first = client.callTool({
+      name: 'task',
+      arguments: { agent_type: 'general', description: 'a', prompt: 'a' },
+    });
+    const second = client.callTool({
+      name: 'task',
+      arguments: { agent_type: 'general', description: 'b', prompt: 'b' },
+    });
+
+    // One ChatResult carries BOTH calls — that's what lets the engine run the
+    // sub agents concurrently instead of one per round trip.
+    const round = await send;
+    expect(round.toolCalls).toHaveLength(2);
+    expect(round.toolCalls?.map((call) => call.name)).toEqual(['task', 'task']);
+
+    // Answer both on the next sendChat so the parked handlers resolve.
+    const calls = round.toolCalls!;
+    history.push(
+      createMessage('assistant', '', new Date(), undefined, {
+        toolCalls: calls,
+      }),
+      createMessage('tool', 'report a', new Date(), undefined, {
+        toolCallId: calls[0]!.id,
+        name: 'task',
+      }),
+      createMessage('tool', 'report b', new Date(), undefined, {
+        toolCallId: calls[1]!.id,
+        name: 'task',
+      })
+    );
+    const secondRound = provider.sendChat({
+      model: 'claude-sonnet-5',
+      sessionId: 's1',
+      messages: history,
+      tools: [TASK_TOOL, READ_TOOL],
+    });
+    await Promise.all([first, second]);
+    harness.emit(successResult('done'));
+    const final = await secondRound;
+    expect(final.content).toBe('done');
+  });
+
   it('switches model and re-registers tools mid-session', async () => {
     const harness = new FakeQueryHarness();
     const provider = new ClaudeAgentProvider({

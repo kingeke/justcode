@@ -264,14 +264,21 @@ export async function createRuntimeServices(
     new PresentPlanTool(),
     // Resolves its dependencies per run so sub agents always see the live
     // provider and toolset (MCP tools included once they finish connecting).
+    // The provider is read from the chat session service — the hosts switch
+    // providers there at runtime (`switchProvider`), and capturing the
+    // bootstrap `provider` here would leave sub agents talking to the provider
+    // the app started on while the main turn runs on the new one.
     new TaskTool(
-      () => ({
-        provider,
-        tools: toolRegistry.list(),
-        ...(provider.getDefaultModel()
-          ? { defaultModel: provider.getDefaultModel() as string }
-          : {}),
-      }),
+      () => {
+        const currentProvider = chatSessionService.getProvider();
+        return {
+          provider: currentProvider,
+          tools: toolRegistry.list(),
+          ...(currentProvider.getDefaultModel()
+            ? { defaultModel: currentProvider.getDefaultModel() as string }
+            : {}),
+        };
+      },
       (type) => subAgentPromptSettings[type]
     ),
   ];
@@ -378,22 +385,23 @@ export async function createRuntimeServices(
           return [];
         });
   const allProviders = createAllProviders(config, registry);
+  const chatSessionService = new ChatSessionService(repository, provider, {
+    toolRegistry,
+    workspaceRoot,
+    workspaceFiles,
+    getSystemPrompt: () => systemPromptSetting.value,
+    getCompactPrompt: () => compactPromptSetting.value,
+    getMaxHistoryMessages: () => historySettings.maxHistoryMessages,
+    getLazyToolLoadingEnabled: () => lazyToolLoadingSettings.enabled,
+    getDisabledToolNames: () => disabledToolsSettings.names,
+    getEagerlyAdvertisedToolNames: () => eagerToolsSetting.names,
+  });
 
   return {
     providerId,
     sessionsDirectory: config.sessionsDirectory,
     workspaceRoot,
-    chatSessionService: new ChatSessionService(repository, provider, {
-      toolRegistry,
-      workspaceRoot,
-      workspaceFiles,
-      getSystemPrompt: () => systemPromptSetting.value,
-      getCompactPrompt: () => compactPromptSetting.value,
-      getMaxHistoryMessages: () => historySettings.maxHistoryMessages,
-      getLazyToolLoadingEnabled: () => lazyToolLoadingSettings.enabled,
-      getDisabledToolNames: () => disabledToolsSettings.names,
-      getEagerlyAdvertisedToolNames: () => eagerToolsSetting.names,
-    }),
+    chatSessionService,
     listModelsService: new ListModelsService(provider),
     promptAttachmentService: new PromptAttachmentService(
       workspaceFiles,

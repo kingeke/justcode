@@ -12,6 +12,29 @@ import { marked } from 'marked';
  */
 marked.setOptions({ gfm: true, breaks: true });
 
+/**
+ * Parsed-HTML cache, keyed by the source Markdown. Committed transcript
+ * messages never change, but the transcript re-renders on every streamed
+ * token — without the cache a long conversation re-parses every assistant
+ * message per token. LRU-ish: a hit is refreshed to the back, and the oldest
+ * entry is evicted at the cap (streaming inserts one entry per token for the
+ * live message; eviction keeps that from growing unbounded).
+ */
+const cache = new Map<string, string>();
+const CACHE_LIMIT = 2000;
+
 export function renderMarkdown(text: string): string {
-  return marked.parse(text, { async: false });
+  const hit = cache.get(text);
+  if (hit !== undefined) {
+    cache.delete(text);
+    cache.set(text, hit);
+    return hit;
+  }
+  const html = marked.parse(text, { async: false });
+  if (cache.size >= CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(text, html);
+  return html;
 }

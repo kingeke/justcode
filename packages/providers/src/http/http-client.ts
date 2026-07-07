@@ -53,11 +53,36 @@ function extractErrorDetail(responseText: string): string | undefined {
   return trimmed;
 }
 
+/** Default deadline for non-streaming JSON requests (model lists, auth, etc.). */
+const DEFAULT_JSON_TIMEOUT_MS = 30_000;
+
 export interface JsonRequestOptions {
   method?: 'GET' | 'POST';
   headers?: Record<string, string>;
   body?: unknown;
   signal?: AbortSignal;
+  /**
+   * Overrides the request deadline; `0` disables it entirely. The default
+   * exists to fail fast on unresponsive endpoints for requests with no other
+   * escape hatch (model lists, auth probes). Chat requests should disable it —
+   * they carry the user's own abort signal, and any fixed deadline is just an
+   * arbitrary point at which a legitimately slow reasoning turn gets killed.
+   */
+  timeoutMs?: number;
+}
+
+/**
+ * The request's abort wiring: the caller's signal, the fail-fast deadline
+ * (unless disabled with `timeoutMs: 0`), both, or neither.
+ */
+function buildSignal(options: JsonRequestOptions): { signal?: AbortSignal } {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_JSON_TIMEOUT_MS;
+  const timeout = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+  if (options.signal && timeout) {
+    return { signal: AbortSignal.any([options.signal, timeout]) };
+  }
+  const signal = options.signal ?? timeout;
+  return signal ? { signal } : {};
 }
 
 export async function requestJson<T>(
@@ -71,9 +96,7 @@ export async function requestJson<T>(
       'user-agent': appUserAgent(),
       ...options.headers,
     },
-    signal: options.signal
-      ? AbortSignal.any([options.signal, AbortSignal.timeout(30_000)])
-      : AbortSignal.timeout(30_000),
+    ...buildSignal(options),
   };
 
   if (options.body !== undefined) {

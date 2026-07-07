@@ -325,6 +325,16 @@ export class ChatSessionService {
     this.provider = provider;
   }
 
+  /**
+   * The provider currently backing this session. The single source of truth
+   * after a runtime switch — anything spawning its own model calls (the task
+   * tool's sub agents) must read it per run rather than capture the bootstrap
+   * provider, or it would keep talking to the provider the app started on.
+   */
+  public getProvider(): ProviderClient {
+    return this.provider;
+  }
+
   public async startSession(
     input: StartSessionInput
   ): Promise<StartSessionResult> {

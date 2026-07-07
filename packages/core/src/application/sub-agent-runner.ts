@@ -83,6 +83,11 @@ export async function runSubAgent(
       messages: [systemMessage, ...messages],
       ...(toolDefinitions.length > 0 ? { tools: toolDefinitions } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
+      // Streaming (the tokens are discarded — nobody watches a sub agent type)
+      // keeps HTTP providers on their streaming path, which has no fixed
+      // response deadline. The non-streaming path rides `requestJson`'s hard
+      // timeout, which a long reasoning step (a big review) can easily exceed.
+      onToken: () => {},
     });
 
     throwIfAborted(input.signal);

@@ -44,6 +44,7 @@ import {
 } from '@ext/webview/components/SubAgentPanel';
 import { deriveChangedFiles, type ChangedFile } from '@ext/webview/changes';
 import { selectThinkingItems } from '@ext/webview/thinking-items';
+import { windowMessages } from '@ext/webview/transcript-window';
 import { BUILD_MODE_ID } from '@core/domain/chat-mode';
 import { ToolName } from '@core/domain/tool-name';
 
@@ -64,6 +65,24 @@ export function App(): React.JSX.Element {
   const [openSubAgentId, setOpenSubAgentId] = React.useState<string | null>(
     null
   );
+  // Long-transcript windowing: only the newest MESSAGE_WINDOW committed
+  // messages mount by default — mounting (and re-rendering) a thousand
+  // messages per streamed token is what makes big sessions feel slow. A
+  // "show earlier" button (or a sidebar jump to a hidden message) reveals the
+  // full history. Reset per session.
+  const [showAllMessages, setShowAllMessages] = React.useState(false);
+  React.useEffect(() => setShowAllMessages(false), [state.sessionId]);
+  // A sidebar jump whose target message is still hidden by the window: reveal
+  // everything first, then scroll once the target has mounted.
+  const pendingScrollRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!pendingScrollRef.current) return;
+    const node = document.getElementById(`msg-${pendingScrollRef.current}`);
+    if (node) {
+      pendingScrollRef.current = null;
+      node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
   // The queued message being edited inline, and its working draft text.
   const [editingQueuedId, setEditingQueuedId] = React.useState<string | null>(
     null
@@ -627,10 +646,16 @@ export function App(): React.JSX.Element {
 
   // Jumps the transcript to a message picked in the conversation sidebar. The
   // sidebar only lists committed messages, each anchored by MessageView's domId.
+  // A target hidden by the message window reveals the full history first and
+  // scrolls once it has mounted (via pendingScrollRef's effect).
   const scrollToMessage = (messageId: string): void => {
-    document
-      .getElementById(`msg-${messageId}`)
-      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const node = document.getElementById(`msg-${messageId}`);
+    if (node) {
+      node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    pendingScrollRef.current = messageId;
+    setShowAllMessages(true);
   };
 
   const closeModelPicker = (): void => {
@@ -909,6 +934,10 @@ export function App(): React.JSX.Element {
     );
   }
 
+  // The window over the committed transcript (see showAllMessages above).
+  const { visible: visibleMessages, hiddenCount: hiddenMessageCount } =
+    windowMessages(state.messages, showAllMessages);
+
   // The most recent presented plan (a present_plan tool result). Its card carries
   // the Start/Edit actions — so they attach to a real plan, not to any Plan-mode
   // reply, and stay correct after resuming a session.
@@ -1088,7 +1117,21 @@ export function App(): React.JSX.Element {
               <div className="notice">{state.notice}</div>
             ) : null}
 
-            {state.messages.map((message, index) => {
+            {hiddenMessageCount > 0 ? (
+              <button
+                type="button"
+                className="transcript-show-earlier"
+                onClick={() => setShowAllMessages(true)}
+              >
+                Show {hiddenMessageCount} earlier message
+                {hiddenMessageCount === 1 ? '' : 's'}
+              </button>
+            ) : null}
+
+            {visibleMessages.map((message, visibleIndex) => {
+              // Index into the full transcript (the window hides the head), so
+              // plan/compaction/last-message positions stay correct.
+              const index = hiddenMessageCount + visibleIndex;
               // Collapse mode: show only the user's own messages so they can scan
               // back through what they asked without the long replies in between.
               if (

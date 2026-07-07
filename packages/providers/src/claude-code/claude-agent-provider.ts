@@ -31,6 +31,7 @@ import {
   type ToolCall,
 } from '@core/domain/message';
 import type { ToolDefinition, ToolResult } from '@core/ports/tool';
+import { ToolName } from '@core/domain/tool-name';
 import { logRequestResponse } from '@core/application/debug-log';
 import { normalizeEffortLevels } from '@providers/http/reasoning';
 
@@ -58,6 +59,15 @@ import { normalizeEffortLevels } from '@providers/http/reasoning';
 /** MCP server name; the SDK prefixes tool names as `mcp__<name>__<tool>`. */
 const MCP_SERVER_NAME = 'justcode';
 const MCP_TOOL_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
+
+/**
+ * Batch window for parallel `task` calls (see collectTurn): after the first
+ * task invocation parks, keep collecting siblings while they arrive within
+ * each quiet step, up to the cap. Sub agent runs take tens of seconds, so the
+ * added latency is negligible next to running them serially.
+ */
+const TASK_BATCH_QUIET_MS = 150;
+const TASK_BATCH_MAX_WAIT_MS = 1500;
 
 /** A tool invocation parked between the MCP handler and the engine. */
 interface PendingToolCall {
@@ -172,6 +182,11 @@ class SessionBridge {
     }
     this.pendingTools.clear();
     this.parkedToolCalls.length = 0;
+  }
+
+  /** Empties the parked queue: every invocation not yet handed to the engine. */
+  public drainParkedToolCalls(): PendingToolCall[] {
+    return this.parkedToolCalls.splice(0);
   }
 
   /** Called by the MCP tool handler: park the call and wake `nextEvent`. */
@@ -814,14 +829,31 @@ export class ClaudeAgentProvider implements ProviderClient {
       const event = await bridge.nextEvent();
 
       if (event.kind === TurnEventKind.Tool) {
+        const pendings = [event.pending];
+        // Parallel tool use: Claude dispatches sibling tool_use blocks
+        // concurrently, so their MCP invocations park moments apart. For
+        // `task` calls, wait through short quiet windows and hand the whole
+        // batch to the engine in one ChatResult — that's what lets sub agents
+        // actually run in parallel (a task run takes tens of seconds, so the
+        // wait is noise). Regular tools return immediately: the engine
+        // executes them sequentially anyway, and the wait would tax every
+        // fast read/edit round trip.
+        if (stripToolPrefix(event.pending.call.name) === ToolName.Task) {
+          let waitedMs = 0;
+          while (waitedMs < TASK_BATCH_MAX_WAIT_MS) {
+            await delay(TASK_BATCH_QUIET_MS);
+            waitedMs += TASK_BATCH_QUIET_MS;
+            const drained = bridge.drainParkedToolCalls();
+            if (drained.length === 0) break;
+            pendings.push(...drained);
+          }
+        }
         return {
           content,
-          toolCalls: [
-            {
-              ...event.pending.call,
-              name: stripToolPrefix(event.pending.call.name),
-            },
-          ],
+          toolCalls: pendings.map((pending) => ({
+            ...pending.call,
+            name: stripToolPrefix(pending.call.name),
+          })),
         };
       }
 

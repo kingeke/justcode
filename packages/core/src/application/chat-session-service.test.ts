@@ -361,6 +361,33 @@ describe('ChatSessionService', () => {
     expect(started).toBe(2);
   });
 
+  it('exposes the live provider after a runtime switch (getProvider)', () => {
+    const repository = new InMemoryConversationRepository();
+    const original: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat(): Promise<ChatResult> {
+        return { content: '' };
+      },
+      async listModels() {
+        return [];
+      },
+      getDefaultModel() {
+        return undefined;
+      },
+    };
+    const replacement: ProviderClient = {
+      ...original,
+      providerId: ProviderId.Copilot,
+    };
+    const service = new ChatSessionService(repository, original, {});
+
+    // Sub agents (the task tool) read the provider per run through this
+    // getter; it must track a host's switchProvider, not the bootstrap client.
+    expect(service.getProvider()).toBe(original);
+    service.switchProvider(replacement);
+    expect(service.getProvider()).toBe(replacement);
+  });
+
   it('threads model, tool call id, and sub agent recording into tool execution', async () => {
     const repository = new InMemoryConversationRepository();
     const tool = new SubAgentRecordingTool();

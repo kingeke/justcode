@@ -163,6 +163,9 @@ export class OpenRouterProvider implements ProviderClient {
       {
         method: 'POST',
         headers,
+        // No deadline: chat is cancelled by the user's signal, and a fixed
+        // clock only kills legitimately slow reasoning turns.
+        timeoutMs: 0,
         ...(request.signal ? { signal: request.signal } : {}),
         body: {
           model: request.model,

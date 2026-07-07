@@ -115,6 +115,26 @@ body {
   border: 1px solid var(--vscode-inputValidation-warningBorder, transparent);
 }
 
+/* "Show N earlier messages" — reveals the transcript head hidden by the
+   long-conversation window. */
+.transcript-show-earlier {
+  display: block;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 6px 8px;
+  border: 1px dashed var(--vscode-panel-border, rgba(127, 127, 127, 0.4));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, var(--vscode-foreground));
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.transcript-show-earlier:hover {
+  background: var(--vscode-list-hoverBackground, rgba(127, 127, 127, 0.1));
+}
+
 /* Loading notice in the floating banner (e.g. `/usage` fetching): spinner + text. */
 .notice-loading {
   display: inline-flex;
@@ -1420,6 +1440,13 @@ textarea:focus {
   bottom: 12px;
   z-index: 60;
   transition: bottom 0.12s ease;
+}
+
+/* The hovered button's popup must paint over the sibling floating buttons
+   (e.g. the sub agents robot stacked above "Your messages"). */
+.conversation-sidebar:hover,
+.conversation-sidebar:focus-within {
+  z-index: 70;
 }
 
 /* Raised one slot per visible jump arrow below it. */

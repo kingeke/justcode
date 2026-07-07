@@ -124,6 +124,9 @@ export class AnthropicProvider implements ProviderClient {
       {
         method: 'POST',
         headers: await this.createHeaders(),
+        // No deadline: chat is cancelled by the user's signal, and a fixed
+        // clock only kills legitimately slow reasoning turns.
+        timeoutMs: 0,
         ...(request.signal ? { signal: request.signal } : {}),
         body: { ...body, stream: false },
       }

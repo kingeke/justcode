@@ -50,9 +50,11 @@ export async function sendResponsesRequest({
     ...(prompt_cache_key ? { prompt_cache_key } : {}),
     ...(instructions ? { instructions } : {}),
     input,
-    ...(tools
-      ? { tools, tool_choice: 'auto', parallel_tool_calls: false }
-      : {}),
+    // parallel_tool_calls must be true: the engine executes a multi-call
+    // batch itself (regular tools in order, `task` calls concurrently), and
+    // `false` forces the model to emit one call per response — which made sub
+    // agents run strictly one at a time no matter what the prompt asked for.
+    ...(tools ? { tools, tool_choice: 'auto', parallel_tool_calls: true } : {}),
     // gpt-5* are reasoning models; always send a reasoning block, defaulting to
     // medium when the caller hasn't picked a level (`'off'` isn't valid here).
     reasoning: {

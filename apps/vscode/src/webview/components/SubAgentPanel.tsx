@@ -29,7 +29,8 @@ export function SubAgentPanel({
         {runs.length} sub agent{runs.length === 1 ? '' : 's'}
       </div>
       <ul className="subagents-list">
-        {runs.map((run) => (
+        {/* Newest first, matching the robot popup's ordering. */}
+        {[...runs].reverse().map((run) => (
           <li key={run.runId} className="subagents-row-wrap">
             <div
               className="subagents-row is-expandable"
@@ -99,7 +100,8 @@ export function SubAgentSidebar({
         </div>
 
         <div className="conversation-sidebar-list">
-          {runs.map((run) => (
+          {/* Newest first, so the latest runs sit at the top of the popup. */}
+          {[...runs].reverse().map((run) => (
             <button
               key={run.runId}
               type="button"

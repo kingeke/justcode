@@ -28,7 +28,28 @@ const TOOL_CHANGE_PREVIEW_NAMES = new Set([
   'write_file',
 ]);
 
-export function MessageView({
+interface MessageViewProps {
+  message: WebviewMessage;
+  expandTools?: boolean;
+  onOpenFile?: (path: string) => void;
+  /** Opens a full-size preview of a transcript image (data URL). */
+  onOpenImage?: (src: string) => void;
+  /**
+   * Re-sends this user message, scrapping it and every message after it.
+   * Only passed for retryable user messages (idle, current epoch).
+   */
+  onRetry?: () => void;
+  /**
+   * Opens an inline composer to edit this user message and re-send it,
+   * scrapping it and every message after it. Passed under the same conditions
+   * as {@link onRetry}.
+   */
+  onEdit?: () => void;
+  /** DOM id for the message's root element, so the sidebar can scroll to it. */
+  domId?: string;
+}
+
+function MessageViewImpl({
   message,
   expandTools = false,
   onOpenFile,
@@ -239,3 +260,24 @@ export function MessageView({
     </div>
   );
 }
+
+/**
+ * Memoized: the transcript re-renders on every streamed token and local state
+ * change, so with long conversations re-rendering a thousand committed
+ * messages per token dominates the frame. Committed message objects are stable
+ * between snapshots, so a reference compare skips them. Handler *identity* is
+ * deliberately ignored — App recreates the closures each render but their
+ * behavior only depends on the (compared) message and stable dispatchers — so
+ * only their presence (retry/edit offered or not) forces a re-render.
+ */
+export const MessageView = React.memo(
+  MessageViewImpl,
+  (prev: MessageViewProps, next: MessageViewProps) =>
+    prev.message === next.message &&
+    prev.expandTools === next.expandTools &&
+    prev.domId === next.domId &&
+    Boolean(prev.onRetry) === Boolean(next.onRetry) &&
+    Boolean(prev.onEdit) === Boolean(next.onEdit) &&
+    Boolean(prev.onOpenFile) === Boolean(next.onOpenFile) &&
+    Boolean(prev.onOpenImage) === Boolean(next.onOpenImage)
+);

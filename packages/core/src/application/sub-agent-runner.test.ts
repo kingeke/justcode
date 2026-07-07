@@ -71,6 +71,9 @@ describe('runSubAgent', () => {
     // providers key their live session — and thus real tool calling — on it).
     expect(requests[0]?.sessionId).toBe('subagent-test');
     expect(requests[0]?.ephemeral).toBeUndefined();
+    // Requests stream (tokens are discarded): the non-streaming provider paths
+    // carry a hard response deadline that long reasoning steps would blow.
+    expect(requests[0]?.onToken).toBeTypeOf('function');
     expect(result.messages[0]?.role).toBe('user');
     expect(result.messages.at(-1)?.role).toBe('assistant');
   });

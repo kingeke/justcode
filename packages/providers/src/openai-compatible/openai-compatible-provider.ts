@@ -245,6 +245,10 @@ export class OpenAiCompatibleProvider implements ProviderClient {
       {
         method: 'POST',
         headers: await this.createHeaders(),
+        // No deadline: chat is cancelled by the user's signal, and a fixed
+        // clock only kills legitimately slow reasoning turns. The default 30s
+        // is for requests with no other escape hatch (model lists etc.).
+        timeoutMs: 0,
         ...(request.signal ? { signal: request.signal } : {}),
         body: {
           model: request.model,
