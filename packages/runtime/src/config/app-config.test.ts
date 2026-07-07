@@ -148,6 +148,8 @@ describe('loadAppConfig', () => {
         askSystemPrompt: '',
         planSystemPrompt: '',
         compactPrompt: '',
+        explorerSubAgentPrompt: '',
+        generalSubAgentPrompt: '',
       })
     );
 
@@ -157,6 +159,8 @@ describe('loadAppConfig', () => {
     expect(config.askSystemPrompt).toBe('');
     expect(config.planSystemPrompt).toBe('');
     expect(config.compactPrompt).toBe('');
+    expect(config.explorerSubAgentPrompt).toBe('');
+    expect(config.generalSubAgentPrompt).toBe('');
     expect(writeFile).not.toHaveBeenCalled();
   });
 

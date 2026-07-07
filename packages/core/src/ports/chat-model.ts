@@ -146,6 +146,14 @@ export interface ProviderClient {
   listModels(): Promise<ModelInfo[]>;
   getDefaultModel(): string | undefined;
   /**
+   * Tears down any per-session state held for `sessionId`. Optional: only
+   * session-oriented providers (Claude Code, which spawns a runtime process per
+   * session) need it; stateless HTTP providers hold nothing. Callers that mint
+   * throwaway session ids (sub agent runs) invoke it when the run ends so those
+   * sessions don't accumulate.
+   */
+  closeSession?: ((sessionId: string) => void) | undefined;
+  /**
    * Plan usage for a `/usage`-style display. Optional: only providers with an
    * account-level usage surface (Claude Code) implement it; absent means the
    * command isn't supported for this provider.

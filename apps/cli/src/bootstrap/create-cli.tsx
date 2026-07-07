@@ -23,6 +23,7 @@ import {
 import { resetAppState } from '@runtime/persistence/reset-app-state';
 import {
   addCustomMode,
+  removeCustomMode,
   BUILD_MODE_ID,
   eagerToolsForMode,
   isKnownMode,
@@ -648,6 +649,20 @@ async function runChat(options: SharedOptions): Promise<void> {
         applyMode(created.id);
         persistConfig({ customModes, mode: created.id });
         return { modes: listModes(customModes), modeId: created.id };
+      },
+      onDeleteMode: (modeId: string) => {
+        const removed = removeCustomMode(modeId, customModes);
+        if (!removed) return null;
+        customModes = removed.customModes;
+        // Deleting the active mode falls back to Build; otherwise the active
+        // mode is untouched.
+        const activeModeId =
+          currentConfig.mode === modeId
+            ? BUILD_MODE_ID
+            : (currentConfig.mode ?? BUILD_MODE_ID);
+        if (activeModeId !== currentConfig.mode) applyMode(activeModeId);
+        persistConfig({ customModes, mode: activeModeId });
+        return { modes: listModes(customModes), modeId: activeModeId };
       },
       initialExpandTools: savedConfig.expandTools ?? true,
       initialMaxReadLines:

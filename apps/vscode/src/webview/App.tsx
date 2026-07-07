@@ -37,6 +37,11 @@ import {
   PencilIcon,
 } from '@ext/webview/components/Icons';
 import { ChangesPanel } from '@ext/webview/components/ChangesPanel';
+import {
+  SubAgentPanel,
+  SubAgentSidebar,
+  SubAgentTranscriptModal,
+} from '@ext/webview/components/SubAgentPanel';
 import { deriveChangedFiles, type ChangedFile } from '@ext/webview/changes';
 import { selectThinkingItems } from '@ext/webview/thinking-items';
 import { BUILD_MODE_ID } from '@core/domain/chat-mode';
@@ -55,6 +60,10 @@ export function App(): React.JSX.Element {
   const [state, dispatch] = React.useReducer(reducer, initialState);
   // The image (data URL) shown full-size in the preview modal, or null when closed.
   const [previewImage, setPreviewImage] = React.useState<string | null>(null);
+  // The sub agent run whose full transcript popup is open, or null when closed.
+  const [openSubAgentId, setOpenSubAgentId] = React.useState<string | null>(
+    null
+  );
   // The queued message being edited inline, and its working draft text.
   const [editingQueuedId, setEditingQueuedId] = React.useState<string | null>(
     null
@@ -321,6 +330,13 @@ export function App(): React.JSX.Element {
       // ResizeObserver fires once on observe, which conveniently pins a freshly
       // opened chat to its latest message.
       observer.observe(node);
+      // Also watch the scroll viewport itself (the content's parent — read
+      // directly because React assigns child refs before parent refs, so
+      // transcriptRef isn't set yet on first mount): panels below the
+      // transcript (the changes list, an approval card) growing mid-turn
+      // shrink the viewport without resizing the content, which would silently
+      // drift the view off the bottom while stick-to-bottom is still on.
+      if (node.parentElement) observer.observe(node.parentElement);
       contentObserverRef.current = observer;
     },
     [pinToBottom]
@@ -764,6 +780,31 @@ export function App(): React.JSX.Element {
     });
   };
 
+  // Every reviewable sub agent run: the conversation's persisted runs plus
+  // (overridden by) the current turn's live ones. Drives the robot popup and
+  // the transcript modal lookup.
+  const allSubAgentRuns = React.useMemo(() => {
+    const liveIds = new Set(state.subAgents.map((run) => run.runId));
+    return [
+      ...state.sessionSubAgents.filter((run) => !liveIds.has(run.runId)),
+      ...state.subAgents,
+    ];
+  }, [state.sessionSubAgents, state.subAgents]);
+
+  // The open popup's run, if any. The transcript request re-fires whenever the
+  // run makes progress (tool count or status changes) so a running sub agent's
+  // popup stays live; the host serves the freshest messages each time.
+  const openSubAgentRun = openSubAgentId
+    ? (allSubAgentRuns.find((run) => run.runId === openSubAgentId) ?? null)
+    : null;
+  React.useEffect(() => {
+    if (!openSubAgentId) return;
+    postToHost({
+      type: WebviewMessageType.RequestSubAgentTranscript,
+      runId: openSubAgentId,
+    });
+  }, [openSubAgentId, openSubAgentRun?.toolUseCount, openSubAgentRun?.status]);
+
   const openMcpConfig = (): void => {
     postToHost({ type: WebviewMessageType.OpenMcpConfig });
   };
@@ -793,6 +834,10 @@ export function App(): React.JSX.Element {
       name,
       ...(systemPrompt ? { systemPrompt } : {}),
     });
+  };
+
+  const deleteMode = (modeId: string): void => {
+    postToHost({ type: WebviewMessageType.DeleteMode, modeId });
   };
 
   // Plan mode hands off to Build: switch the mode (the SelectMode message is
@@ -940,6 +985,7 @@ export function App(): React.JSX.Element {
     activeModeId: state.activeModeId,
     onSelectMode: selectMode,
     onCreateMode: createMode,
+    onDeleteMode: deleteMode,
     onToggleAutoApprove: toggleAutoApprove,
     onToggleExpandTools: toggleExpandTools,
     onToggleThinkingCollapsed: toggleThinkingCollapsed,
@@ -1257,6 +1303,15 @@ export function App(): React.JSX.Element {
             }
           />
         ) : null}
+        <SubAgentSidebar
+          runs={allSubAgentRuns}
+          onOpen={setOpenSubAgentId}
+          stackedButtons={
+            (showJumpToTop ? 1 : 0) +
+            (showJumpToBottom ? 1 : 0) +
+            (state.showConversationSidebar ? 1 : 0)
+          }
+        />
         {/* Floating banner pinned above the composer: compaction progress, or
             a transient notice (auto-compact warning, cancellation). Slides in
             and out so it's visible regardless of transcript scroll position. */}
@@ -1292,6 +1347,8 @@ export function App(): React.JSX.Element {
           )}
         </FloatingBanner>
       </div>
+
+      <SubAgentPanel runs={state.subAgents} onOpen={setOpenSubAgentId} />
 
       <ChangesPanel
         files={changedFiles}
@@ -1386,6 +1443,15 @@ export function App(): React.JSX.Element {
         initialImages={composerDraftImagesRef.current}
         onDraftChange={persistComposerDraft}
       />
+
+      {openSubAgentRun ? (
+        <SubAgentTranscriptModal
+          run={openSubAgentRun}
+          messages={state.subAgentTranscripts[openSubAgentRun.runId]}
+          onClose={() => setOpenSubAgentId(null)}
+          onOpenFile={openFile}
+        />
+      ) : null}
 
       {previewImage ? (
         <div

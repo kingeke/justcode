@@ -27,6 +27,7 @@ import {
   describeTool,
   getInterruptedConversation,
   type ToolApprovalRequest,
+  ToolActivityPhase,
   type ToolActivityEvent,
 } from '@core/application/chat-session-service';
 import type { ToolInvocationView, UserQuestionRequest } from '@core/ports/tool';
@@ -42,6 +43,11 @@ import {
   DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT,
   DEFAULT_COMPACT_PROMPT,
 } from '@core/application/compact-prompt';
+import {
+  SUB_AGENT_CONFIGS,
+  SubAgentType,
+  type SubAgentRun,
+} from '@core/domain/sub-agent';
 import {
   readGlobalConfig,
   writeGlobalConfig,
@@ -101,9 +107,14 @@ import {
   type TokenMessage,
   type ThinkingMessage,
   type ToolActivityMessage,
+  type SubAgentActivityMessage,
+  type WebviewSubAgentRunSnapshot,
+  WebviewSubAgentPhase,
+  WebviewSubAgentStatus,
 } from '@ext/shared/protocol';
 import {
   addCustomMode,
+  removeCustomMode,
   BUILD_MODE_ID,
   eagerToolsForMode,
   isKnownMode,
@@ -149,8 +160,16 @@ export class ChatBridge {
   // live thinking, tool cards, and streaming answer exactly — with their
   // original ordering, which the host otherwise can't reconstruct. Reset per turn.
   private liveTurnEvents: Array<
-    TokenMessage | ThinkingMessage | ToolActivityMessage
+    | TokenMessage
+    | ThinkingMessage
+    | ToolActivityMessage
+    | SubAgentActivityMessage
   > = [];
+  // Live sub agent runs of the in-flight turn, keyed by run id. Each value is
+  // the run object the task tool mutates as the sub agent works, so serving a
+  // transcript request reads the freshest messages. Reset per turn; finished
+  // turns' runs live on `conversation.subAgentRuns` instead.
+  private liveSubAgentRuns = new Map<string, SubAgentRun>();
   // Epoch ms of the in-flight turn's start and first token, sent on resume so
   // the webview's live tok/s keeps its original time base. Undefined off-turn.
   private turnStartedAtMs: number | undefined;
@@ -424,6 +443,9 @@ export class ChatBridge {
       case WebviewMessageType.CreateMode:
         await this.createMode(message.name, message.systemPrompt);
         return;
+      case WebviewMessageType.DeleteMode:
+        await this.deleteMode(message.modeId);
+        return;
       case WebviewMessageType.EditPlan:
         await this.editPlan(message.content);
         return;
@@ -450,9 +472,46 @@ export class ChatBridge {
       case WebviewMessageType.RequestWorkspaceFiles:
         await this.sendWorkspaceFiles();
         return;
+      case WebviewMessageType.RequestSubAgentTranscript:
+        await this.sendSubAgentTranscript(message.runId);
+        return;
       case WebviewMessageType.RequestFileSymbols:
         await this.sendFileSymbols(message.path);
         return;
+    }
+  }
+
+  /**
+   * Serves a sub agent run's full transcript for the webview's popup viewer.
+   * Prefers the live run (its messages grow while the sub agent works, and the
+   * webview re-requests on each activity event) and falls back to the runs
+   * persisted on the conversation for finished turns.
+   */
+  private async sendSubAgentTranscript(runId: string): Promise<void> {
+    const run =
+      this.liveSubAgentRuns.get(runId) ??
+      this.conversation?.subAgentRuns?.find((entry) => entry.id === runId);
+    if (!run) return;
+    try {
+      const services = await this.ensureServices();
+      // Wrap the run's messages in a throwaway conversation so the same
+      // converter (tool views, thinking, role mapping) renders them.
+      const messages = await toWebviewMessages(
+        {
+          sessionId: runId,
+          messages: run.messages,
+          createdAt: run.startedAt,
+          updatedAt: run.endedAt ?? run.startedAt,
+        },
+        services
+      );
+      this.post({
+        type: HostMessageType.SubAgentTranscript,
+        runId,
+        messages,
+      });
+    } catch {
+      // A failed conversion just leaves the popup empty; nothing to surface.
     }
   }
 
@@ -807,6 +866,7 @@ export class ChatBridge {
         reasoningEffortByModel: this.reasoningEffortByModel,
         workspaceRoot: this.workspaceRoot,
         resolvedFiles,
+        subAgents: toSubAgentSnapshots(session.conversation),
         ...(session.conversation.title !== undefined
           ? { sessionTitle: session.conversation.title }
           : {}),
@@ -874,6 +934,7 @@ export class ChatBridge {
         reasoningEffortByModel: this.reasoningEffortByModel,
         workspaceRoot: this.workspaceRoot,
         resolvedFiles,
+        subAgents: toSubAgentSnapshots(conversation),
         ...(conversation.title !== undefined
           ? { sessionTitle: conversation.title }
           : {}),
@@ -1119,6 +1180,7 @@ export class ChatBridge {
     this.abortController = abortController;
     this.activeTurnSessionId = this.conversation.sessionId;
     this.liveTurnEvents = [];
+    this.liveSubAgentRuns.clear();
 
     // A fresh turn starts with an empty steering queue; follow-ups the user adds
     // while this turn runs are mirrored in via `SyncSteeringQueue`.
@@ -1215,13 +1277,37 @@ export class ChatBridge {
             usage: this.usageSnapshot(),
           });
         },
+        onSubAgentActivity: (event) => {
+          // Keep the live run object so transcript requests can read its
+          // messages while the sub agent is still working.
+          if (event.run) this.liveSubAgentRuns.set(event.runId, event.run);
+          const message: SubAgentActivityMessage = {
+            type: HostMessageType.SubAgentActivity,
+            phase: event.phase as string as WebviewSubAgentPhase,
+            runId: event.runId,
+            agentType: event.agentType,
+            description: event.description,
+            ...(event.latestActivity
+              ? { latestActivity: event.latestActivity }
+              : {}),
+            ...(event.toolUseCount !== undefined
+              ? { toolUseCount: event.toolUseCount }
+              : {}),
+            ...(event.status
+              ? { status: event.status as string as WebviewSubAgentStatus }
+              : {}),
+            ...(event.summary !== undefined ? { summary: event.summary } : {}),
+          };
+          this.liveTurnEvents.push(message);
+          this.post(message);
+        },
         onToolActivity: (event) => {
           // A tool call is the model's first output for turns that act before
           // they speak (no streamed prose/thinking — common on the Claude Code
           // provider). Mark first-token here too, so TTFT settles instead of
           // climbing for the whole turn and tok/s isn't divided by a
           // milliseconds-long window (mirrors the CLI).
-          if (event.phase === 'start') markFirstToken();
+          if (event.phase === ToolActivityPhase.Start) markFirstToken();
           this.postToolActivity(event);
         },
         // Auto-approve runs approval-gated tools without prompting. Express that
@@ -1597,7 +1683,7 @@ export class ChatBridge {
     // runs, then synthesize a deletion diff once the file is gone so it shows in
     // the changes panel like any other edit.
     if (event.toolName === ToolName.Bash) {
-      if (event.phase === 'start') {
+      if (event.phase === ToolActivityPhase.Start) {
         this.captureDeletionCandidates(event.toolCallId, view.preview);
       } else {
         const diff = this.resolveDeletionDiff(event.toolCallId);
@@ -1605,7 +1691,8 @@ export class ChatBridge {
       }
     }
 
-    const isError = event.phase === 'end' && (event.result?.isError ?? false);
+    const isError =
+      event.phase === ToolActivityPhase.End && (event.result?.isError ?? false);
     // A rejected/failed call never touched disk, so its diff is only a preview.
     // Flag it so the post-turn rebuild (and thus the changes panel) can tell it
     // apart from an applied edit.
@@ -1618,9 +1705,9 @@ export class ChatBridge {
     // start view.
     const cached = this.toolViewsByCallId.get(event.toolCallId);
     if (
-      event.phase === 'start' ||
+      event.phase === ToolActivityPhase.Start ||
       !cached ||
-      (event.phase === 'end' && view.diff)
+      (event.phase === ToolActivityPhase.End && view.diff)
     ) {
       this.toolViewsByCallId.set(event.toolCallId, view);
     } else if (isError && cached) {
@@ -1643,7 +1730,10 @@ export class ChatBridge {
     }
     const message: ToolActivityMessage = {
       type: HostMessageType.ToolActivity,
-      phase: event.phase === 'start' ? ToolPhase.Start : ToolPhase.End,
+      phase:
+        event.phase === ToolActivityPhase.Start
+          ? ToolPhase.Start
+          : ToolPhase.End,
       toolName: event.toolName,
       toolCallId: event.toolCallId,
       view,
@@ -1866,6 +1956,7 @@ export class ChatBridge {
           reasoningEffortByModel: this.reasoningEffortByModel,
           workspaceRoot: this.workspaceRoot,
           resolvedFiles,
+          subAgents: toSubAgentSnapshots(conversation),
           ...(conversation.title !== undefined
             ? { sessionTitle: conversation.title }
             : {}),
@@ -2539,6 +2630,17 @@ export class ChatBridge {
     this.services?.setCompactPrompt(
       config.compactPrompt ?? DEFAULT_COMPACT_PROMPT
     );
+    // Edited sub agent prompts apply to the next spawned sub agent.
+    this.services?.setSubAgentPrompt(
+      SubAgentType.Explorer,
+      config.explorerSubAgentPrompt ??
+        SUB_AGENT_CONFIGS[SubAgentType.Explorer].systemPrompt
+    );
+    this.services?.setSubAgentPrompt(
+      SubAgentType.General,
+      config.generalSubAgentPrompt ??
+        SUB_AGENT_CONFIGS[SubAgentType.General].systemPrompt
+    );
     this.customModesConfig = config.customModes ?? {};
     this.modes = listModes(this.customModesConfig);
     if (!isKnownMode(this.activeModeId, this.customModesConfig)) {
@@ -2647,6 +2749,29 @@ export class ChatBridge {
       ...config,
       customModes,
       mode: id,
+    });
+  }
+
+  /**
+   * Deletes a custom mode (built-ins are refused by `removeCustomMode`),
+   * persists the removal, and — when the deleted mode was active — switches to
+   * Build. `applyMode` pushes the refreshed list to the picker either way.
+   */
+  private async deleteMode(modeId: string): Promise<void> {
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    const removed = removeCustomMode(modeId, config.customModes ?? {});
+    if (!removed) return;
+
+    this.customModesConfig = removed.customModes;
+    this.modes = listModes(removed.customModes);
+    const nextActive =
+      this.activeModeId === modeId ? BUILD_MODE_ID : this.activeModeId;
+    this.applyMode(nextActive);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      customModes: removed.customModes,
+      ...(config.mode === modeId ? { mode: nextActive } : {}),
     });
   }
 
@@ -2889,6 +3014,27 @@ function toToolView(view: ToolInvocationView): WebviewToolView {
     ...(view.diff ? { diff: view.diff } : {}),
     ...(view.path ? { path: view.path } : {}),
   };
+}
+
+/**
+ * Summarizes a conversation's persisted sub agent runs for the Ready snapshot,
+ * so a reopened session still lists them (robot popup) and can open each run's
+ * transcript. Tool-use counts are recomputed from the stored messages.
+ */
+export function toSubAgentSnapshots(
+  conversation: Conversation
+): WebviewSubAgentRunSnapshot[] {
+  return (conversation.subAgentRuns ?? []).map((run) => ({
+    runId: run.id,
+    agentType: run.agentType,
+    description: run.description,
+    status: run.status as string as WebviewSubAgentStatus,
+    toolUseCount: run.messages.filter((message) => message.role === 'tool')
+      .length,
+    ...(run.summary !== undefined ? { summary: run.summary } : {}),
+    startedAt: Date.parse(run.startedAt),
+    ...(run.endedAt !== undefined ? { endedAt: Date.parse(run.endedAt) } : {}),
+  }));
 }
 
 /**

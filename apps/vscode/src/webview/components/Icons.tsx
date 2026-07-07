@@ -227,6 +227,19 @@ export function ChatIcon({ size = 16 }: IconProps): React.JSX.Element {
   );
 }
 
+/** Robot head — the sub agents popup (runs spawned by the task tool). */
+export function RobotIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <rect x="5" y="8" width="14" height="11" rx="2" />
+      <path d="M12 8V5M12 5h.01M9 19v2M15 19v2M2.5 12v4M21.5 12v4" />
+      <circle cx="9.5" cy="12.5" r="0.75" />
+      <circle cx="14.5" cy="12.5" r="0.75" />
+      <path d="M9.5 16h5" />
+    </svg>
+  );
+}
+
 /** Clipboard with a checklist — the Plan mode (lay out the steps). */
 export function ClipboardIcon({ size = 16 }: IconProps): React.JSX.Element {
   return (

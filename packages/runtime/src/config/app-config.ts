@@ -23,6 +23,7 @@ import {
   DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT,
   DEFAULT_COMPACT_PROMPT,
 } from '@core/application/compact-prompt';
+import { SUB_AGENT_CONFIGS, SubAgentType } from '@core/domain/sub-agent';
 
 export interface AppConfig {
   /** Provider to use on launch, or undefined when nothing is configured yet. */
@@ -38,6 +39,10 @@ export interface AppConfig {
   planSystemPrompt: string;
   /** Compaction summarization prompt (defaults applied). */
   compactPrompt: string;
+  /** Explorer sub agent system prompt (defaults applied). */
+  explorerSubAgentPrompt: string;
+  /** General sub agent system prompt (defaults applied). */
+  generalSubAgentPrompt: string;
   /** Auto-compact threshold percent (default 80); 0 turns auto-compact off. */
   autoCompactThresholdPercent: number;
   /** Whether local providers refetch their model list on every load (default true). */
@@ -110,13 +115,21 @@ export async function loadAppConfig(
     globalConfig.systemPrompt === undefined ||
     globalConfig.askSystemPrompt === undefined ||
     globalConfig.planSystemPrompt === undefined ||
-    globalConfig.compactPrompt === undefined;
+    globalConfig.compactPrompt === undefined ||
+    globalConfig.explorerSubAgentPrompt === undefined ||
+    globalConfig.generalSubAgentPrompt === undefined;
   const configWithDefaults = {
     ...globalConfig,
     systemPrompt: globalConfig.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
     askSystemPrompt: globalConfig.askSystemPrompt ?? ASK_SYSTEM_PROMPT,
     planSystemPrompt: globalConfig.planSystemPrompt ?? PLAN_SYSTEM_PROMPT,
     compactPrompt: globalConfig.compactPrompt ?? DEFAULT_COMPACT_PROMPT,
+    explorerSubAgentPrompt:
+      globalConfig.explorerSubAgentPrompt ??
+      SUB_AGENT_CONFIGS[SubAgentType.Explorer].systemPrompt,
+    generalSubAgentPrompt:
+      globalConfig.generalSubAgentPrompt ??
+      SUB_AGENT_CONFIGS[SubAgentType.General].systemPrompt,
   };
 
   if (needsPromptDefaults) {
@@ -154,6 +167,8 @@ export async function loadAppConfig(
     askSystemPrompt: configWithDefaults.askSystemPrompt ?? ASK_SYSTEM_PROMPT,
     planSystemPrompt: configWithDefaults.planSystemPrompt ?? PLAN_SYSTEM_PROMPT,
     compactPrompt: configWithDefaults.compactPrompt ?? DEFAULT_COMPACT_PROMPT,
+    explorerSubAgentPrompt: configWithDefaults.explorerSubAgentPrompt,
+    generalSubAgentPrompt: configWithDefaults.generalSubAgentPrompt,
     autoCompactThresholdPercent:
       configWithDefaults.autoCompactThresholdPercent ??
       DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT,

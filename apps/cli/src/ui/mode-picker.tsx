@@ -40,14 +40,23 @@ interface ModePickerProps {
   onSelect: (modeId: string) => void;
   /** Create a custom mode (name + optional system prompt) and switch to it. */
   onCreate: (name: string, systemPrompt?: string) => void;
+  /** Delete the focused custom mode (built-ins can never be deleted). */
+  onDelete?: (modeId: string) => void;
   onCancel: () => void;
+}
+
+/** The kinds of row the picker renders. */
+enum RowKind {
+  Category = 'category',
+  Mode = 'mode',
+  Create = 'create',
 }
 
 /** A navigable row: a category heading, a selectable mode, or the create action. */
 type Row =
-  | { kind: 'category'; label: string }
-  | { kind: 'mode'; mode: ChatMode }
-  | { kind: 'create' };
+  | { kind: RowKind.Category; label: string }
+  | { kind: RowKind.Mode; mode: ChatMode }
+  | { kind: RowKind.Create };
 
 /**
  * The `/mode` modal. Modes are grouped under Default/Custom headings; ↑↓ move
@@ -66,22 +75,22 @@ export function ModePicker(props: ModePickerProps): React.ReactNode {
     const builtIn = props.modes.filter((mode) => !mode.custom);
     const custom = props.modes.filter((mode) => mode.custom);
     const result: Row[] = [];
-    result.push({ kind: 'category', label: BUILT_IN_MODE_CATEGORY });
-    for (const mode of builtIn) result.push({ kind: 'mode', mode });
+    result.push({ kind: RowKind.Category, label: BUILT_IN_MODE_CATEGORY });
+    for (const mode of builtIn) result.push({ kind: RowKind.Mode, mode });
     if (custom.length > 0) {
-      result.push({ kind: 'category', label: CUSTOM_MODE_CATEGORY });
-      for (const mode of custom) result.push({ kind: 'mode', mode });
+      result.push({ kind: RowKind.Category, label: CUSTOM_MODE_CATEGORY });
+      for (const mode of custom) result.push({ kind: RowKind.Mode, mode });
     }
-    result.push({ kind: 'create' });
+    result.push({ kind: RowKind.Create });
     return result;
   }, [props.modes]);
 
   const isSelectable = (index: number): boolean =>
-    rows[index]?.kind !== 'category';
+    rows[index]?.kind !== RowKind.Category;
 
   const firstSelectable = useMemo(() => {
     const fromActive = rows.findIndex(
-      (row) => row.kind === 'mode' && row.mode.id === props.activeModeId
+      (row) => row.kind === RowKind.Mode && row.mode.id === props.activeModeId
     );
     if (fromActive >= 0) return fromActive;
     return rows.findIndex((_, index) => isSelectable(index));
@@ -128,14 +137,24 @@ export function ModePicker(props: ModePickerProps): React.ReactNode {
       move(-1);
       return;
     }
+    if (key.name === KeyName.X) {
+      const row = rows[focusedIndex];
+      // Only custom modes are deletable; built-ins are permanent.
+      if (row?.kind === RowKind.Mode && row.mode.custom) {
+        props.onDelete?.(row.mode.id);
+        // Keep the cursor on a valid row after the list shrinks.
+        move(-1);
+      }
+      return;
+    }
     if (key.name === KeyName.Return) {
       const row = rows[focusedIndex];
       if (!row) return;
-      if (row.kind === 'create') {
+      if (row.kind === RowKind.Create) {
         setStep('name');
         return;
       }
-      if (row.kind === 'mode') {
+      if (row.kind === RowKind.Mode) {
         props.onSelect(row.mode.id);
       }
     }
@@ -221,12 +240,16 @@ export function ModePicker(props: ModePickerProps): React.ReactNode {
         <text fg="cyan" attributes={BOLD}>
           Select a mode
         </text>
-        <text fg={MUTED}>↑↓ move · enter select · esc cancel</text>
+        <text fg={MUTED}>
+          ↑↓ move · enter select
+          {props.modes.some((mode) => mode.custom) ? ' · x delete custom' : ''}
+          {' · esc cancel'}
+        </text>
       </box>
 
       <box flexDirection="column">
         {rows.map((row, index) => {
-          if (row.kind === 'category') {
+          if (row.kind === RowKind.Category) {
             return (
               <text key={`cat:${row.label}`} fg={MUTED} attributes={BOLD}>
                 {'  '}
@@ -235,7 +258,7 @@ export function ModePicker(props: ModePickerProps): React.ReactNode {
             );
           }
           const isFocused = index === focusedIndex;
-          if (row.kind === 'create') {
+          if (row.kind === RowKind.Create) {
             return (
               <box key="create" flexDirection="row" marginTop={1}>
                 <text

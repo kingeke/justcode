@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createConversation } from '@core/domain/conversation';
+import { SubAgentRunStatus, SubAgentType } from '@core/domain/sub-agent';
 import { createMessage } from '@core/domain/message';
 import {
   FileConversationRepository,
@@ -54,6 +55,34 @@ describe('FileConversationRepository', () => {
       content: 'thinking aloud',
       durationMs: 123,
     });
+  });
+
+  it('round-trips sub agent runs with the conversation', async () => {
+    const repository = new FileConversationRepository(directory);
+    const conversation = createConversation('sub-agent-session');
+    conversation.subAgentRuns = [
+      {
+        id: 'call-1',
+        agentType: SubAgentType.Explorer,
+        description: 'Find the bug',
+        prompt: 'Locate the bug and report it.',
+        status: SubAgentRunStatus.Completed,
+        messages: [createMessage('user', 'Locate the bug and report it.')],
+        startedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+        summary: 'bug found in auth.ts',
+      },
+    ];
+
+    await repository.save(conversation);
+    const reloaded = await repository.load('sub-agent-session');
+
+    expect(reloaded.subAgentRuns).toHaveLength(1);
+    expect(reloaded.subAgentRuns?.[0]?.status).toBe(
+      SubAgentRunStatus.Completed
+    );
+    expect(reloaded.subAgentRuns?.[0]?.summary).toBe('bug found in auth.ts');
+    expect(reloaded.subAgentRuns?.[0]?.messages).toHaveLength(1);
   });
 
   it('lists saved sessions sorted by most recent activity', async () => {

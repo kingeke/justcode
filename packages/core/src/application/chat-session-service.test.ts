@@ -16,7 +16,13 @@ import {
 } from '@core/ports/chat-model';
 import { ProviderId } from '@core/ports/provider-catalog';
 import type { ConversationRepository } from '@core/ports/conversation-repository';
-import type { Tool } from '@core/ports/tool';
+import type { Tool, ToolExecutionContext } from '@core/ports/tool';
+import {
+  SubAgentActivityPhase,
+  SubAgentRunStatus,
+  SubAgentType,
+  type SubAgentActivityEvent,
+} from '@core/domain/sub-agent';
 import { LazyLoadToolsTool } from '@runtime/tools/lazy-load-tools-tool';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 import {
@@ -248,7 +254,143 @@ function createTitleGeneratingProvider(): ProviderClient {
   };
 }
 
+/** A stub `task`-style tool that records and reports a sub agent run. */
+class SubAgentRecordingTool implements Tool {
+  public readonly requiresApproval = false;
+  public receivedModel: string | undefined;
+  public receivedToolCallId: string | undefined;
+  public readonly definition = {
+    name: 'task',
+    description: 'delegates a task',
+    parameters: { type: 'object' },
+  };
+
+  public describe(): { title: string } {
+    return { title: 'task' };
+  }
+
+  public async execute(
+    _rawArguments: string,
+    context: ToolExecutionContext
+  ): Promise<{ content: string }> {
+    this.receivedModel = context.model;
+    this.receivedToolCallId = context.toolCallId;
+    context.recordSubAgentRun?.({
+      id: context.toolCallId ?? 'run-1',
+      agentType: SubAgentType.Explorer,
+      description: 'Find the bug',
+      prompt: 'find it',
+      status: SubAgentRunStatus.Completed,
+      messages: [],
+      startedAt: new Date().toISOString(),
+      summary: 'found it',
+    });
+    context.onSubAgentActivity?.({
+      phase: SubAgentActivityPhase.End,
+      runId: context.toolCallId ?? 'run-1',
+      agentType: SubAgentType.Explorer,
+      description: 'Find the bug',
+      status: SubAgentRunStatus.Completed,
+    });
+    return { content: 'found it' };
+  }
+}
+
 describe('ChatSessionService', () => {
+  it('runs multiple task calls in the same batch concurrently', async () => {
+    const repository = new InMemoryConversationRepository();
+    // A task tool whose two executions overlap only if they run in parallel:
+    // each records its start, then waits until both have started.
+    let started = 0;
+    let releaseAll: (() => void) | undefined;
+    const bothStarted = new Promise<void>((resolve) => {
+      releaseAll = () => resolve();
+    });
+    const tool: Tool = {
+      requiresApproval: false,
+      definition: {
+        name: 'task',
+        description: 'delegates',
+        parameters: { type: 'object' },
+      },
+      describe: () => ({ title: 'task' }),
+      execute: async () => {
+        started += 1;
+        if (started === 2) releaseAll?.();
+        await bothStarted;
+        return { content: 'done' };
+      },
+    };
+    let turn = 0;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat(): Promise<ChatResult> {
+        turn += 1;
+        if (turn === 1) {
+          return {
+            content: '',
+            toolCalls: [
+              { id: 'call-1', name: 'task', arguments: '{}' },
+              { id: 'call-2', name: 'task', arguments: '{}' },
+            ],
+          };
+        }
+        return { content: 'All done.' };
+      },
+      async listModels() {
+        return [];
+      },
+      getDefaultModel() {
+        return undefined;
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry: new ToolRegistry([tool]),
+      getLazyToolLoadingEnabled: () => false,
+    });
+
+    const result = await service.submitMessage({
+      conversation: titledConversation('session-1'),
+      model: 'gpt',
+      content: 'delegate twice',
+    });
+
+    // Sequential execution would deadlock (the first call waits forever for
+    // the second to start); completing at all proves they ran concurrently.
+    expect(result.reply).toBe('All done.');
+    expect(started).toBe(2);
+  });
+
+  it('threads model, tool call id, and sub agent recording into tool execution', async () => {
+    const repository = new InMemoryConversationRepository();
+    const tool = new SubAgentRecordingTool();
+    const events: SubAgentActivityEvent[] = [];
+    const service = new ChatSessionService(
+      repository,
+      createToolCallingProvider('task', '{}'),
+      {
+        toolRegistry: new ToolRegistry([tool]),
+        getLazyToolLoadingEnabled: () => false,
+      }
+    );
+
+    const result = await service.submitMessage({
+      conversation: titledConversation('session-1'),
+      model: 'gpt',
+      content: 'delegate this',
+      onSubAgentActivity: (event) => events.push(event),
+    });
+
+    expect(tool.receivedModel).toBe('gpt');
+    expect(tool.receivedToolCallId).toBe('call-1');
+    expect(events).toHaveLength(1);
+    expect(events[0]?.status).toBe(SubAgentRunStatus.Completed);
+    // The run is persisted with the turn (and on the returned conversation).
+    expect(result.conversation.subAgentRuns).toHaveLength(1);
+    expect(result.conversation.subAgentRuns?.[0]?.summary).toBe('found it');
+    expect(repository.conversation.subAgentRuns).toHaveLength(1);
+  });
+
   it('loads available models and picks the first model when none is requested', async () => {
     const service = new ChatSessionService(
       new InMemoryConversationRepository(),

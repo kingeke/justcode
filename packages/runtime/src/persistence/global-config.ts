@@ -19,6 +19,10 @@ export interface GlobalConfig {
   planSystemPrompt?: string;
   /** Compaction summarization prompt; falls back to the built-in when unset. */
   compactPrompt?: string;
+  /** Explorer sub agent system prompt; falls back to the built-in when unset. */
+  explorerSubAgentPrompt?: string;
+  /** General sub agent system prompt; falls back to the built-in when unset. */
+  generalSubAgentPrompt?: string;
   /**
    * Auto-compact the conversation when the last request used at least this
    * percent of the model's context window. 0 disables auto-compact; unset

@@ -45,10 +45,17 @@ import {
   getInterruptedConversation,
   type ChatSessionService,
   type StartSessionResult,
+  ToolActivityPhase,
   type ToolActivityEvent,
   type ToolApprovalRequest,
 } from '@core/application/chat-session-service';
 import type { UserQuestionRequest } from '@core/ports/tool';
+import {
+  SubAgentActivityPhase,
+  SubAgentRunStatus,
+  type SubAgentActivityEvent,
+  type SubAgentType,
+} from '@core/domain/sub-agent';
 import {
   createConversation,
   type Conversation,
@@ -219,6 +226,14 @@ interface ChatAppProps {
     name: string,
     systemPrompt?: string
   ) => { modes: ChatMode[]; modeId: string } | null;
+  /**
+   * Delete a custom mode. The host persists the removal (switching to Build
+   * when the deleted mode was active) and returns the updated mode list and the
+   * now-active mode id, or null when the id isn't a deletable custom mode.
+   */
+  onDeleteMode?: (
+    modeId: string
+  ) => { modes: ChatMode[]; modeId: string } | null;
   initialMaxReadLines?: number;
   onMaxReadLinesChange?: (lines: number) => void;
   initialMaxHistoryMessages?: number;
@@ -236,6 +251,18 @@ interface ChatAppProps {
     modelId: string,
     effort: ReasoningEffort | 'off'
   ) => void;
+}
+
+/** One sub agent run's live progress, shown in the sub agent panel. */
+interface SubAgentPanelEntry {
+  runId: string;
+  agentType: SubAgentType;
+  description: string;
+  toolUseCount: number;
+  latestActivity?: string;
+  status: SubAgentRunStatus;
+  startedAt: number;
+  endedAt?: number;
 }
 
 interface PendingApproval {
@@ -956,6 +983,13 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   // running turn to steer the model at the next round-trip (see drainSteering),
   // and any left over when the turn ends are sent together as the next turn.
   const [queuedMessages, setQueuedMessages] = useState<string[]>([]);
+  // Live progress of the sub agents spawned by this turn's `task` tool calls,
+  // rendered as a view-only panel above the prompt while any of them exist.
+  // Cleared at the start of the next turn; full transcripts persist on the
+  // conversation's `subAgentRuns` for later review.
+  const [subAgentActivity, setSubAgentActivity] = useState<
+    SubAgentPanelEntry[]
+  >([]);
   // Mirrors queuedMessages so the steering callback (captured once when a turn
   // starts) always reads the latest queue rather than a stale snapshot.
   const queuedMessagesRef = useRef<string[]>([]);
@@ -2710,6 +2744,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
     setError(null);
     setIsSending(true);
+    // A new turn starts with a clean sub agent panel; finished runs from the
+    // previous turn stay reviewable in the persisted conversation.
+    setSubAgentActivity([]);
     // Show the user's message immediately, before the model starts responding.
     const optimisticUserMessage = createMessage(
       'user',
@@ -2824,7 +2861,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     };
 
     const onToolActivity = (event: ToolActivityEvent): void => {
-      if (event.phase === 'start') {
+      if (event.phase === ToolActivityPhase.Start) {
         // A tool call is the model's first output for turns that act before they
         // speak (no streamed prose/thinking). Mark first-token here too, so TTFT
         // settles instead of climbing like a stopwatch for the whole turn.
@@ -2897,6 +2934,47 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       );
     };
 
+    // Upserts a run's live progress into the sub agent panel as `task` sub
+    // agents start, use tools, and finish.
+    const onSubAgentActivity = (event: SubAgentActivityEvent): void => {
+      setSubAgentActivity((prev) => {
+        const existing = prev.find((entry) => entry.runId === event.runId);
+        if (!existing) {
+          return [
+            ...prev,
+            {
+              runId: event.runId,
+              agentType: event.agentType,
+              description: event.description,
+              toolUseCount: event.toolUseCount ?? 0,
+              ...(event.latestActivity
+                ? { latestActivity: event.latestActivity }
+                : {}),
+              status: event.status ?? SubAgentRunStatus.Running,
+              startedAt: Date.now(),
+            },
+          ];
+        }
+        return prev.map((entry) =>
+          entry.runId === event.runId
+            ? {
+                ...entry,
+                toolUseCount: event.toolUseCount ?? entry.toolUseCount,
+                ...(event.latestActivity
+                  ? { latestActivity: event.latestActivity }
+                  : {}),
+                ...(event.phase === SubAgentActivityPhase.End
+                  ? {
+                      status: event.status ?? SubAgentRunStatus.Completed,
+                      endedAt: Date.now(),
+                    }
+                  : {}),
+              }
+            : entry
+        );
+      });
+    };
+
     // Update the metrics line as each model response arrives, instead of waiting
     // for the whole (possibly multi-step) turn to finish. `stepUsage` is this
     // response's usage, not the running total, so we accumulate it.
@@ -2955,6 +3033,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         requestUserInput,
         onUsage,
         onToolActivity,
+        onSubAgentActivity,
         drainSteering: () => {
           const queued = queuedMessagesRef.current;
           if (queued.length === 0) return null;
@@ -3387,6 +3466,17 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           setActiveMode(result.modeId);
           const created = result.modes.find((m) => m.id === result.modeId);
           setStatus(`Mode: ${created?.name ?? name}`);
+        }}
+        onDelete={(modeId) => {
+          const deleted = modes.find((m) => m.id === modeId);
+          const result = props.onDeleteMode?.(modeId);
+          if (!result) {
+            setStatus('Could not delete mode');
+            return;
+          }
+          setModes(result.modes);
+          setActiveMode(result.modeId);
+          setStatus(`Deleted mode: ${deleted?.name ?? modeId}`);
         }}
         onCancel={() => setShowModePicker(false)}
       />
@@ -3966,6 +4056,61 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           </box>
         ) : null}
 
+        {subAgentActivity.length > 0 ? (
+          <box
+            marginTop={1}
+            flexShrink={0}
+            flexDirection="column"
+            border
+            borderStyle="rounded"
+            borderColor={MUTED}
+            paddingX={1}
+          >
+            <text fg={MUTED}>
+              {`${subAgentActivity.length} sub agent${
+                subAgentActivity.length === 1 ? '' : 's'
+              } · transcripts saved with the session`}
+            </text>
+            {subAgentActivity.map((entry) => (
+              <text
+                key={entry.runId}
+                content={
+                  new StyledText([
+                    tc(`${subAgentStatusGlyph(entry.status)} `, {
+                      fg: subAgentStatusColor(entry.status),
+                    }),
+                    tc(`${entry.agentType}  `, { fg: MUTED }),
+                    tc(entry.description, { fg: 'white' }),
+                    tc(
+                      entry.toolUseCount > 0
+                        ? `  ${entry.toolUseCount} tool use${
+                            entry.toolUseCount === 1 ? '' : 's'
+                          }`
+                        : '',
+                      { fg: MUTED }
+                    ),
+                    tc(
+                      entry.status === SubAgentRunStatus.Running
+                        ? entry.latestActivity
+                          ? ` · ${entry.latestActivity}`
+                          : ' · starting…'
+                        : entry.endedAt
+                          ? ` · ${Math.max(
+                              1,
+                              Math.round(
+                                (entry.endedAt - entry.startedAt) / 1000
+                              )
+                            )}s`
+                          : '',
+                      { fg: MUTED }
+                    ),
+                  ])
+                }
+              />
+            ))}
+          </box>
+        ) : null}
+
         {queuedMessages.length > 0 ? (
           <box
             marginTop={1}
@@ -4474,6 +4619,32 @@ function summarizeToolArgs(rawArguments: string): string {
     return keys.length ? keys.join(', ') : '';
   } catch {
     return truncate(rawArguments, 40);
+  }
+}
+
+function subAgentStatusGlyph(status: SubAgentRunStatus): string {
+  switch (status) {
+    case SubAgentRunStatus.Running:
+      return '◐';
+    case SubAgentRunStatus.Completed:
+      return '●';
+    case SubAgentRunStatus.Failed:
+      return '✗';
+    case SubAgentRunStatus.Aborted:
+      return '○';
+  }
+}
+
+function subAgentStatusColor(status: SubAgentRunStatus): string {
+  switch (status) {
+    case SubAgentRunStatus.Running:
+      return 'yellow';
+    case SubAgentRunStatus.Completed:
+      return 'green';
+    case SubAgentRunStatus.Failed:
+      return 'red';
+    case SubAgentRunStatus.Aborted:
+      return MUTED;
   }
 }
 

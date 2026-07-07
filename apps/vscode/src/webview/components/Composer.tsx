@@ -152,6 +152,8 @@ export interface ComposerProps {
   activeModeId: string;
   /** Switch the active mode. */
   onSelectMode: (modeId: string) => void;
+  /** Delete a custom mode (built-ins can never be deleted). */
+  onDeleteMode: (modeId: string) => void;
   /** Create a custom mode with a name and optional system prompt. */
   onCreateMode: (name: string, systemPrompt?: string) => void;
   /** Auto-compact when ctx usage reaches this percent of the window; 0 = off. */
@@ -1003,27 +1005,37 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                           {customModes.map((mode) => {
                             const isCurrent = mode.id === props.activeModeId;
                             return (
-                              <button
-                                key={mode.id}
-                                type="button"
-                                className="modes-item"
-                                onClick={() => {
-                                  props.onSelectMode(mode.id);
-                                  setShowModes(false);
-                                }}
-                              >
-                                <span
-                                  className={`tools-check ${isCurrent ? 'tools-check-on' : ''}`}
+                              <div key={mode.id} className="modes-item-row">
+                                <button
+                                  type="button"
+                                  className="modes-item"
+                                  onClick={() => {
+                                    props.onSelectMode(mode.id);
+                                    setShowModes(false);
+                                  }}
                                 >
-                                  {isCurrent ? '✓' : ''}
-                                </span>
-                                <span className="modes-item-icon">
-                                  <ModeIcon icon={mode.icon} />
-                                </span>
-                                <span className="modes-item-label">
-                                  {mode.name}
-                                </span>
-                              </button>
+                                  <span
+                                    className={`tools-check ${isCurrent ? 'tools-check-on' : ''}`}
+                                  >
+                                    {isCurrent ? '✓' : ''}
+                                  </span>
+                                  <span className="modes-item-icon">
+                                    <ModeIcon icon={mode.icon} />
+                                  </span>
+                                  <span className="modes-item-label">
+                                    {mode.name}
+                                  </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="modes-item-delete"
+                                  title={`Delete ${mode.name}`}
+                                  aria-label={`Delete ${mode.name}`}
+                                  onClick={() => props.onDeleteMode(mode.id)}
+                                >
+                                  ✕
+                                </button>
+                              </div>
                             );
                           })}
                         </div>

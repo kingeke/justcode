@@ -2,6 +2,8 @@ import {
   HostMessageType,
   ToolPhase,
   WebviewRole,
+  WebviewSubAgentPhase,
+  WebviewSubAgentStatus,
   type ApprovalRequestMessage,
   type HostToWebview,
   type UserInputRequestMessage,
@@ -140,6 +142,24 @@ export interface ChatState {
   /** Epoch ms of the current turn's first token, 0 until one arrives. */
   turnFirstTokenAt: number;
   tools: ToolActivity[];
+  /**
+   * Live view of the sub agents spawned by this turn's `task` calls, upserted
+   * from SubAgentActivity messages. Cleared when a new turn starts; finished
+   * runs stay listed until then so their reports remain reviewable.
+   */
+  subAgents: SubAgentRunView[];
+  /**
+   * The conversation's persisted sub agent runs (from the Ready snapshot), so
+   * a reopened session still lists them in the robot popup. Live runs from the
+   * current turn live in `subAgents`; the popup merges the two.
+   */
+  sessionSubAgents: SubAgentRunView[];
+  /**
+   * Fetched sub agent transcripts by run id (see the SubAgentTranscript
+   * message); populated on demand when the user opens a run's popup and
+   * refreshed while the run is live. Cleared alongside `subAgents`.
+   */
+  subAgentTranscripts: Record<string, WebviewMessage[]>;
   approval?: ApprovalRequestMessage | undefined;
   input?: UserInputRequestMessage | undefined;
   usage?: WebviewUsage | undefined;
@@ -211,6 +231,19 @@ export interface ChatState {
   fileSymbols: Record<string, string[]>;
 }
 
+/** One sub agent run as the webview renders it (see SubAgentPanel). */
+export interface SubAgentRunView {
+  runId: string;
+  agentType: string;
+  description: string;
+  toolUseCount: number;
+  latestActivity?: string | undefined;
+  status: WebviewSubAgentStatus;
+  summary?: string | undefined;
+  startedAt: number;
+  endedAt?: number | undefined;
+}
+
 export const initialState: ChatState = {
   status: ChatStatus.Loading,
   view: 'sessions',
@@ -231,6 +264,9 @@ export const initialState: ChatState = {
   turnStartedAt: 0,
   turnFirstTokenAt: 0,
   tools: [],
+  subAgents: [],
+  sessionSubAgents: [],
+  subAgentTranscripts: {},
   liveTurnItems: [],
   completedThinkingItems: [],
   autoApprove: false,
@@ -373,6 +409,20 @@ export function reducer(state: ChatState, action: Action): ChatState {
         turnStartedAt: action.busy ? (action.turnStartedAt ?? Date.now()) : 0,
         turnFirstTokenAt: action.busy ? (action.turnFirstTokenAt ?? 0) : 0,
         tools: [],
+        subAgents: [],
+        // The conversation's persisted runs, so reopening a session keeps its
+        // sub agents reviewable through the robot popup.
+        sessionSubAgents: (action.subAgents ?? []).map((run) => ({
+          runId: run.runId,
+          agentType: run.agentType,
+          description: run.description,
+          toolUseCount: run.toolUseCount,
+          status: run.status,
+          summary: run.summary,
+          startedAt: run.startedAt,
+          endedAt: run.endedAt,
+        })),
+        subAgentTranscripts: {},
         liveTurnItems: [],
         completedThinkingItems: [],
         approval: undefined,
@@ -543,6 +593,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
         turnStartedAt: Date.now(),
         turnFirstTokenAt: 0,
         tools: [],
+        subAgents: [],
+        subAgentTranscripts: {},
         liveTurnItems: [],
         completedThinkingItems: [],
         error: undefined,
@@ -565,6 +617,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
         turnStartedAt: Date.now(),
         turnFirstTokenAt: 0,
         tools: [],
+        subAgents: [],
+        subAgentTranscripts: {},
         liveTurnItems: [],
         completedThinkingItems: [],
         error: undefined,
@@ -603,6 +657,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
         turnStartedAt: Date.now(),
         turnFirstTokenAt: 0,
         tools: [],
+        subAgents: [],
+        subAgentTranscripts: {},
         liveTurnItems: [],
         completedThinkingItems: [],
         error: undefined,
@@ -648,6 +704,58 @@ export function reducer(state: ChatState, action: Action): ChatState {
             : flushedState.liveTurnItems,
       };
     }
+
+    case HostMessageType.SubAgentActivity: {
+      const existing = state.subAgents.find(
+        (run) => run.runId === action.runId
+      );
+      if (!existing) {
+        return {
+          ...state,
+          subAgents: [
+            ...state.subAgents,
+            {
+              runId: action.runId,
+              agentType: action.agentType,
+              description: action.description,
+              toolUseCount: action.toolUseCount ?? 0,
+              latestActivity: action.latestActivity,
+              status: action.status ?? WebviewSubAgentStatus.Running,
+              summary: action.summary,
+              startedAt: Date.now(),
+            },
+          ],
+        };
+      }
+      return {
+        ...state,
+        subAgents: state.subAgents.map((run) =>
+          run.runId === action.runId
+            ? {
+                ...run,
+                toolUseCount: action.toolUseCount ?? run.toolUseCount,
+                latestActivity: action.latestActivity ?? run.latestActivity,
+                ...(action.phase === WebviewSubAgentPhase.End
+                  ? {
+                      status: action.status ?? WebviewSubAgentStatus.Completed,
+                      summary: action.summary ?? run.summary,
+                      endedAt: Date.now(),
+                    }
+                  : {}),
+              }
+            : run
+        ),
+      };
+    }
+
+    case HostMessageType.SubAgentTranscript:
+      return {
+        ...state,
+        subAgentTranscripts: {
+          ...state.subAgentTranscripts,
+          [action.runId]: action.messages,
+        },
+      };
 
     case HostMessageType.ApprovalRequest:
       return { ...state, approval: action };

@@ -131,6 +131,21 @@ export function addCustomMode(
 }
 
 /**
+ * Removes a custom mode from a custom-mode map, returning the new map. Returns
+ * null when the id doesn't name a custom mode (built-ins can never be deleted).
+ * The input map is not mutated.
+ */
+export function removeCustomMode(
+  modeId: string,
+  existing: Record<string, CustomModeConfig> = {}
+): { customModes: Record<string, CustomModeConfig> } | null {
+  if (!existing[modeId]) return null;
+  const customModes = { ...existing };
+  delete customModes[modeId];
+  return { customModes };
+}
+
+/**
  * Resolves the system prompt for the active mode. Build/Ask/Plan each use the
  * user-editable prompt from config (`agentPrompt`/`askPrompt`/`planPrompt`),
  * every one falling back to its built-in default when unset. A custom mode uses

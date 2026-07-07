@@ -1,4 +1,5 @@
 import type { ChatMessage } from '@core/domain/message';
+import type { SubAgentRun } from '@core/domain/sub-agent';
 
 /**
  * The footer metrics of a session (ctx/cost/tok-s), persisted with the
@@ -54,6 +55,12 @@ export interface Conversation {
    * the legacy "gateway call loads everything" behavior).
    */
   activeTools?: string[];
+  /**
+   * Sub agent runs spawned by this conversation's `task` tool calls, each
+   * carrying its own full transcript. Never sent to the model — persisted so
+   * UIs can review what a sub agent did (including partially, mid-run).
+   */
+  subAgentRuns?: SubAgentRun[];
 }
 
 export function createConversation(

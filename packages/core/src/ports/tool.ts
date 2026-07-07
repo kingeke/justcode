@@ -4,6 +4,11 @@
  * knows how to advertise definitions, describe a pending call, and execute it.
  */
 
+import type {
+  SubAgentActivityEvent,
+  SubAgentRun,
+} from '@core/domain/sub-agent';
+
 /** A function definition advertised to the model (OpenAI function-calling shape). */
 export interface ToolDefinition {
   name: string;
@@ -35,6 +40,24 @@ export interface ToolExecutionContext {
    * tools that need it must handle its absence. Rejects if the user cancels.
    */
   askUser?: (request: UserQuestionRequest) => Promise<string>;
+  /**
+   * The id of the tool call being executed. Set by the agentic loop so tools
+   * that spawn sub agents (`task`) can link their run to the transcript row.
+   */
+  toolCallId?: string;
+  /**
+   * The model the current turn runs on, so a delegating tool (`task`) can run
+   * its sub agent on the same model. Set by the agentic loop.
+   */
+  model?: string;
+  /** Live sub agent progress sink, bridged by the agentic loop to the host. */
+  onSubAgentActivity?: (event: SubAgentActivityEvent) => void;
+  /**
+   * Upserts a sub agent run (by `id`) onto the conversation being persisted.
+   * Called on run start, as its transcript grows, and on completion so a crash
+   * or abort still leaves a reviewable partial transcript.
+   */
+  recordSubAgentRun?: (run: SubAgentRun) => void;
 }
 
 /**

@@ -63,6 +63,8 @@ export enum SettingsWebviewMessageType {
   SavePrompt = 'savePrompt',
   /** Create a new custom mode (name + optional prompt). */
   CreateMode = 'createMode',
+  /** Delete a custom mode (built-ins can never be deleted). */
+  DeleteMode = 'deleteMode',
   /** Open the raw `config.json` in a VS Code editor tab. */
   OpenConfigFile = 'openConfigFile',
   /** Ask the host for the installed skills (both scopes). */
@@ -356,6 +358,16 @@ export interface SettingsCreateModeMessage {
   prompt: string;
 }
 
+/**
+ * Delete a custom mode from the System Prompts tab. The host removes it from
+ * config (switching the active mode to Build when it was the deleted one) and
+ * replies with PromptSaveResult and a fresh Prompts list.
+ */
+export interface SettingsDeleteModeMessage {
+  type: SettingsWebviewMessageType.DeleteMode;
+  modeId: string;
+}
+
 /** Ask the host to open `config.json` in a VS Code editor tab. */
 export interface SettingsOpenConfigFileMessage {
   type: SettingsWebviewMessageType.OpenConfigFile;
@@ -407,6 +419,7 @@ export type SettingsWebviewToHost =
   | SettingsGetPromptsMessage
   | SettingsSavePromptMessage
   | SettingsCreateModeMessage
+  | SettingsDeleteModeMessage
   | SettingsOpenConfigFileMessage
   | SettingsGetSkillsMessage
   | SettingsAddSkillMessage

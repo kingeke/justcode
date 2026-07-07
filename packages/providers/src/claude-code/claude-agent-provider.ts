@@ -904,6 +904,18 @@ export class ClaudeAgentProvider implements ProviderClient {
     }
   }
 
+  /**
+   * Tears down the live session for `sessionId`, if any. Used by sub agent
+   * runs, which mint a throwaway session id per run so they get real tool
+   * calling — without this each finished run would leak a runtime process.
+   */
+  public closeSession(sessionId: string): void {
+    const bridge = this.sessions.get(sessionId);
+    if (!bridge) return;
+    this.dropBridge(bridge);
+    void bridge.query.return(undefined).catch(() => {});
+  }
+
   private dropBridge(bridge: SessionBridge): void {
     for (const [key, value] of this.sessions) {
       if (value === bridge) this.sessions.delete(key);

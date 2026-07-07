@@ -9,6 +9,7 @@ import {
   type ToolDisplay,
 } from '@core/domain/tool-metadata';
 import { type ProviderClient } from '@core/ports/chat-model';
+import type { Tool } from '@core/ports/tool';
 import { ProviderId } from '@core/ports/provider-catalog';
 import { WriteFileTool } from '@runtime/tools/write-file-tool';
 import { EditFileTool } from '@runtime/tools/edit-file-tool';
@@ -22,6 +23,8 @@ import { WebSearchTool } from '@runtime/tools/web-search-tool';
 import { QuestionTool } from '@runtime/tools/question-tool';
 import { ViewHistoryTool } from '@runtime/tools/view-history-tool';
 import { PresentPlanTool } from '@runtime/tools/present-plan-tool';
+import { TaskTool } from '@runtime/tools/task-tool';
+import { SubAgentType } from '@core/domain/sub-agent';
 import {
   ReadFileTool,
   DEFAULT_MAX_READ_LINES,
@@ -110,6 +113,11 @@ export interface RuntimeServices {
    * settings. Read per compaction, so it takes effect on the next `/compact`.
    */
   setCompactPrompt: (prompt: string) => void;
+  /**
+   * Replace a sub agent type's system prompt, used when the user edits it in
+   * settings. Read per run, so it takes effect on the next spawned sub agent.
+   */
+  setSubAgentPrompt: (type: SubAgentType, prompt: string) => void;
   /**
    * Replace the tool names advertised up front even under lazy loading. The host
    * sets this per chat mode (e.g. `['present_plan']` in Plan mode, `[]` in
@@ -234,7 +242,13 @@ export async function createRuntimeServices(
   // per mode — e.g. `present_plan` in Plan mode — so a mode-specific tool is
   // reachable from the first turn without loading the whole toolset).
   const eagerToolsSetting = { names: [] as string[] };
-  const builtInTools = [
+  // Mutable so a prompt edit (settings/config reload) reaches running sub
+  // agents: the task tool reads the map per run through the getter below.
+  const subAgentPromptSettings: Record<SubAgentType, string> = {
+    [SubAgentType.Explorer]: config.explorerSubAgentPrompt,
+    [SubAgentType.General]: config.generalSubAgentPrompt,
+  };
+  const builtInTools: Tool[] = [
     new WriteFileTool(workspaceFiles),
     new EditFileTool(workspaceFiles),
     new ApplyPatchTool(workspaceFiles),
@@ -248,6 +262,18 @@ export async function createRuntimeServices(
     new QuestionTool(),
     new ViewHistoryTool(),
     new PresentPlanTool(),
+    // Resolves its dependencies per run so sub agents always see the live
+    // provider and toolset (MCP tools included once they finish connecting).
+    new TaskTool(
+      () => ({
+        provider,
+        tools: toolRegistry.list(),
+        ...(provider.getDefaultModel()
+          ? { defaultModel: provider.getDefaultModel() as string }
+          : {}),
+      }),
+      (type) => subAgentPromptSettings[type]
+    ),
   ];
   const lazyLoadableTools: LazyLoadableToolDefinition[] = builtInTools.map(
     (tool) => ({
@@ -279,7 +305,7 @@ export async function createRuntimeServices(
   const manageableTools: ManageableToolInfo[] =
     TOOL_DISPLAY.flatMap(toManageable);
   const lazyLoadToolsTool = new LazyLoadToolsTool(lazyLoadableTools);
-  const toolRegistry = new ToolRegistry(
+  const toolRegistry: ToolRegistry = new ToolRegistry(
     [lazyLoadToolsTool, ...builtInTools],
     [
       {
@@ -407,6 +433,9 @@ export async function createRuntimeServices(
     },
     setCompactPrompt: (prompt: string) => {
       compactPromptSetting.value = prompt;
+    },
+    setSubAgentPrompt: (type: SubAgentType, prompt: string) => {
+      subAgentPromptSettings[type] = prompt;
     },
     setEagerlyAdvertisedTools: (names: string[]) => {
       eagerToolsSetting.names = names;

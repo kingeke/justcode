@@ -30,6 +30,10 @@ import type {
 } from '@core/ports/tool';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 import { ToolName } from '@core/domain/tool-name';
+import type {
+  SubAgentActivityEvent,
+  SubAgentRun,
+} from '@core/domain/sub-agent';
 import {
   type AdvertisedToolDefinition,
   type ToolRegistry,
@@ -86,8 +90,14 @@ export interface ToolApprovalRequest extends ToolInvocationView {
   toolName: string;
 }
 
+/** Lifecycle phase of a {@link ToolActivityEvent}. */
+export enum ToolActivityPhase {
+  Start = 'start',
+  End = 'end',
+}
+
 export interface ToolActivityEvent {
-  phase: 'start' | 'end';
+  phase: ToolActivityPhase;
   toolName: string;
   /** The tool call's id, so the UI can match a `start` event to its `end`. */
   toolCallId: string;
@@ -156,6 +166,11 @@ export interface SubmitMessageInput {
   /** Lets a tool prompt the user for input mid-turn (e.g. the question tool). */
   requestUserInput?: (request: UserQuestionRequest) => Promise<string>;
   onToolActivity?: (event: ToolActivityEvent) => void;
+  /**
+   * Fired as sub agents spawned by the `task` tool start, make progress, and
+   * finish, so hosts can render live sub agent activity.
+   */
+  onSubAgentActivity?: (event: SubAgentActivityEvent) => void;
   /**
    * Fired as soon as a session title is generated. The title call is awaited
    * before the main turn starts (folded into the first message's wait), so
@@ -619,6 +634,13 @@ export class ChatSessionService {
     // find gateway calls in history with nothing persisted and take the legacy
     // load-everything fallback, silently activating every tool.
     let gatewayCalledThisTurn = false;
+    // Sub agent runs recorded by `task` tool calls, seeded with the
+    // conversation's existing runs so this turn's save doesn't drop history.
+    // Upserted in place by the recorder handed to each tool call and persisted
+    // with the turn (including the abort path), so partial transcripts survive.
+    const subAgentRuns: SubAgentRun[] = [
+      ...(input.conversation.subAgentRuns ?? []),
+    ];
 
     // Title generation is a separate, short model call, awaited *before* the
     // main turn: the user is already waiting on their first message, so folding
@@ -846,13 +868,42 @@ export class ChatSessionService {
         stepThinking = '';
         stepThinkingStartedAt = 0;
 
+        // Sub agents are independent workers, so when the model requests
+        // several `task` calls in one batch they run concurrently — that's the
+        // point of delegating. They're started here and awaited in order below,
+        // so tool-result messages keep the batch's original order. All other
+        // tools stay strictly sequential (a bash after an edit must see it).
+        const parallelTaskResults = new Map<string, Promise<ToolResult>>();
+        if (
+          toolCalls.filter((call) => call.name === ToolName.Task).length > 1
+        ) {
+          for (const call of toolCalls) {
+            if (call.name !== ToolName.Task) continue;
+            const pending = this.runToolCall(
+              call,
+              input,
+              working,
+              activeToolNames,
+              subAgentRuns
+            );
+            // If an earlier call in the batch throws (abort), the later
+            // promises are never awaited — swallow their rejection on this
+            // side handle so it can't surface as an unhandled rejection. The
+            // stored promise still rejects normally when awaited below.
+            pending.catch(() => {});
+            parallelTaskResults.set(call.id, pending);
+          }
+        }
+
         for (const call of toolCalls) {
-          const toolResult = await this.runToolCall(
-            call,
-            input,
-            working,
-            activeToolNames
-          );
+          const toolResult = await (parallelTaskResults.get(call.id) ??
+            this.runToolCall(
+              call,
+              input,
+              working,
+              activeToolNames,
+              subAgentRuns
+            ));
           working.push(
             createMessage('tool', toolResult.content, new Date(), undefined, {
               toolCallId: call.id,
@@ -908,7 +959,8 @@ export class ChatSessionService {
             working,
             generatedTitle,
             activeToolNames,
-            gatewayCalledThisTurn
+            gatewayCalledThisTurn,
+            subAgentRuns
           );
           rememberInterruptedConversation(error, interrupted);
         } catch {
@@ -923,7 +975,8 @@ export class ChatSessionService {
       working,
       generatedTitle,
       activeToolNames,
-      gatewayCalledThisTurn
+      gatewayCalledThisTurn,
+      subAgentRuns
     );
 
     return {
@@ -943,7 +996,8 @@ export class ChatSessionService {
     working: ChatMessage[],
     generatedTitle: string | undefined,
     activeToolNames: Set<string>,
-    gatewayCalledThisTurn: boolean
+    gatewayCalledThisTurn: boolean,
+    subAgentRuns: SubAgentRun[] = []
   ): Promise<Conversation> {
     const updatedConversation: Conversation = {
       ...input.conversation,
@@ -962,6 +1016,10 @@ export class ChatSessionService {
       gatewayCalledThisTurn
         ? { activeTools: [...activeToolNames] }
         : {}),
+      // Persist sub agent transcripts so they stay reviewable across reloads.
+      // Left absent while no run has ever happened, so ordinary sessions don't
+      // grow the field.
+      ...(subAgentRuns.length > 0 ? { subAgentRuns } : {}),
     };
 
     // A title may have been persisted out of band since this turn started —
@@ -989,7 +1047,8 @@ export class ChatSessionService {
     call: ToolCall,
     input: SubmitMessageInput,
     history: ChatMessage[],
-    activeToolNames: Set<string>
+    activeToolNames: Set<string>,
+    subAgentRuns: SubAgentRun[] = []
   ): Promise<ToolResult> {
     throwIfAborted(input.signal);
     const tool = this.toolRegistry?.get(call.name);
@@ -1034,7 +1093,7 @@ export class ChatSessionService {
       ...(input.signal ? { signal: input.signal } : {}),
     });
     input.onToolActivity?.({
-      phase: 'start',
+      phase: ToolActivityPhase.Start,
       toolName: effectiveToolName,
       toolCallId: call.id,
       arguments: call.arguments,
@@ -1050,7 +1109,7 @@ export class ChatSessionService {
     if (call.name === ToolName.LazyLoadTools) {
       result = this.lazyLoadTools(call, activeToolNames);
       input.onToolActivity?.({
-        phase: 'end',
+        phase: ToolActivityPhase.End,
         toolName: effectiveToolName,
         toolCallId: call.id,
         arguments: call.arguments,
@@ -1062,7 +1121,7 @@ export class ChatSessionService {
     if (call.name === ToolName.ViewHistory) {
       result = this.viewHistory(call, history);
       input.onToolActivity?.({
-        phase: 'end',
+        phase: ToolActivityPhase.End,
         toolName: effectiveToolName,
         toolCallId: call.id,
         arguments: call.arguments,
@@ -1090,9 +1149,39 @@ export class ChatSessionService {
         ? (request: UserQuestionRequest): Promise<string> =>
             awaitWithAbort(requestUserInput(request), input.signal)
         : undefined;
+      // Upserts a sub agent run (by id) into this turn's collection and
+      // best-effort persists it on status changes (start/finish), so a crash
+      // mid-run still leaves a reviewable partial transcript on disk.
+      const recordSubAgentRun = (run: SubAgentRun): void => {
+        const index = subAgentRuns.findIndex(
+          (existing) => existing.id === run.id
+        );
+        const statusChanged =
+          index === -1 || subAgentRuns[index]?.status !== run.status;
+        if (index === -1) subAgentRuns.push(run);
+        else subAgentRuns[index] = run;
+        if (statusChanged) {
+          void this.repository
+            .save({
+              ...input.conversation,
+              messages: history,
+              subAgentRuns,
+              updatedAt: new Date().toISOString(),
+            })
+            .catch(() => {
+              // Best-effort: the turn's final persist is authoritative.
+            });
+        }
+      };
       try {
         result = await tool.execute(call.arguments, {
           workspaceRoot: this.workspaceRoot,
+          toolCallId: call.id,
+          model: input.model,
+          recordSubAgentRun,
+          ...(input.onSubAgentActivity
+            ? { onSubAgentActivity: input.onSubAgentActivity }
+            : {}),
           ...(input.signal ? { signal: input.signal } : {}),
           ...(askUser ? { askUser } : {}),
         });
@@ -1109,7 +1198,7 @@ export class ChatSessionService {
     }
 
     input.onToolActivity?.({
-      phase: 'end',
+      phase: ToolActivityPhase.End,
       toolName: effectiveToolName,
       toolCallId: call.id,
       arguments: call.arguments,

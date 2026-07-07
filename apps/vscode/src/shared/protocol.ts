@@ -16,6 +16,9 @@ export enum HostMessageType {
   Token = 'token',
   Thinking = 'thinking',
   ToolActivity = 'toolActivity',
+  /** Live progress of a sub agent spawned by the `task` tool. */
+  SubAgentActivity = 'subAgentActivity',
+  SubAgentTranscript = 'subAgentTranscript',
   ApprovalRequest = 'approvalRequest',
   UserInputRequest = 'userInputRequest',
   UsageUpdate = 'usageUpdate',
@@ -68,6 +71,8 @@ export enum WebviewMessageType {
   SetDisabledTools = 'setDisabledTools',
   SelectMode = 'selectMode',
   CreateMode = 'createMode',
+  /** Delete a custom mode (built-ins can never be deleted). */
+  DeleteMode = 'deleteMode',
   /** Write the plan to a new markdown file, open it, and switch to Build mode. */
   EditPlan = 'editPlan',
   ListSessions = 'listSessions',
@@ -85,6 +90,7 @@ export enum WebviewMessageType {
   SaveResolvedFiles = 'saveResolvedFiles',
   SyncSteeringQueue = 'syncSteeringQueue',
   RequestWorkspaceFiles = 'requestWorkspaceFiles',
+  RequestSubAgentTranscript = 'requestSubAgentTranscript',
   RequestFileSymbols = 'requestFileSymbols',
 }
 
@@ -434,6 +440,11 @@ export interface ReadyMessage {
    * so resuming a chat doesn't resurface reviewed edits. Keyed by workspace path.
    */
   resolvedFiles: Record<string, WebviewResolvedFile>;
+  /**
+   * The conversation's persisted sub agent runs, so reopening a session keeps
+   * them reviewable (via the robot popup and the transcript modal).
+   */
+  subAgents?: WebviewSubAgentRunSnapshot[];
   sessionTitle?: string | undefined;
   /** Absolute path of the workspace folder backing this session. */
   workspaceRoot: string;
@@ -497,6 +508,68 @@ export interface ThinkingMessage {
 }
 
 /** Start or end of a tool invocation, so the UI can show live tool activity. */
+/** Mirrors `@core`'s `SubAgentActivityPhase` (kept dependency-free here). */
+export enum WebviewSubAgentPhase {
+  Start = 'start',
+  Progress = 'progress',
+  End = 'end',
+}
+
+/** Mirrors `@core`'s `SubAgentRunStatus` (kept dependency-free here). */
+export enum WebviewSubAgentStatus {
+  Running = 'running',
+  Completed = 'completed',
+  Failed = 'failed',
+  Aborted = 'aborted',
+}
+
+/**
+ * Live progress of a sub agent run, mirrored from the engine's
+ * `SubAgentActivityEvent` so the webview can render what each sub agent is
+ * doing while it works (and its report when it finishes).
+ */
+export interface SubAgentActivityMessage {
+  type: HostMessageType.SubAgentActivity;
+  phase: WebviewSubAgentPhase;
+  runId: string;
+  /** The sub agent type's raw id (e.g. "explorer", "general"). */
+  agentType: string;
+  description: string;
+  latestActivity?: string;
+  toolUseCount?: number;
+  status?: WebviewSubAgentStatus;
+  summary?: string;
+}
+
+/**
+ * A persisted sub agent run summarized for the webview, sent on Ready so a
+ * reopened conversation still lists its sub agents (the robot popup) and can
+ * open each run's transcript.
+ */
+export interface WebviewSubAgentRunSnapshot {
+  runId: string;
+  agentType: string;
+  description: string;
+  status: WebviewSubAgentStatus;
+  toolUseCount: number;
+  summary?: string;
+  /** Epoch ms, matching the live SubAgentRunView timestamps. */
+  startedAt: number;
+  endedAt?: number;
+}
+
+/**
+ * The full transcript of one sub agent run, sent in response to
+ * `RequestSubAgentTranscript`. `messages` reuses the main transcript's shape
+ * so the webview renders it with the same components; for a still-running sub
+ * agent the webview re-requests it on each activity event to stay live.
+ */
+export interface SubAgentTranscriptMessage {
+  type: HostMessageType.SubAgentTranscript;
+  runId: string;
+  messages: WebviewMessage[];
+}
+
 export interface ToolActivityMessage {
   type: HostMessageType.ToolActivity;
   phase: ToolPhase;
@@ -694,6 +767,8 @@ export type HostToWebview =
   | TokenMessage
   | ThinkingMessage
   | ToolActivityMessage
+  | SubAgentActivityMessage
+  | SubAgentTranscriptMessage
   | ApprovalRequestMessage
   | UserInputRequestMessage
   | UsageUpdateMessage
@@ -925,6 +1000,15 @@ export interface CreateModeMessage {
 }
 
 /**
+ * The user deleted a custom chat mode. The host removes it from config and,
+ * when it was active, switches to Build; a ModeUpdate reflects the new list.
+ */
+export interface DeleteModeMessage {
+  type: WebviewMessageType.DeleteMode;
+  modeId: string;
+}
+
+/**
  * Write the plan to a fresh markdown file (a non-colliding name in the workspace
  * root), open it for editing, and switch to Build mode so the user can refine
  * the plan and then send it back to start implementation.
@@ -1007,6 +1091,12 @@ export interface RequestWorkspaceFilesMessage {
   type: WebviewMessageType.RequestWorkspaceFiles;
 }
 
+/** Asks the host for a sub agent run's full transcript (see {@link SubAgentTranscriptMessage}). */
+export interface RequestSubAgentTranscriptMessage {
+  type: WebviewMessageType.RequestSubAgentTranscript;
+  runId: string;
+}
+
 /** Asks the host for a file's symbols, to drive `@path::method` completions. */
 export interface RequestFileSymbolsMessage {
   type: WebviewMessageType.RequestFileSymbols;
@@ -1047,11 +1137,13 @@ export type WebviewToHost =
   | SetDisabledToolsMessage
   | SelectModeMessage
   | CreateModeMessage
+  | DeleteModeMessage
   | EditPlanMessage
   | RevertFileMessage
   | SaveResolvedFilesMessage
   | SyncSteeringQueueMessage
   | RequestWorkspaceFilesMessage
+  | RequestSubAgentTranscriptMessage
   | RequestFileSymbolsMessage
   | OpenFileMessage
   | OpenDiffMessage

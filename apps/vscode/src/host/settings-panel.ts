@@ -9,7 +9,13 @@ import {
   PLAN_SYSTEM_PROMPT,
 } from '@core/application/system-prompt';
 import { DEFAULT_COMPACT_PROMPT } from '@core/application/compact-prompt';
-import { BUILT_IN_MODES, addCustomMode } from '@core/domain/chat-mode';
+import { SUB_AGENT_CONFIGS, SubAgentType } from '@core/domain/sub-agent';
+import {
+  BUILD_MODE_ID,
+  BUILT_IN_MODES,
+  addCustomMode,
+  removeCustomMode,
+} from '@core/domain/chat-mode';
 import {
   readGlobalConfig,
   writeGlobalConfig,
@@ -265,6 +271,9 @@ export class SettingsPanel {
       case SettingsWebviewMessageType.CreateMode:
         await this.createMode(message.name, message.prompt);
         return;
+      case SettingsWebviewMessageType.DeleteMode:
+        await this.deleteMode(message.modeId);
+        return;
       case SettingsWebviewMessageType.OpenConfigFile:
         await this.openConfigFile();
         return;
@@ -475,6 +484,39 @@ export class SettingsPanel {
   }
 
   /**
+   * Deletes a custom mode from the System Prompts tab. Built-ins are refused by
+   * `removeCustomMode`. When the deleted mode was the active one, the active
+   * mode falls back to Build so the chat never sits on a mode that no longer
+   * exists.
+   */
+  private async deleteMode(modeId: string): Promise<void> {
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    const removed = removeCustomMode(modeId, config.customModes ?? {});
+    if (!removed) {
+      this.post({
+        type: SettingsHostMessageType.PromptSaveResult,
+        modeId,
+        success: false,
+        error: 'Only custom modes can be deleted.',
+      });
+      return;
+    }
+    await writeGlobalConfig(configDir, {
+      ...config,
+      customModes: removed.customModes,
+      ...(config.mode === modeId ? { mode: BUILD_MODE_ID } : {}),
+    });
+    this.onPromptsChanged();
+    this.post({
+      type: SettingsHostMessageType.PromptSaveResult,
+      modeId,
+      success: true,
+    });
+    await this.sendPrompts();
+  }
+
+  /**
    * Opens the raw `config.json` in a VS Code editor tab, seeding the file first
    * if it doesn't exist yet so the editor doesn't open on a missing path.
    */
@@ -664,13 +706,23 @@ const BUILT_IN_PROMPTS: Record<
       | 'systemPrompt'
       | 'askSystemPrompt'
       | 'planSystemPrompt'
-      | 'compactPrompt';
+      | 'compactPrompt'
+      | 'explorerSubAgentPrompt'
+      | 'generalSubAgentPrompt';
   }
 > = {
   build: { default: DEFAULT_SYSTEM_PROMPT, configKey: 'systemPrompt' },
   ask: { default: ASK_SYSTEM_PROMPT, configKey: 'askSystemPrompt' },
   plan: { default: PLAN_SYSTEM_PROMPT, configKey: 'planSystemPrompt' },
   compact: { default: DEFAULT_COMPACT_PROMPT, configKey: 'compactPrompt' },
+  'subagent-explorer': {
+    default: SUB_AGENT_CONFIGS[SubAgentType.Explorer].systemPrompt,
+    configKey: 'explorerSubAgentPrompt',
+  },
+  'subagent-general': {
+    default: SUB_AGENT_CONFIGS[SubAgentType.General].systemPrompt,
+    configKey: 'generalSubAgentPrompt',
+  },
 };
 
 /**
@@ -710,6 +762,27 @@ function listPromptInfos(config: GlobalConfig): SettingsPromptInfo[] {
         },
       ]
     : [];
+  // Sub agent prompts aren't chat modes either, but they're editable (and
+  // reset) the same way, so they ride along after Compaction.
+  const subAgents = (
+    [
+      ['subagent-explorer', 'Explorer sub agent'],
+      ['subagent-general', 'General sub agent'],
+    ] as const
+  ).flatMap(([id, name]) => {
+    const entry = BUILT_IN_PROMPTS[id];
+    if (!entry) return [];
+    const override = config[entry.configKey];
+    return [
+      {
+        id,
+        name,
+        custom: false,
+        prompt: override ?? entry.default,
+        overridden: override !== undefined && override !== entry.default,
+      },
+    ];
+  });
   const custom = Object.entries(config.customModes ?? {}).map(
     ([id, modeConfig]) => ({
       id,
@@ -719,7 +792,7 @@ function listPromptInfos(config: GlobalConfig): SettingsPromptInfo[] {
       overridden: false,
     })
   );
-  return [...builtIns, ...compact, ...custom];
+  return [...builtIns, ...compact, ...subAgents, ...custom];
 }
 
 /**

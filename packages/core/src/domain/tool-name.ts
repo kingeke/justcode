@@ -18,4 +18,5 @@ export enum ToolName {
   WebSearch = 'websearch',
   Question = 'question',
   PresentPlan = 'present_plan',
+  Task = 'task',
 }

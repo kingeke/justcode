@@ -96,6 +96,12 @@ export const TOOL_DISPLAY: ToolDisplay[] = [
     summary: 'Read earlier conversation history',
   },
   {
+    name: ToolName.Task,
+    label: 'task',
+    category: BUILT_IN_TOOL_CATEGORY,
+    summary: 'Delegate a task to a sub agent',
+  },
+  {
     name: ToolName.PresentPlan,
     label: 'present_plan',
     category: BUILT_IN_TOOL_CATEGORY,

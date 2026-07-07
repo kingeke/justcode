@@ -282,6 +282,15 @@ export function SettingsApp(): React.JSX.Element {
     });
   };
 
+  const deleteMode = (modeId: string): void => {
+    setPromptSaving(true);
+    setPromptSaveState(undefined);
+    postSettingsToHost({
+      type: SettingsWebviewMessageType.DeleteMode,
+      modeId,
+    });
+  };
+
   const saveMcpConfig = (content: string): void => {
     setMcpSaving(true);
     setMcpSaveState(undefined);
@@ -415,6 +424,7 @@ export function SettingsApp(): React.JSX.Element {
               saveState={promptSaveState}
               onSave={savePrompt}
               onCreate={createMode}
+              onDelete={deleteMode}
             />
           ) : (
             <AboutTab appInfo={appInfo} />
@@ -1735,12 +1745,14 @@ function PromptsTab({
   saveState,
   onSave,
   onCreate,
+  onDelete,
 }: {
   prompts: SettingsPromptInfo[] | undefined;
   saving: boolean;
   saveState: PromptSaveState | undefined;
   onSave: (modeId: string, prompt: string) => void;
   onCreate: (name: string, prompt: string) => void;
+  onDelete: (modeId: string) => void;
 }): React.JSX.Element {
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = React.useState(false);
@@ -1754,22 +1766,44 @@ function PromptsTab({
     );
   }
 
-  const builtIns = prompts.filter((p) => !p.custom);
+  const subAgents = prompts.filter(
+    (p) => !p.custom && p.id.startsWith('subagent-')
+  );
+  const builtIns = prompts.filter(
+    (p) => !p.custom && !p.id.startsWith('subagent-')
+  );
   const custom = prompts.filter((p) => p.custom);
 
   return (
     <div className="settings-section">
       <h2 className="settings-section-title">System Prompts</h2>
       <p className="settings-hint">
-        Each chat mode sends its own system prompt, and Compaction is the prompt
-        used to summarize a conversation when it's compacted. Edit any of them
-        here — including the built-in defaults. Changes apply to the next
-        message.
+        Each chat mode sends its own system prompt, Compaction is the prompt
+        used to summarize a conversation when it's compacted, and the sub agent
+        prompts steer agents spawned by the task tool. Edit any of them here —
+        including the built-in defaults. Changes apply to the next message.
       </p>
 
       <div className="settings-subhead">Built-in prompts</div>
       <div className="provider-list">
         {builtIns.map((prompt) => (
+          <PromptCard
+            key={prompt.id}
+            prompt={prompt}
+            expanded={expandedId === prompt.id}
+            onToggle={() =>
+              setExpandedId(expandedId === prompt.id ? null : prompt.id)
+            }
+            saving={saving}
+            saveState={saveState?.modeId === prompt.id ? saveState : undefined}
+            onSave={onSave}
+          />
+        ))}
+      </div>
+
+      <div className="settings-subhead">Built-in sub-agents prompts</div>
+      <div className="provider-list">
+        {subAgents.map((prompt) => (
           <PromptCard
             key={prompt.id}
             prompt={prompt}
@@ -1797,6 +1831,7 @@ function PromptsTab({
             saving={saving}
             saveState={saveState?.modeId === prompt.id ? saveState : undefined}
             onSave={onSave}
+            onDelete={onDelete}
           />
         ))}
         <div className="provider-row-wrap">
@@ -1923,6 +1958,7 @@ function PromptCard({
   saving,
   saveState,
   onSave,
+  onDelete,
 }: {
   prompt: SettingsPromptInfo;
   expanded: boolean;
@@ -1930,8 +1966,11 @@ function PromptCard({
   saving: boolean;
   saveState: PromptSaveState | undefined;
   onSave: (modeId: string, prompt: string) => void;
+  /** Delete this custom mode; absent for built-ins (they can't be deleted). */
+  onDelete?: (modeId: string) => void;
 }): React.JSX.Element {
   const [draft, setDraft] = React.useState(prompt.prompt);
+  const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   // The host re-sends the list after each save (the source of truth on disk);
   // sync the editor to it then. Between pushes `prompt.prompt` is stable, so
   // typing is preserved.
@@ -1952,9 +1991,45 @@ function PromptCard({
               : `${prompt.prompt.length.toLocaleString()} characters`}
           </span>
         </div>
-        <button type="button" className="provider-action" onClick={onToggle}>
-          {expanded ? 'Close' : 'Edit'}
-        </button>
+        <div className="provider-row-buttons">
+          <button type="button" className="provider-action" onClick={onToggle}>
+            {expanded ? 'Close' : 'Edit'}
+          </button>
+          {prompt.custom && onDelete ? (
+            confirmingDelete ? (
+              <>
+                <button
+                  type="button"
+                  className="provider-action provider-action-danger"
+                  disabled={saving}
+                  onClick={() => {
+                    onDelete(prompt.id);
+                    setConfirmingDelete(false);
+                  }}
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  className="provider-action"
+                  onClick={() => setConfirmingDelete(false)}
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="provider-action"
+                disabled={saving}
+                title={`Delete the ${prompt.name} mode`}
+                onClick={() => setConfirmingDelete(true)}
+              >
+                Delete
+              </button>
+            )
+          ) : null}
+        </div>
       </div>
 
       {expanded ? (

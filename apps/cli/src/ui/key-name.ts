@@ -21,6 +21,7 @@ export enum KeyName {
   Y = 'y',
   A = 'a',
   N = 'n',
+  X = 'x',
 }
 
 const KEY_NAME_SET = new Set<string>([

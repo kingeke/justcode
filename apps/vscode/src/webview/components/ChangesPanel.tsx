@@ -16,7 +16,9 @@ import {
  * created, mirroring the per-message diffs into one place. Each file can be
  * Kept (accepted, removed from the panel) or Undone (reverted on disk via the
  * host), with Keep all / Undo all acting on every still-pending file.
- * Clicking a file opens the native VS Code diff view for it.
+ * Clicking a file opens the native VS Code diff view for it. The list shows
+ * about five rows and scrolls for the rest (see `.changes-list` in the CSS),
+ * so a big turn doesn't push the composer off screen.
  */
 export function ChangesPanel({
   files,

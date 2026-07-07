@@ -56,6 +56,7 @@ function baseProps(overrides: Partial<ComposerProps> = {}): ComposerProps {
     activeModeId: 'ask',
     onSelectMode: () => {},
     onCreateMode: () => {},
+    onDeleteMode: () => {},
     autoCompactThresholdPercent: 0,
     onSetAutoCompactThreshold: () => {},
     compacting: false,
