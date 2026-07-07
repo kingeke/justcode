@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createMessage } from '@core/domain/message';
+import { createMessage, MessageRole } from '@core/domain/message';
 import {
   parseOpenAiToolCalls,
   sanitizeToolCallName,
@@ -10,7 +10,7 @@ import {
 describe('toOpenAiWireMessages with images', () => {
   it('builds multi-part content with a data-URI image_url part', () => {
     const message = createMessage(
-      'user',
+      MessageRole.User,
       'describe this',
       new Date(),
       undefined,
@@ -29,7 +29,9 @@ describe('toOpenAiWireMessages with images', () => {
   });
 
   it('keeps the plain string form when there are no images', () => {
-    const [wire] = toOpenAiWireMessages([createMessage('user', 'hello')]);
+    const [wire] = toOpenAiWireMessages([
+      createMessage(MessageRole.User, 'hello'),
+    ]);
     expect(wire?.content).toBe('hello');
   });
 });

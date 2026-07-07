@@ -1,4 +1,5 @@
 import {
+  MessageRole,
   renderMessageContentForModel,
   type ChatMessage,
   type ToolCall,
@@ -51,12 +52,12 @@ export function toResponsesPayload(messages: ChatMessage[]): ResponsesPayload {
   const input: ResponsesInputItem[] = [];
 
   for (const message of messages) {
-    if (message.role === 'system') {
+    if (message.role === MessageRole.System) {
       if (message.content.trim()) instructions.push(message.content);
       continue;
     }
 
-    if (message.role === 'tool') {
+    if (message.role === MessageRole.Tool) {
       input.push({
         type: 'function_call_output',
         ...(message.toolCallId ? { call_id: message.toolCallId } : {}),
@@ -65,7 +66,7 @@ export function toResponsesPayload(messages: ChatMessage[]): ResponsesPayload {
       continue;
     }
 
-    if (message.role === 'assistant' && message.toolCalls?.length) {
+    if (message.role === MessageRole.Assistant && message.toolCalls?.length) {
       if (message.content.trim()) {
         input.push({
           type: 'message',
@@ -85,7 +86,7 @@ export function toResponsesPayload(messages: ChatMessage[]): ResponsesPayload {
     }
 
     const text = renderMessageContentForModel(message);
-    const isAssistant = message.role === 'assistant';
+    const isAssistant = message.role === MessageRole.Assistant;
     const content: ResponsesContentPart[] = [];
     if (!isAssistant) {
       for (const image of message.images ?? []) {

@@ -11,9 +11,9 @@ import {
 import { APP_NAME } from '@core/branding';
 import {
   createMessage,
+  MessageRole,
   type ChatMessage,
   type MessageAttachment,
-  type MessageRole,
 } from '@core/domain/message';
 import type {
   ModelInfo,
@@ -1095,7 +1095,7 @@ export class ChatBridge {
       return;
     }
     const index = conversation.messages.findIndex(
-      (m) => m.id === messageId && m.role === 'user'
+      (m) => m.id === messageId && m.role === MessageRole.User
     );
     if (index === -1) {
       this.post({
@@ -1409,7 +1409,7 @@ export class ChatBridge {
           // failed): rebuild the exchange from this bridge's streaming
           // buffers and save it ourselves.
           const userMessage = createMessage(
-            'user',
+            MessageRole.User,
             content,
             new Date(),
             undefined,
@@ -1426,7 +1426,7 @@ export class ChatBridge {
           const partialAssistant =
             streamedContent.trim() || trimmedThinking
               ? createMessage(
-                  'assistant',
+                  MessageRole.Assistant,
                   streamedContent,
                   new Date(),
                   undefined,
@@ -3029,8 +3029,9 @@ export function toSubAgentSnapshots(
     agentType: run.agentType,
     description: run.description,
     status: run.status as string as WebviewSubAgentStatus,
-    toolUseCount: run.messages.filter((message) => message.role === 'tool')
-      .length,
+    toolUseCount: run.messages.filter(
+      (message) => message.role === MessageRole.Tool
+    ).length,
     ...(run.summary !== undefined ? { summary: run.summary } : {}),
     startedAt: Date.parse(run.startedAt),
     ...(run.endedAt !== undefined ? { endedAt: Date.parse(run.endedAt) } : {}),
@@ -3055,8 +3056,12 @@ export async function toWebviewMessages(
     ...(conversation.previousMessages ?? []),
     ...conversation.messages,
   ]) {
-    if (message.role === 'system') continue;
-    if (message.role === 'assistant' && message.toolCalls?.length && services) {
+    if (message.role === MessageRole.System) continue;
+    if (
+      message.role === MessageRole.Assistant &&
+      message.toolCalls?.length &&
+      services
+    ) {
       for (const toolCall of message.toolCalls) {
         // Prefer the view captured while the tool ran: it holds the pre-edit
         // diff, which can't be recomputed once the file has changed on disk.
@@ -3078,7 +3083,7 @@ export async function toWebviewMessages(
       }
     }
     if (
-      message.role === 'assistant' &&
+      message.role === MessageRole.Assistant &&
       !message.content.trim() &&
       !message.thinking
     ) {
@@ -3092,10 +3097,10 @@ export async function toWebviewMessages(
       ...(message.llmReceivedAt
         ? { llmReceivedAt: message.llmReceivedAt }
         : {}),
-      ...(message.role === 'tool' && message.name
+      ...(message.role === MessageRole.Tool && message.name
         ? { toolName: message.name }
         : {}),
-      ...(message.role === 'tool' &&
+      ...(message.role === MessageRole.Tool &&
       message.toolCallId &&
       toolViewsByCallId.has(message.toolCallId)
         ? {
@@ -3107,7 +3112,7 @@ export async function toWebviewMessages(
         : {}),
       ...(message.thinking ? { thinking: message.thinking } : {}),
       ...(message.isCompactSummary ? { isCompactSummary: true } : {}),
-      ...(message.role === 'user' && message.images?.length
+      ...(message.role === MessageRole.User && message.images?.length
         ? {
             images: message.images.map((image) => ({
               mediaType: image.mediaType,
@@ -3134,13 +3139,13 @@ function autoCompactWarnMilestone(pointsLeft: number): number | null {
 
 function toWebviewRole(role: MessageRole): WebviewRole {
   switch (role) {
-    case 'user':
+    case MessageRole.User:
       return WebviewRole.User;
-    case 'assistant':
+    case MessageRole.Assistant:
       return WebviewRole.Assistant;
-    case 'tool':
+    case MessageRole.Tool:
       return WebviewRole.Tool;
-    case 'system':
+    case MessageRole.System:
       return WebviewRole.System;
   }
 }

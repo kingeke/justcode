@@ -6,7 +6,7 @@ import {
 } from '@core/application/chat-session-service';
 import { ToolRegistry } from '@core/application/tool-registry';
 import { createConversation } from '@core/domain/conversation';
-import { createMessage } from '@core/domain/message';
+import { createMessage, MessageRole } from '@core/domain/message';
 import {
   ReasoningEffort,
   ToolsUnsupportedError,
@@ -688,10 +688,10 @@ describe('ChatSessionService', () => {
       // (separate) sendChat and pollute the recorded counts.
       title: 'Existing',
       messages: [
-        createMessage('user', 'm1'),
-        createMessage('assistant', 'm2'),
-        createMessage('user', 'm3'),
-        createMessage('assistant', 'm4'),
+        createMessage(MessageRole.User, 'm1'),
+        createMessage(MessageRole.Assistant, 'm2'),
+        createMessage(MessageRole.User, 'm3'),
+        createMessage(MessageRole.Assistant, 'm4'),
       ],
     };
 
@@ -855,7 +855,9 @@ describe('ChatSessionService', () => {
 
   it('renames a session, persisting the trimmed title', async () => {
     const repository = new InMemoryConversationRepository();
-    repository.conversation.messages.push(createMessage('user', 'hi'));
+    repository.conversation.messages.push(
+      createMessage(MessageRole.User, 'hi')
+    );
     const service = new ChatSessionService(repository, createProviderStub());
 
     const updated = await service.renameSession('session-1', '  My chat  ');
@@ -1939,14 +1941,14 @@ describe('ChatSessionService', () => {
     // `activeTools` was ever persisted.
     const legacy = titledConversation('session-legacy');
     legacy.messages.push(
-      createMessage('user', 'do something', new Date()),
-      createMessage('assistant', '', new Date(), undefined, {
+      createMessage(MessageRole.User, 'do something', new Date()),
+      createMessage(MessageRole.Assistant, '', new Date(), undefined, {
         toolCalls: [
           { id: 'call-old', name: 'lazy_load_tools', arguments: '{}' },
         ],
       }),
       createMessage(
-        'tool',
+        MessageRole.Tool,
         'Tool loading acknowledged.',
         new Date(),
         undefined,
@@ -2037,10 +2039,10 @@ describe('compactSession', () => {
   function conversationWithHistory(): ReturnType<typeof createConversation> {
     const conversation = titledConversation('session-1');
     conversation.messages = [
-      createMessage('user', 'first question'),
-      createMessage('assistant', 'first answer'),
-      createMessage('user', 'second question'),
-      createMessage('assistant', 'second answer'),
+      createMessage(MessageRole.User, 'first question'),
+      createMessage(MessageRole.Assistant, 'first answer'),
+      createMessage(MessageRole.User, 'second question'),
+      createMessage(MessageRole.Assistant, 'second answer'),
     ];
     return conversation;
   }
@@ -2123,8 +2125,8 @@ describe('compactSession', () => {
 
     // A second compaction (after more turns) accumulates the prior epoch.
     first.conversation.messages.push(
-      createMessage('user', 'third question'),
-      createMessage('assistant', 'third answer')
+      createMessage(MessageRole.User, 'third question'),
+      createMessage(MessageRole.Assistant, 'third answer')
     );
     const second = await service.compactSession({
       conversation: first.conversation,
@@ -2148,7 +2150,7 @@ describe('compactSession', () => {
 
     const summaryOnly = titledConversation('session-1');
     summaryOnly.messages = [
-      createMessage('user', 'summary', new Date(), undefined, {
+      createMessage(MessageRole.User, 'summary', new Date(), undefined, {
         isCompactSummary: true,
       }),
     ];

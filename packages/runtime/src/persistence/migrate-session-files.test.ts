@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createConversation } from '@core/domain/conversation';
-import { createMessage } from '@core/domain/message';
+import { createMessage, MessageRole } from '@core/domain/message';
 import {
   FileConversationRepository,
   sessionFilePath,
@@ -40,7 +40,9 @@ describe('session split backfill', () => {
   async function writeLegacySession(sessionId: string): Promise<void> {
     const conversation = createConversation(sessionId);
     conversation.title = `title-${sessionId}`;
-    conversation.messages.push(createMessage('user', `hi from ${sessionId}`));
+    conversation.messages.push(
+      createMessage(MessageRole.User, `hi from ${sessionId}`)
+    );
     await writeFile(
       sessionFilePath(sessionsDir, sessionId),
       `${JSON.stringify(conversation, null, 2)}\n`,

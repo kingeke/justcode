@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
-export type MessageRole = 'system' | 'user' | 'assistant' | 'tool';
+export enum MessageRole {
+  System = 'system',
+  User = 'user',
+  Assistant = 'assistant',
+  Tool = 'tool',
+}
 
 export interface MessageAttachment {
   path: string;
@@ -113,7 +118,7 @@ export function markLlmReceived(
   receivedAt = new Date()
 ): void {
   for (const message of messages) {
-    if (message.role === 'user' && !message.llmReceivedAt) {
+    if (message.role === MessageRole.User && !message.llmReceivedAt) {
       message.llmReceivedAt = receivedAt.toISOString();
     }
   }

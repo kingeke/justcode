@@ -127,7 +127,7 @@ describe('chat app tool diff rendering', () => {
   it('preserves finished tool content across the final committed rerender when expand-tools is active', () => {
     expect(source).toContain('if (!expandTools || !prev) {');
     expect(source).toContain('const previousToolMessagesByCallId = new Map(');
-    expect(source).toContain("message.role === 'tool' &&");
+    expect(source).toContain('message.role === MessageRole.Tool &&');
     expect(source).toContain("message.content !== ''");
   });
 });

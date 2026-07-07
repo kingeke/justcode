@@ -11,10 +11,15 @@ import { OpenAiCompatibleProvider } from '@providers/openai-compatible/openai-co
 import { ProviderId } from '@core/ports/provider-catalog';
 import { setDebugLoggingEnabled } from '@core/application/debug-log';
 import { ReasoningEffort } from '@core/ports/chat-model';
-import type { ChatMessage } from '@core/domain/message';
+import { MessageRole, type ChatMessage } from '@core/domain/message';
 
 function userMessage(content: string): ChatMessage {
-  return { id: 'm1', role: 'user', content, createdAt: '2026-01-01T00:00:00Z' };
+  return {
+    id: 'm1',
+    role: MessageRole.User,
+    content,
+    createdAt: '2026-01-01T00:00:00Z',
+  };
 }
 
 /** The JSON request body the fetch mock was called with. */

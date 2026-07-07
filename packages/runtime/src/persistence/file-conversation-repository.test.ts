@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createConversation } from '@core/domain/conversation';
 import { SubAgentRunStatus, SubAgentType } from '@core/domain/sub-agent';
-import { createMessage } from '@core/domain/message';
+import { createMessage, MessageRole } from '@core/domain/message';
 import {
   FileConversationRepository,
   sessionFilePath,
@@ -37,11 +37,17 @@ describe('FileConversationRepository', () => {
     const repository = new FileConversationRepository(directory);
     const conversation = createConversation('my/session');
     conversation.title = 'project-planning-2026-06-26-1530';
-    conversation.messages.push(createMessage('user', 'Hello'));
+    conversation.messages.push(createMessage(MessageRole.User, 'Hello'));
     conversation.messages.push(
-      createMessage('assistant', 'partial answer', new Date(), undefined, {
-        thinking: { content: 'thinking aloud', durationMs: 123 },
-      })
+      createMessage(
+        MessageRole.Assistant,
+        'partial answer',
+        new Date(),
+        undefined,
+        {
+          thinking: { content: 'thinking aloud', durationMs: 123 },
+        }
+      )
     );
 
     await repository.save(conversation);
@@ -67,7 +73,9 @@ describe('FileConversationRepository', () => {
         description: 'Find the bug',
         prompt: 'Locate the bug and report it.',
         status: SubAgentRunStatus.Completed,
-        messages: [createMessage('user', 'Locate the bug and report it.')],
+        messages: [
+          createMessage(MessageRole.User, 'Locate the bug and report it.'),
+        ],
         startedAt: new Date().toISOString(),
         endedAt: new Date().toISOString(),
         summary: 'bug found in auth.ts',
@@ -90,7 +98,7 @@ describe('FileConversationRepository', () => {
 
     const olderConversation = createConversation('older-session', new Date(1));
     const newerConversation = createConversation('newer-session', new Date(2));
-    newerConversation.messages.push(createMessage('user', 'recent'));
+    newerConversation.messages.push(createMessage(MessageRole.User, 'recent'));
 
     await repository.save(olderConversation);
     await repository.save(newerConversation);
@@ -114,7 +122,7 @@ describe('FileConversationRepository', () => {
   it('keeps the summary file lean and the messages file complete', async () => {
     const repository = new FileConversationRepository(directory);
     const conversation = createConversation('split-session');
-    conversation.messages.push(createMessage('user', 'hello there'));
+    conversation.messages.push(createMessage(MessageRole.User, 'hello there'));
 
     await repository.save(conversation);
 
@@ -144,7 +152,9 @@ describe('FileConversationRepository', () => {
     // no separate messages file.
     const legacy = createConversation('legacy-session');
     legacy.title = 'legacy';
-    legacy.messages.push(createMessage('user', 'from the old layout'));
+    legacy.messages.push(
+      createMessage(MessageRole.User, 'from the old layout')
+    );
     await writeFile(
       sessionFilePath(directory, 'legacy-session'),
       `${JSON.stringify(legacy, null, 2)}\n`,
@@ -179,7 +189,7 @@ describe('FileConversationRepository', () => {
   it('clears both files for a session', async () => {
     const repository = new FileConversationRepository(directory);
     const conversation = createConversation('doomed');
-    conversation.messages.push(createMessage('user', 'delete me'));
+    conversation.messages.push(createMessage(MessageRole.User, 'delete me'));
     await repository.save(conversation);
 
     await repository.clear('doomed');

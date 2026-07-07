@@ -5,6 +5,7 @@ import {
   AnthropicStreamAccumulator,
 } from './anthropic-provider.js';
 import { ReasoningEffort } from '@core/ports/chat-model';
+import { MessageRole } from '@core/domain/message';
 
 describe('AnthropicStreamAccumulator usage math', () => {
   it('folds the cached prefix into inputTokens so ctx reflects full context', () => {
@@ -90,7 +91,7 @@ describe('anthropic thinking wire format', () => {
     const messages = [
       {
         id: '1',
-        role: 'user' as const,
+        role: MessageRole.User,
         content: 'hey',
         createdAt: new Date().toISOString(),
       },

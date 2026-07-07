@@ -4,18 +4,22 @@ import {
   renderHistoryWindow,
   selectRecentMessages,
 } from '@core/application/history-window';
-import { createMessage, type ChatMessage } from '@core/domain/message';
+import {
+  createMessage,
+  MessageRole,
+  type ChatMessage,
+} from '@core/domain/message';
 
 function user(content: string): ChatMessage {
-  return createMessage('user', content);
+  return createMessage(MessageRole.User, content);
 }
 
 function assistant(content: string): ChatMessage {
-  return createMessage('assistant', content);
+  return createMessage(MessageRole.Assistant, content);
 }
 
 function toolResult(content: string, callId = 'call-1'): ChatMessage {
-  return createMessage('tool', content, new Date(), undefined, {
+  return createMessage(MessageRole.Tool, content, new Date(), undefined, {
     toolCallId: callId,
     name: 'read_file',
   });

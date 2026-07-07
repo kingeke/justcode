@@ -54,8 +54,10 @@ import {
   SubAgentActivityPhase,
   SubAgentRunStatus,
   type SubAgentActivityEvent,
+  type SubAgentRun,
   type SubAgentType,
 } from '@core/domain/sub-agent';
+import { SubAgentTranscript } from '@cli/ui/sub-agent-transcript.js';
 import {
   createConversation,
   type Conversation,
@@ -67,7 +69,11 @@ import {
   modePlaceholder,
   type ChatMode,
 } from '@core/domain/chat-mode';
-import { createMessage, type MessageImage } from '@core/domain/message';
+import {
+  createMessage,
+  MessageRole,
+  type MessageImage,
+} from '@core/domain/message';
 import { DEFAULT_SYSTEM_PROMPT } from '@core/application/system-prompt';
 import type {
   ModelInfo,
@@ -824,7 +830,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       prev
         ? {
             ...prev,
-            messages: [...prev.messages, createMessage('assistant', text)],
+            messages: [
+              ...prev.messages,
+              createMessage(MessageRole.Assistant, text),
+            ],
           }
         : prev
     );
@@ -868,7 +877,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             ...prev,
             messages: [
               ...prev.messages,
-              createMessage('assistant', '', new Date(), undefined, {
+              createMessage(MessageRole.Assistant, '', new Date(), undefined, {
                 thinking: { content: text, durationMs },
               }),
             ],
@@ -990,6 +999,31 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const [subAgentActivity, setSubAgentActivity] = useState<
     SubAgentPanelEntry[]
   >([]);
+  // Index into subAgentActivity while browsing the panel with the keyboard;
+  // null means we're not browsing. Entered with ↑ from an empty prompt.
+  const [subAgentBrowseIndex, setSubAgentBrowseIndex] = useState<number | null>(
+    null
+  );
+  // The run whose full transcript is open in the full-screen viewer, or null.
+  const [openSubAgentRunId, setOpenSubAgentRunId] = useState<string | null>(
+    null
+  );
+  // Live run objects by run id, captured from Start-phase activity events (the
+  // event's `run` mutates in place as the sub agent works — same pattern as
+  // the extension's liveSubAgentRuns). Cleared with the panel at turn start;
+  // reopened sessions fall back to the persisted `conversation.subAgentRuns`.
+  const subAgentRunsRef = useRef<Map<string, SubAgentRun>>(new Map());
+  // The open run's transcript: live map first (in-flight and just-finished
+  // runs), then the persisted runs for reopened sessions.
+  const openSubAgentRun = openSubAgentRunId
+    ? (subAgentRunsRef.current.get(openSubAgentRunId) ??
+      conversation?.subAgentRuns?.find((run) => run.id === openSubAgentRunId))
+    : undefined;
+  // Close the viewer instead of rendering nothing when the run can't be found
+  // (e.g. the session changed underneath the open transcript).
+  useEffect(() => {
+    if (openSubAgentRunId && !openSubAgentRun) setOpenSubAgentRunId(null);
+  }, [openSubAgentRunId, openSubAgentRun]);
   // Mirrors queuedMessages so the steering callback (captured once when a turn
   // starts) always reads the latest queue rather than a stale snapshot.
   const queuedMessagesRef = useRef<string[]>([]);
@@ -1007,7 +1041,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const bashCommandByCallId = useMemo(() => {
     const map = new Map<string, string>();
     for (const message of conversation?.messages ?? []) {
-      if (message.role !== 'assistant' || !message.toolCalls) continue;
+      if (message.role !== MessageRole.Assistant || !message.toolCalls)
+        continue;
       for (const call of message.toolCalls) {
         if (call.name === 'bash') map.set(call.id, call.arguments);
       }
@@ -1018,7 +1053,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const bashToolMessages = useMemo(
     () =>
       (conversation?.messages ?? []).filter(
-        (message) => message.role === 'tool' && message.name === 'bash'
+        (message) =>
+          message.role === MessageRole.Tool && message.name === 'bash'
       ),
     [conversation]
   );
@@ -1437,7 +1473,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       showSessionPicker ||
       showReasoningPicker ||
       showToolsPicker ||
-      showModePicker
+      showModePicker ||
+      // The full-screen sub agent transcript owns the keyboard while open.
+      openSubAgentRunId !== null
     )
       return;
 
@@ -1538,6 +1576,46 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       !showMentionSuggestions
     ) {
       setQueueEditIndex(queuedMessages.length - 1);
+      return;
+    }
+
+    // Browsing the sub agent panel: arrows move the selection, Enter opens the
+    // selected run's full transcript, Esc returns to the prompt.
+    if (subAgentBrowseIndex !== null) {
+      if (key.name === KeyName.Escape) {
+        setSubAgentBrowseIndex(null);
+        return;
+      }
+      if (key.name === KeyName.Up) {
+        setSubAgentBrowseIndex((i) => Math.max(0, (i ?? 0) - 1));
+        return;
+      }
+      if (key.name === KeyName.Down) {
+        setSubAgentBrowseIndex((i) =>
+          Math.min(subAgentActivity.length - 1, (i ?? 0) + 1)
+        );
+        return;
+      }
+      if (key.name === KeyName.Return) {
+        const entry = subAgentActivity[subAgentBrowseIndex];
+        if (entry) setOpenSubAgentRunId(entry.runId);
+        return;
+      }
+      // Swallow everything else so stray keys don't leak while browsing.
+      return;
+    }
+
+    // Enter sub-agent browse mode with ↑ from an empty prompt. The panel sits
+    // directly above the composer, so it wins ↑ over bash browsing while any
+    // entries exist; bash browsing stays reachable when there are none.
+    if (
+      key.name === KeyName.Up &&
+      !input &&
+      subAgentActivity.length > 0 &&
+      !isCommandMode &&
+      !showMentionSuggestions
+    ) {
+      setSubAgentBrowseIndex(subAgentActivity.length - 1);
       return;
     }
 
@@ -1982,7 +2060,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     for (let i = messages.length - 1; i >= 0; i--) {
       const message = messages[i];
       if (
-        message?.role === 'tool' &&
+        message?.role === MessageRole.Tool &&
         message.name === 'present_plan' &&
         message.content.trim()
       ) {
@@ -2747,9 +2825,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     // A new turn starts with a clean sub agent panel; finished runs from the
     // previous turn stay reviewable in the persisted conversation.
     setSubAgentActivity([]);
+    setSubAgentBrowseIndex(null);
+    setOpenSubAgentRunId(null);
+    subAgentRunsRef.current.clear();
     // Show the user's message immediately, before the model starts responding.
     const optimisticUserMessage = createMessage(
-      'user',
+      MessageRole.User,
       cleanedValue,
       new Date(),
       undefined,
@@ -2827,7 +2908,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                       ...prev,
                       messages: [
                         ...prev.messages,
-                        createMessage('assistant', committed),
+                        createMessage(MessageRole.Assistant, committed),
                       ],
                     }
                   : prev
@@ -2895,19 +2976,31 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                 ...prev,
                 messages: [
                   ...prev.messages,
-                  createMessage('assistant', '', new Date(), undefined, {
-                    toolCalls: [
-                      {
-                        id: callId,
-                        name: event.toolName,
-                        arguments: event.arguments,
-                      },
-                    ],
-                  }),
-                  createMessage('tool', initialContent, new Date(), undefined, {
-                    toolCallId: callId,
-                    name: event.toolName,
-                  }),
+                  createMessage(
+                    MessageRole.Assistant,
+                    '',
+                    new Date(),
+                    undefined,
+                    {
+                      toolCalls: [
+                        {
+                          id: callId,
+                          name: event.toolName,
+                          arguments: event.arguments,
+                        },
+                      ],
+                    }
+                  ),
+                  createMessage(
+                    MessageRole.Tool,
+                    initialContent,
+                    new Date(),
+                    undefined,
+                    {
+                      toolCallId: callId,
+                      name: event.toolName,
+                    }
+                  ),
                 ],
               }
             : prev
@@ -2925,7 +3018,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           ? {
               ...prev,
               messages: prev.messages.map((message) =>
-                message.role === 'tool' && message.toolCallId === callId
+                message.role === MessageRole.Tool &&
+                message.toolCallId === callId
                   ? { ...message, content }
                   : message
               ),
@@ -2937,6 +3031,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     // Upserts a run's live progress into the sub agent panel as `task` sub
     // agents start, use tools, and finish.
     const onSubAgentActivity = (event: SubAgentActivityEvent): void => {
+      // Start events carry the live run object; keep it so the transcript
+      // viewer can show the run's messages while (and after) it executes.
+      if (event.run) {
+        subAgentRunsRef.current.set(event.runId, event.run);
+      }
       setSubAgentActivity((prev) => {
         const existing = prev.find((entry) => entry.runId === event.runId);
         if (!existing) {
@@ -3049,7 +3148,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             prev
               ? {
                   ...prev,
-                  messages: [...prev.messages, createMessage('user', combined)],
+                  messages: [
+                    ...prev.messages,
+                    createMessage(MessageRole.User, combined),
+                  ],
                 }
               : prev
           );
@@ -3107,7 +3209,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         baseConversation.messages.length
       );
       const assistantMessages = newMessages.filter(
-        (message) => message.role === 'assistant'
+        (message) => message.role === MessageRole.Assistant
       );
       const capturedContent = streamingBufferRef.current;
       const capturedGenerationMs = Math.max(
@@ -3149,7 +3251,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             prev.messages
               .filter(
                 (message) =>
-                  message.role === 'tool' &&
+                  message.role === MessageRole.Tool &&
                   message.toolCallId &&
                   message.content !== ''
               )
@@ -3159,7 +3261,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           return {
             ...mergedConversation,
             messages: mergedConversation.messages.map((message) =>
-              message.role === 'tool' &&
+              message.role === MessageRole.Tool &&
               message.toolCallId &&
               previousToolMessagesByCallId.has(message.toolCallId)
                 ? {
@@ -3266,7 +3368,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           const interruptedMessage =
             capturedThinking || capturedContent
               ? createMessage(
-                  'assistant',
+                  MessageRole.Assistant,
                   capturedContent,
                   new Date(),
                   undefined,
@@ -3286,7 +3388,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             // Settle any optimistic bash placeholder still marked running, then
             // append whatever partial assistant response was captured.
             const messages = current.messages.map((message) =>
-              message.role === 'tool' &&
+              message.role === MessageRole.Tool &&
               message.name === 'bash' &&
               message.content === ''
                 ? { ...message, content: 'Command was cancelled.' }
@@ -3501,6 +3603,19 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     );
   }
 
+  if (openSubAgentRunId && openSubAgentRun) {
+    const openEntry = subAgentActivity.find(
+      (entry) => entry.runId === openSubAgentRunId
+    );
+    return (
+      <SubAgentTranscript
+        run={openSubAgentRun}
+        status={openEntry?.status ?? openSubAgentRun.status}
+        onClose={() => setOpenSubAgentRunId(null)}
+      />
+    );
+  }
+
   if (showResetPicker) {
     return (
       <ResetPicker
@@ -3692,7 +3807,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           ].map((message) => {
             // Collapse mode: render only the user's messages so the transcript
             // is just what was asked, without the model's replies in between.
-            if (collapseResponses && message.role !== 'user') {
+            if (collapseResponses && message.role !== MessageRole.User) {
               return null;
             }
             // A compaction summary opens a new epoch: draw a divider and render
@@ -3708,7 +3823,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
               );
             }
             const thinking =
-              message.role === 'assistant'
+              message.role === MessageRole.Assistant
                 ? (message.thinking ?? messageThinking[message.id])
                 : undefined;
             return (
@@ -3718,7 +3833,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                 // User messages (and their attachments) hug the right edge,
                 // mirroring the extension, so it's clear which messages are
                 // the user's. The padding keeps the text off the scrollbar.
-                {...(message.role === 'user'
+                {...(message.role === MessageRole.User
                   ? { alignItems: 'flex-end' as const, paddingRight: 2 }
                   : {})}
               >
@@ -3733,7 +3848,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     )}
                   </box>
                 ) : null}
-                {message.role === 'user' ? (
+                {message.role === MessageRole.User ? (
                   <box
                     flexDirection="column"
                     alignItems="flex-end"
@@ -3752,7 +3867,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     ) : null}
                     <text fg={MUTED}>{formatTime(message.createdAt)}</text>
                   </box>
-                ) : message.role === 'assistant' ? (
+                ) : message.role === MessageRole.Assistant ? (
                   <box flexDirection="column">
                     {message.content &&
                     !(thinking && message.toolCalls?.length) ? (
@@ -3783,7 +3898,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                       </text>
                     ) : null}
                   </box>
-                ) : message.role === 'tool' ? (
+                ) : message.role === MessageRole.Tool ? (
                   message.name === 'bash' ? (
                     // When /expand-tools is off, inline stays a one-line summary
                     // (the box opens in a pinned panel via browsing); when on,
@@ -4063,24 +4178,31 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             flexDirection="column"
             border
             borderStyle="rounded"
-            borderColor={MUTED}
+            borderColor={subAgentBrowseIndex !== null ? 'cyan' : MUTED}
             paddingX={1}
           >
             <text fg={MUTED}>
-              {`${subAgentActivity.length} sub agent${
-                subAgentActivity.length === 1 ? '' : 's'
-              } · transcripts saved with the session`}
+              {subAgentBrowseIndex !== null
+                ? '↑/↓ select · enter view transcript · esc back'
+                : `${subAgentActivity.length} sub agent${
+                    subAgentActivity.length === 1 ? '' : 's'
+                  } · ↑ to browse · transcripts saved with the session`}
             </text>
-            {subAgentActivity.map((entry) => (
+            {subAgentActivity.map((entry, index) => (
               <text
                 key={entry.runId}
                 content={
                   new StyledText([
+                    tc(index === subAgentBrowseIndex ? '› ' : '  ', {
+                      fg: index === subAgentBrowseIndex ? 'cyan' : MUTED,
+                    }),
                     tc(`${subAgentStatusGlyph(entry.status)} `, {
                       fg: subAgentStatusColor(entry.status),
                     }),
                     tc(`${entry.agentType}  `, { fg: MUTED }),
-                    tc(entry.description, { fg: 'white' }),
+                    tc(entry.description, {
+                      fg: index === subAgentBrowseIndex ? 'cyan' : 'white',
+                    }),
                     tc(
                       entry.toolUseCount > 0
                         ? `  ${entry.toolUseCount} tool use${

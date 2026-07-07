@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createConversation } from '@core/domain/conversation';
-import { createMessage } from '@core/domain/message';
+import { createMessage, MessageRole } from '@core/domain/message';
 import { toWebviewMessages } from '@ext/host/chat-bridge';
 import type { WebviewToolView } from '@ext/shared/protocol';
 
@@ -17,11 +17,11 @@ const services = {
 function conversationWith(toolResult: string) {
   const conversation = createConversation('s1');
   conversation.messages = [
-    createMessage('user', 'edit it', new Date()),
-    createMessage('assistant', '', new Date(), undefined, {
+    createMessage(MessageRole.User, 'edit it', new Date()),
+    createMessage(MessageRole.Assistant, '', new Date(), undefined, {
       toolCalls: [{ id: 'e1', name: 'edit_file', arguments: '{}' }],
     }),
-    createMessage('tool', toolResult, new Date(), undefined, {
+    createMessage(MessageRole.Tool, toolResult, new Date(), undefined, {
       toolCallId: 'e1',
       name: 'edit_file',
     }),

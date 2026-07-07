@@ -6,7 +6,7 @@
  * `/history-limit` command).
  */
 
-import type { ChatMessage } from '@core/domain/message';
+import { MessageRole, type ChatMessage } from '@core/domain/message';
 
 /**
  * Default number of most-recent messages forwarded to the model per request.
@@ -32,7 +32,10 @@ export function selectRecentMessages(
   }
 
   let start = messages.length - limit;
-  while (start < messages.length && messages[start]?.role === 'tool') {
+  while (
+    start < messages.length &&
+    messages[start]?.role === MessageRole.Tool
+  ) {
     start += 1;
   }
 
@@ -106,7 +109,7 @@ export function renderHistoryWindow(
 
 function formatHistoryMessage(message: ChatMessage, index: number): string {
   const label =
-    message.role === 'tool' && message.name
+    message.role === MessageRole.Tool && message.name
       ? `tool:${message.name}`
       : message.role;
   let body = message.content ?? '';

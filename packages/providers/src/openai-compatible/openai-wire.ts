@@ -1,4 +1,5 @@
 import {
+  MessageRole,
   renderMessageContentForModel,
   type ChatMessage,
   type ToolCall,
@@ -31,7 +32,7 @@ export function toOpenAiWireMessages(
   messages: ChatMessage[]
 ): OpenAiWireMessage[] {
   return messages.map((message) => {
-    if (message.role === 'tool') {
+    if (message.role === MessageRole.Tool) {
       return {
         role: 'tool',
         content: message.content,
@@ -39,7 +40,7 @@ export function toOpenAiWireMessages(
       };
     }
 
-    if (message.role === 'assistant' && message.toolCalls?.length) {
+    if (message.role === MessageRole.Assistant && message.toolCalls?.length) {
       return {
         role: 'assistant',
         content: message.content || null,
@@ -55,7 +56,7 @@ export function toOpenAiWireMessages(
     // as a text part, plus each image as a data-URI `image_url` part. Without
     // images, the simpler string form is kept.
     const text = renderMessageContentForModel(message);
-    if (message.role === 'user' && message.images?.length) {
+    if (message.role === MessageRole.User && message.images?.length) {
       const parts: OpenAiContentPart[] = message.images.map((image) => ({
         type: 'image_url' as const,
         image_url: { url: `data:${image.mediaType};base64,${image.data}` },

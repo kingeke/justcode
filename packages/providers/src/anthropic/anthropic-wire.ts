@@ -1,4 +1,5 @@
 import {
+  MessageRole,
   renderMessageContentForModel,
   type ChatMessage,
   type ToolCall,
@@ -87,12 +88,12 @@ export function toAnthropicWireRequest(
   };
 
   for (const message of messages) {
-    if (message.role === 'system') {
+    if (message.role === MessageRole.System) {
       if (message.content.trim()) systemParts.push(message.content);
       continue;
     }
 
-    if (message.role === 'tool') {
+    if (message.role === MessageRole.Tool) {
       push('user', [
         {
           type: 'tool_result',
@@ -103,7 +104,7 @@ export function toAnthropicWireRequest(
       continue;
     }
 
-    if (message.role === 'assistant') {
+    if (message.role === MessageRole.Assistant) {
       const blocks: AnthropicContentBlock[] = [];
       if (message.content.trim()) {
         blocks.push({ type: 'text', text: message.content });

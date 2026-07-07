@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { createMessage } from '@core/domain/message';
+import { createMessage, MessageRole } from '@core/domain/message';
 import { toAnthropicWireRequest } from './anthropic-wire.js';
 
 describe('toAnthropicWireRequest with images', () => {
   it('emits an image block before the text block', () => {
     const message = createMessage(
-      'user',
+      MessageRole.User,
       'what is this?',
       new Date(),
       undefined,
@@ -26,7 +26,7 @@ describe('toAnthropicWireRequest with images', () => {
   });
 
   it('omits the text block for an image-only message', () => {
-    const message = createMessage('user', '', new Date(), undefined, {
+    const message = createMessage(MessageRole.User, '', new Date(), undefined, {
       images: [{ mediaType: 'image/png', data: 'BASE64' }],
     });
 

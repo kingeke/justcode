@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createMessage,
   markLlmReceived,
+  MessageRole,
   renderMessageContentForModel,
 } from '@core/domain/message';
 
@@ -11,7 +12,7 @@ describe('renderMessageContentForModel', () => {
     expect(
       renderMessageContentForModel({
         id: 'message-1',
-        role: 'user',
+        role: MessageRole.User,
         content: 'Review these files',
         createdAt: '2026-06-22T00:00:00.000Z',
         attachments: [{ path: 'src/app.ts', content: 'console.log("hello")' }],
@@ -21,7 +22,7 @@ describe('renderMessageContentForModel', () => {
 
   it('attaches images passed via extras', () => {
     const message = createMessage(
-      'user',
+      MessageRole.User,
       'look at this',
       new Date(),
       undefined,
@@ -34,13 +35,13 @@ describe('renderMessageContentForModel', () => {
   });
 
   it('omits the images field when none are provided', () => {
-    const message = createMessage('user', 'hi');
+    const message = createMessage(MessageRole.User, 'hi');
     expect(message.images).toBeUndefined();
   });
 
   it('can persist assistant thinking metadata', () => {
     const message = createMessage(
-      'assistant',
+      MessageRole.Assistant,
       'partial',
       new Date(),
       undefined,
@@ -53,28 +54,40 @@ describe('renderMessageContentForModel', () => {
   });
 
   it('carries the LLM-received time passed via extras', () => {
-    const message = createMessage('assistant', 'hi', new Date(), undefined, {
-      llmReceivedAt: '2026-07-02T10:00:05.000Z',
-    });
+    const message = createMessage(
+      MessageRole.Assistant,
+      'hi',
+      new Date(),
+      undefined,
+      {
+        llmReceivedAt: '2026-07-02T10:00:05.000Z',
+      }
+    );
 
     expect(message.llmReceivedAt).toBe('2026-07-02T10:00:05.000Z');
   });
 
   it('carries the compact-summary flag passed via extras', () => {
-    const flagged = createMessage('user', 'summary', new Date(), undefined, {
-      isCompactSummary: true,
-    });
+    const flagged = createMessage(
+      MessageRole.User,
+      'summary',
+      new Date(),
+      undefined,
+      {
+        isCompactSummary: true,
+      }
+    );
     expect(flagged.isCompactSummary).toBe(true);
 
-    const plain = createMessage('user', 'hello');
+    const plain = createMessage(MessageRole.User, 'hello');
     expect(plain.isCompactSummary).toBeUndefined();
   });
 });
 
 describe('markLlmReceived', () => {
   it('stamps unstamped user messages with the received time', () => {
-    const user = createMessage('user', 'hello');
-    const assistant = createMessage('assistant', 'hi');
+    const user = createMessage(MessageRole.User, 'hello');
+    const assistant = createMessage(MessageRole.Assistant, 'hi');
     const receivedAt = new Date('2026-07-02T10:00:05.000Z');
 
     markLlmReceived([user, assistant], receivedAt);
@@ -84,7 +97,7 @@ describe('markLlmReceived', () => {
   });
 
   it('leaves already-stamped user messages untouched', () => {
-    const user = createMessage('user', 'hello');
+    const user = createMessage(MessageRole.User, 'hello');
     user.llmReceivedAt = '2026-07-02T09:00:00.000Z';
 
     markLlmReceived([user], new Date('2026-07-02T10:00:05.000Z'));

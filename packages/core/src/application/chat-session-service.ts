@@ -6,6 +6,7 @@ import {
 import {
   createMessage,
   markLlmReceived,
+  MessageRole,
   type ChatMessage,
   type MessageAttachment,
   type MessageImage,
@@ -449,7 +450,7 @@ export class ChatSessionService {
     }
 
     const systemMessage = createMessage(
-      'system',
+      MessageRole.System,
       buildSystemPrompt(
         this.getSystemPrompt(),
         this.workspaceRoot,
@@ -461,7 +462,10 @@ export class ChatSessionService {
       conversation.messages,
       Math.floor(this.getMaxHistoryMessages())
     );
-    const compactMessage = createMessage('user', this.getCompactPrompt());
+    const compactMessage = createMessage(
+      MessageRole.User,
+      this.getCompactPrompt()
+    );
 
     // Reasoning is deliberately not disabled here (unlike title generation):
     // summarizing a long session benefits from deliberation, and the host
@@ -486,7 +490,7 @@ export class ChatSessionService {
     }
 
     const summaryMessage = createMessage(
-      'user',
+      MessageRole.User,
       buildCompactSummaryContent(summary),
       new Date(),
       undefined,
@@ -527,7 +531,7 @@ export class ChatSessionService {
     }
 
     const userMessage = createMessage(
-      'user',
+      MessageRole.User,
       trimmedContent,
       new Date(),
       input.attachments,
@@ -738,7 +742,7 @@ export class ChatSessionService {
         // cleanly after the preceding tool results.
         const steering = input.drainSteering?.();
         if (steering && steering.trim()) {
-          working.push(createMessage('user', steering.trim()));
+          working.push(createMessage(MessageRole.User, steering.trim()));
         }
 
         // Cap how much prior history travels to the model to save tokens. We trim
@@ -770,7 +774,7 @@ export class ChatSessionService {
           toolsEnabled &&
           !disabledToolNames.has(ToolName.ViewHistory);
         const systemMessage = createMessage(
-          'system',
+          MessageRole.System,
           canRecoverHistory
             ? `${systemPrompt}\n\nNote: the ${omittedCount} oldest message(s) of this ${working.length}-message conversation were omitted from this request to save tokens. They are still available — call the \`view_history\` tool with a "start" (and optional "end") index to read any of them (index 0 = oldest message).`
             : systemPrompt
@@ -852,7 +856,7 @@ export class ChatSessionService {
         if (toolCalls.length === 0) {
           working.push(
             createMessage(
-              'assistant',
+              MessageRole.Assistant,
               response.content,
               new Date(),
               undefined,
@@ -866,11 +870,17 @@ export class ChatSessionService {
         }
 
         working.push(
-          createMessage('assistant', response.content, new Date(), undefined, {
-            toolCalls,
-            llmReceivedAt,
-            ...(thinking ? { thinking } : {}),
-          })
+          createMessage(
+            MessageRole.Assistant,
+            response.content,
+            new Date(),
+            undefined,
+            {
+              toolCalls,
+              llmReceivedAt,
+              ...(thinking ? { thinking } : {}),
+            }
+          )
         );
         // This step's output is now committed to `working`; clear the buffers
         // so an abort during the tool calls below doesn't persist it twice.
@@ -915,13 +925,19 @@ export class ChatSessionService {
               subAgentRuns
             ));
           working.push(
-            createMessage('tool', toolResult.content, new Date(), undefined, {
-              toolCallId: call.id,
-              name: call.name,
-              // Persist the failure flag so the transcript still shows the
-              // call as errored after the turn commits (and across reloads).
-              ...(toolResult.isError ? { isError: true } : {}),
-            })
+            createMessage(
+              MessageRole.Tool,
+              toolResult.content,
+              new Date(),
+              undefined,
+              {
+                toolCallId: call.id,
+                name: call.name,
+                // Persist the failure flag so the transcript still shows the
+                // call as errored after the turn commits (and across reloads).
+                ...(toolResult.isError ? { isError: true } : {}),
+              }
+            )
           );
 
           if (call.name === ToolName.LazyLoadTools) {
@@ -1340,9 +1356,9 @@ export class ChatSessionService {
         ...(input.disableReasoning ? { reasoningEffort: 'off' as const } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
         messages: [
-          createMessage('system', SESSION_TITLE_SYSTEM_PROMPT),
+          createMessage(MessageRole.System, SESSION_TITLE_SYSTEM_PROMPT),
           createMessage(
-            'user',
+            MessageRole.User,
             buildSessionTitleUserMessage(input.userMessage)
           ),
         ],
@@ -1411,7 +1427,7 @@ export class ChatSessionService {
 function hasLoadedTools(messages: ChatMessage[]): boolean {
   return messages.some(
     (message) =>
-      message.role === 'assistant' &&
+      message.role === MessageRole.Assistant &&
       message.toolCalls?.some((call) => call.name === ToolName.LazyLoadTools)
   );
 }
@@ -1505,16 +1521,18 @@ function appendInterruptedStepArtifacts(
 ): void {
   const answeredCallIds = new Set(
     working
-      .filter((message) => message.role === 'tool' && message.toolCallId)
+      .filter(
+        (message) => message.role === MessageRole.Tool && message.toolCallId
+      )
       .map((message) => message.toolCallId as string)
   );
   for (const message of working) {
-    if (message.role !== 'assistant' || !message.toolCalls) continue;
+    if (message.role !== MessageRole.Assistant || !message.toolCalls) continue;
     for (const call of message.toolCalls) {
       if (answeredCallIds.has(call.id)) continue;
       working.push(
         createMessage(
-          'tool',
+          MessageRole.Tool,
           '[Interrupted by user — this tool call was cancelled before it produced a result.]',
           new Date(),
           undefined,
@@ -1528,7 +1546,7 @@ function appendInterruptedStepArtifacts(
   if (!step.content.trim() && !trimmedThinking) return;
   working.push(
     createMessage(
-      'assistant',
+      MessageRole.Assistant,
       step.content,
       new Date(),
       undefined,

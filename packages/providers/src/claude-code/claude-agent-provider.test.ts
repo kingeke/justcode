@@ -11,7 +11,11 @@ import type {
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 
-import { createMessage, type ChatMessage } from '@core/domain/message';
+import {
+  createMessage,
+  MessageRole,
+  type ChatMessage,
+} from '@core/domain/message';
 import { ClaudeAgentProvider } from './claude-agent-provider.js';
 
 /**
@@ -187,8 +191,8 @@ describe('ClaudeAgentProvider', () => {
       model: 'claude-sonnet-5',
       sessionId: 's1',
       messages: [
-        createMessage('system', 'You are helpful.'),
-        createMessage('user', 'hello'),
+        createMessage(MessageRole.System, 'You are helpful.'),
+        createMessage(MessageRole.User, 'hello'),
       ],
       onToken: (token) => tokens.push(token),
     });
@@ -226,7 +230,7 @@ describe('ClaudeAgentProvider', () => {
     const send = provider.sendChat({
       model: 'claude-sonnet-5',
       sessionId: 's1',
-      messages: [createMessage('user', 'hi')],
+      messages: [createMessage(MessageRole.User, 'hi')],
     });
     await harness.nextPrompt();
     harness.emit(successResult('hey'));
@@ -253,7 +257,7 @@ describe('ClaudeAgentProvider', () => {
     const send = provider.sendChat({
       model: 'claude-sonnet-5',
       sessionId: 's1',
-      messages: [createMessage('user', 'hi')],
+      messages: [createMessage(MessageRole.User, 'hi')],
     });
     await harness.nextPrompt();
     harness.emit(successResult('hey'));
@@ -283,8 +287,8 @@ describe('ClaudeAgentProvider', () => {
     });
 
     const history: ChatMessage[] = [
-      createMessage('system', 'sys'),
-      createMessage('user', 'read moby-dick.txt'),
+      createMessage(MessageRole.System, 'sys'),
+      createMessage(MessageRole.User, 'read moby-dick.txt'),
     ];
     const firstRound = provider.sendChat({
       model: 'claude-sonnet-5',
@@ -319,13 +323,25 @@ describe('ClaudeAgentProvider', () => {
 
     // Engine executed the tool; the next sendChat carries the result.
     history.push(
-      createMessage('assistant', round1.content, new Date(), undefined, {
-        toolCalls: [call],
-      }),
-      createMessage('tool', 'Call me Ishmael.', new Date(), undefined, {
-        toolCallId: call.id,
-        name: 'read_file',
-      })
+      createMessage(
+        MessageRole.Assistant,
+        round1.content,
+        new Date(),
+        undefined,
+        {
+          toolCalls: [call],
+        }
+      ),
+      createMessage(
+        MessageRole.Tool,
+        'Call me Ishmael.',
+        new Date(),
+        undefined,
+        {
+          toolCallId: call.id,
+          name: 'read_file',
+        }
+      )
     );
     const secondRound = provider.sendChat({
       model: 'claude-sonnet-5',
@@ -360,7 +376,7 @@ describe('ClaudeAgentProvider', () => {
       parameters: { type: 'object' },
     };
     const history: ChatMessage[] = [
-      createMessage('user', 'build it with sub agents'),
+      createMessage(MessageRole.User, 'build it with sub agents'),
     ];
     const send = provider.sendChat({
       model: 'claude-sonnet-5',
@@ -391,14 +407,14 @@ describe('ClaudeAgentProvider', () => {
     // Answer both on the next sendChat so the parked handlers resolve.
     const calls = round.toolCalls!;
     history.push(
-      createMessage('assistant', '', new Date(), undefined, {
+      createMessage(MessageRole.Assistant, '', new Date(), undefined, {
         toolCalls: calls,
       }),
-      createMessage('tool', 'report a', new Date(), undefined, {
+      createMessage(MessageRole.Tool, 'report a', new Date(), undefined, {
         toolCallId: calls[0]!.id,
         name: 'task',
       }),
-      createMessage('tool', 'report b', new Date(), undefined, {
+      createMessage(MessageRole.Tool, 'report b', new Date(), undefined, {
         toolCallId: calls[1]!.id,
         name: 'task',
       })
@@ -421,7 +437,7 @@ describe('ClaudeAgentProvider', () => {
       createQuery: harness.createQuery,
     });
 
-    const history: ChatMessage[] = [createMessage('user', 'hi')];
+    const history: ChatMessage[] = [createMessage(MessageRole.User, 'hi')];
     const first = provider.sendChat({
       model: 'claude-sonnet-5',
       sessionId: 's1',
@@ -432,8 +448,8 @@ describe('ClaudeAgentProvider', () => {
     harness.emit(successResult('hello'));
     await first;
 
-    history.push(createMessage('assistant', 'hello'));
-    history.push(createMessage('user', 'and now?'));
+    history.push(createMessage(MessageRole.Assistant, 'hello'));
+    history.push(createMessage(MessageRole.User, 'and now?'));
     const second = provider.sendChat({
       model: 'claude-opus-4-8',
       sessionId: 's1',
@@ -464,8 +480,8 @@ describe('ClaudeAgentProvider', () => {
       sessionId: 's1',
       ephemeral: true,
       messages: [
-        createMessage('system', 'You generate a short title.'),
-        createMessage('user', 'hey how are u'),
+        createMessage(MessageRole.System, 'You generate a short title.'),
+        createMessage(MessageRole.User, 'hey how are u'),
       ],
     });
     await harness.nextPrompt();
@@ -477,8 +493,8 @@ describe('ClaudeAgentProvider', () => {
       model: 'claude-sonnet-5',
       sessionId: 's1',
       messages: [
-        createMessage('system', 'You are JustCode.'),
-        createMessage('user', 'hey how are u'),
+        createMessage(MessageRole.System, 'You are JustCode.'),
+        createMessage(MessageRole.User, 'hey how are u'),
       ],
     });
     await harness.nextPrompt();
@@ -504,7 +520,7 @@ describe('ClaudeAgentProvider', () => {
     const first = provider.sendChat({
       model: 'claude-sonnet-5',
       sessionId: 's1',
-      messages: [createMessage('user', 'hello')],
+      messages: [createMessage(MessageRole.User, 'hello')],
     });
     await harness.nextPrompt();
     harness.emit(successResult('hi'));
@@ -516,8 +532,11 @@ describe('ClaudeAgentProvider', () => {
       model: 'claude-sonnet-5',
       sessionId: 's1',
       messages: [
-        createMessage('user', 'Summary of the conversation so far: greetings.'),
-        createMessage('user', 'and now?'),
+        createMessage(
+          MessageRole.User,
+          'Summary of the conversation so far: greetings.'
+        ),
+        createMessage(MessageRole.User, 'and now?'),
       ],
     });
     // A single rebuilt turn carries the replayed summary folded into the new
@@ -538,7 +557,9 @@ describe('ClaudeAgentProvider', () => {
       createQuery: harness.createQuery,
     });
 
-    const history: ChatMessage[] = [createMessage('user', 'do something big')];
+    const history: ChatMessage[] = [
+      createMessage(MessageRole.User, 'do something big'),
+    ];
     const controller = new AbortController();
     const aborted = provider.sendChat({
       model: 'claude-sonnet-5',
@@ -559,7 +580,7 @@ describe('ClaudeAgentProvider', () => {
     await expect(aborted).rejects.toMatchObject({ name: 'AbortError' });
 
     // Next message on the same session gets a clean turn and a real answer.
-    history.push(createMessage('user', 'hey'));
+    history.push(createMessage(MessageRole.User, 'hey'));
     const next = provider.sendChat({
       model: 'claude-sonnet-5',
       sessionId: 's1',
@@ -582,10 +603,10 @@ describe('ClaudeAgentProvider', () => {
       model: 'claude-sonnet-5',
       sessionId: 's1',
       messages: [
-        createMessage('system', 'sys'),
-        createMessage('user', 'first question'),
-        createMessage('assistant', 'first answer'),
-        createMessage('user', 'follow-up'),
+        createMessage(MessageRole.System, 'sys'),
+        createMessage(MessageRole.User, 'first question'),
+        createMessage(MessageRole.Assistant, 'first answer'),
+        createMessage(MessageRole.User, 'follow-up'),
       ],
     });
 

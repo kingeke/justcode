@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { createMessage } from '@core/domain/message';
+import { createMessage, MessageRole } from '@core/domain/message';
 import { toResponsesPayload } from './openai-responses-wire.js';
 
 describe('toResponsesPayload with images', () => {
   it('emits an input_image part before the input_text part', () => {
     const message = createMessage(
-      'user',
+      MessageRole.User,
       'what is this?',
       new Date(),
       undefined,

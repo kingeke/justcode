@@ -1,4 +1,8 @@
-import { createMessage, type ChatMessage } from '@core/domain/message';
+import {
+  createMessage,
+  MessageRole,
+  type ChatMessage,
+} from '@core/domain/message';
 import type { ProviderClient, TokenUsage } from '@core/ports/chat-model';
 import type { Tool, ToolInvocationView } from '@core/ports/tool';
 import { buildSystemPrompt } from '@core/application/system-prompt';
@@ -60,7 +64,7 @@ export async function runSubAgent(
   );
   const toolDefinitions = input.tools.map((tool) => tool.definition);
   const systemMessage = createMessage(
-    'system',
+    MessageRole.System,
     buildSystemPrompt(input.systemPrompt, input.workspaceRoot, toolDefinitions)
   );
 
@@ -69,7 +73,7 @@ export async function runSubAgent(
     messages.push(message);
     input.onMessage?.(message);
   };
-  append(createMessage('user', input.prompt));
+  append(createMessage(MessageRole.User, input.prompt));
 
   let usage: TokenUsage | undefined;
   let toolUseCount = 0;
@@ -98,7 +102,7 @@ export async function runSubAgent(
 
     const toolCalls = response.toolCalls ?? [];
     if (toolCalls.length === 0) {
-      append(createMessage('assistant', response.content));
+      append(createMessage(MessageRole.Assistant, response.content));
       return {
         summary: response.content,
         messages,
@@ -108,9 +112,15 @@ export async function runSubAgent(
     }
 
     append(
-      createMessage('assistant', response.content, new Date(), undefined, {
-        toolCalls,
-      })
+      createMessage(
+        MessageRole.Assistant,
+        response.content,
+        new Date(),
+        undefined,
+        {
+          toolCalls,
+        }
+      )
     );
 
     for (const call of toolCalls) {
@@ -120,7 +130,7 @@ export async function runSubAgent(
       if (!tool) {
         append(
           createMessage(
-            'tool',
+            MessageRole.Tool,
             `Unknown tool: ${call.name}. Available tools: ${[...toolsByName.keys()].join(', ')}.`,
             new Date(),
             undefined,
@@ -150,7 +160,7 @@ export async function runSubAgent(
         isError = true;
       }
       append(
-        createMessage('tool', content, new Date(), undefined, {
+        createMessage(MessageRole.Tool, content, new Date(), undefined, {
           toolCallId: call.id,
           name: call.name,
           ...(isError ? { isError: true } : {}),
@@ -161,7 +171,7 @@ export async function runSubAgent(
 
   // Cap reached: return whatever the transcript holds rather than looping on.
   const summary = `Sub agent stopped after reaching the ${maxIterations}-iteration limit without finishing.`;
-  append(createMessage('assistant', summary));
+  append(createMessage(MessageRole.Assistant, summary));
   return { summary, messages, toolUseCount, ...(usage ? { usage } : {}) };
 }
 

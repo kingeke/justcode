@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { sendResponsesRequest } from '@providers/openai/openai-responses-client';
+import { MessageRole } from '@core/domain/message';
 
 const originalFetch = globalThis.fetch;
 
@@ -32,7 +33,7 @@ describe('sendResponsesRequest', () => {
           messages: [
             {
               id: 'u1',
-              role: 'user',
+              role: MessageRole.User,
               content: 'hi',
               createdAt: new Date().toISOString(),
             },

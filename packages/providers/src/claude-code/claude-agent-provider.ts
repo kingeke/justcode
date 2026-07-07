@@ -26,6 +26,7 @@ import {
 } from '@core/ports/chat-model';
 import { ProviderId } from '@core/ports/provider-catalog';
 import {
+  MessageRole,
   renderMessageContentForModel,
   type ChatMessage,
   type ToolCall,
@@ -448,7 +449,7 @@ export class ClaudeAgentProvider implements ProviderClient {
     if (bridge && bridge.pendingTools.size > 0) {
       const answered = new Set(
         request.messages
-          .filter((message) => message.role === 'tool')
+          .filter((message) => message.role === MessageRole.Tool)
           .map((message) => message.toolCallId)
       );
       const orphaned = [...bridge.pendingTools.keys()].some(
@@ -556,7 +557,9 @@ export class ClaudeAgentProvider implements ProviderClient {
   private async runEphemeral(request: ChatRequest): Promise<ChatResult> {
     const createQuery = await this.resolveCreateQuery();
     const bridge = new SessionBridge(request.model);
-    const systemMessage = request.messages.find((m) => m.role === 'system');
+    const systemMessage = request.messages.find(
+      (m) => m.role === MessageRole.System
+    );
     bridge.query = createQuery({
       prompt: bridge.input,
       options: {
@@ -572,7 +575,7 @@ export class ClaudeAgentProvider implements ProviderClient {
     });
     try {
       for (const message of request.messages) {
-        if (message.role !== 'user') continue;
+        if (message.role !== MessageRole.User) continue;
         bridge.input.push(chatMessageToSdkUserMessage(message));
       }
       return await this.collectTurn(bridge, request);
@@ -627,7 +630,9 @@ export class ClaudeAgentProvider implements ProviderClient {
     bridge.toolDefinitions = request.tools ?? [];
     bridge.advertisedToolNames = toolNamesKey(request.tools);
 
-    const systemMessage = request.messages.find((m) => m.role === 'system');
+    const systemMessage = request.messages.find(
+      (m) => m.role === MessageRole.System
+    );
     const options: Options = {
       model: request.model,
       // justcode owns the agent loop: no Claude Code built-ins, no user
@@ -740,7 +745,9 @@ export class ClaudeAgentProvider implements ProviderClient {
     bridge: SessionBridge,
     request: ChatRequest
   ): void {
-    const conversation = request.messages.filter((m) => m.role !== 'system');
+    const conversation = request.messages.filter(
+      (m) => m.role !== MessageRole.System
+    );
     const lastSeenIndex = bridge.lastSeenMessageId
       ? conversation.findIndex((m) => m.id === bridge.lastSeenMessageId)
       : -1;
@@ -765,7 +772,7 @@ export class ClaudeAgentProvider implements ProviderClient {
 
     let advancedSession = false;
     for (const message of fresh) {
-      if (message.role === 'tool') {
+      if (message.role === MessageRole.Tool) {
         const pending = message.toolCallId
           ? bridge.pendingTools.get(message.toolCallId)
           : undefined;
@@ -779,7 +786,7 @@ export class ClaudeAgentProvider implements ProviderClient {
         }
         continue;
       }
-      if (message.role !== 'user') continue;
+      if (message.role !== MessageRole.User) continue;
       const sdkMessage = chatMessageToSdkUserMessage(message);
       // Prepend the replayed context to the first user message we forward so it
       // rides along as a single querying turn.
@@ -1025,7 +1032,7 @@ function stripToolPrefix(name: string): string {
 
 function findLastUserIndex(messages: ChatMessage[]): number {
   for (let index = messages.length - 1; index >= 0; index--) {
-    if (messages[index]?.role === 'user') return index;
+    if (messages[index]?.role === MessageRole.User) return index;
   }
   return messages.length - 1;
 }
@@ -1034,7 +1041,7 @@ function findLastUserIndex(messages: ChatMessage[]): number {
 function renderTranscript(messages: ChatMessage[]): string {
   return messages
     .map((message) => {
-      if (message.role === 'tool') {
+      if (message.role === MessageRole.Tool) {
         return `[tool result: ${message.name ?? 'unknown'}]\n${message.content}`;
       }
       const calls = message.toolCalls

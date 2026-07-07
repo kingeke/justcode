@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createConversation } from '@core/domain/conversation';
-import { createMessage } from '@core/domain/message';
+import { createMessage, MessageRole } from '@core/domain/message';
 import {
   SubAgentRunStatus,
   SubAgentType,
@@ -19,15 +19,15 @@ describe('toSubAgentSnapshots', () => {
       prompt: 'Create style.css',
       status: SubAgentRunStatus.Completed,
       messages: [
-        createMessage('user', 'Create style.css', new Date()),
-        createMessage('assistant', '', new Date(), undefined, {
+        createMessage(MessageRole.User, 'Create style.css', new Date()),
+        createMessage(MessageRole.Assistant, '', new Date(), undefined, {
           toolCalls: [{ id: 't1', name: 'write_file', arguments: '{}' }],
         }),
-        createMessage('tool', 'ok', new Date(), undefined, {
+        createMessage(MessageRole.Tool, 'ok', new Date(), undefined, {
           toolCallId: 't1',
           name: 'write_file',
         }),
-        createMessage('assistant', 'Done.', new Date()),
+        createMessage(MessageRole.Assistant, 'Done.', new Date()),
       ],
       startedAt: '2026-07-07T18:00:00.000Z',
       endedAt: '2026-07-07T18:01:00.000Z',
