@@ -147,23 +147,31 @@ export function SubAgentTranscript({
       borderColor="cyan"
       paddingX={1}
     >
-      <text
-        content={
-          new StyledText([
-            tc(`${statusGlyph(status)} `, { fg: statusColor(status) }),
-            tc('sub agent · ', { fg: MUTED }),
-            tc(`${run.agentType} · `, { fg: MUTED }),
-            tc(run.description, { fg: 'white', bold: true }),
-            tc(
-              toolUseCount > 0
-                ? `  ${toolUseCount} tool use${toolUseCount === 1 ? '' : 's'}`
-                : '',
-              { fg: MUTED }
-            ),
-          ])
-        }
-      />
-      <text fg={MUTED}>↑/↓ scroll · esc back</text>
+      <box
+        flexDirection="row"
+        justifyContent="space-between"
+        marginTop={1}
+        marginBottom={1}
+        flexShrink={0}
+      >
+        <text
+          content={
+            new StyledText([
+              tc(`${statusGlyph(status)} `, { fg: statusColor(status) }),
+              tc('sub agent · ', { fg: MUTED }),
+              tc(`${run.agentType} · `, { fg: MUTED }),
+              tc(run.description, { fg: 'white', bold: true }),
+              tc(
+                toolUseCount > 0
+                  ? `  ${toolUseCount} tool use${toolUseCount === 1 ? '' : 's'}`
+                  : '',
+                { fg: MUTED }
+              ),
+            ])
+          }
+        />
+        <text fg={MUTED}>↑/↓ scroll · esc back</text>
+      </box>
       <scrollbox
         ref={scrollRef}
         flexGrow={1}
