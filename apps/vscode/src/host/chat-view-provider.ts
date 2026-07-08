@@ -55,8 +55,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     const bridge = new ChatBridge(
       (message) => {
-        // postMessage is fire-and-forget; ignore the returned promise.
-        void webview.postMessage(message);
+        // postMessage is fire-and-forget; ignore the returned promise. It
+        // throws synchronously once the webview is disposed — and turns keep
+        // running in the host after the view closes — so swallow that instead
+        // of letting it unwind (and effectively crash) the running turn.
+        try {
+          void webview.postMessage(message);
+        } catch {
+          // Webview gone; the turn's state is persisted and replayed on reopen.
+        }
       },
       resolveWorkspaceRoot(),
       () => openConnectTerminal(),
@@ -83,7 +90,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           ? `${name} (created)`
           : `${name} (baseline ↔ current)`;
         void vscode.commands.executeCommand('vscode.diff', left, right, title);
-      }
+      },
+      // OS notifications fire only while the window is unfocused — the user is
+      // elsewhere and should know a turn finished or a question is waiting.
+      () => vscode.window.state.focused,
+      vscode.Uri.joinPath(mediaUri, 'icon.png').fsPath
     );
     this.bridge = bridge;
 
@@ -100,7 +111,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     );
 
     webview.onDidReceiveMessage((message: WebviewToHost) => {
-      void bridge.handle(message);
+      // Never let a handler failure escape as an unhandled rejection in the
+      // extension host — log it so it shows in the Developer Tools console.
+      bridge.handle(message).catch((error: unknown) => {
+        console.error(`[${APP_NAME}] failed to handle webview message`, error);
+      });
     });
 
     webviewView.onDidDispose(() => {
@@ -119,6 +134,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   /** Clears the conversation in the live webview, if one is open. */
   public newSession(): void {
     void this.bridge?.handle({ type: WebviewMessageType.NewSession });
+  }
+
+  /**
+   * Attaches files (by absolute path) to the chat composer — the context-menu
+   * counterpart to drag-and-drop. The bridge reads them from disk and the
+   * webview stages them as chips (see AttachDroppedPaths).
+   */
+  public async attachFiles(paths: string[]): Promise<void> {
+    await this.bridge?.handle({
+      type: WebviewMessageType.AttachDroppedPaths,
+      paths,
+    });
   }
 
   /** Reveals the Settings editor tab. */

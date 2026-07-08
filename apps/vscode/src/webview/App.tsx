@@ -5,6 +5,7 @@ import {
   SettingsSection,
   WebviewMessageType,
   WebviewRole,
+  type WebviewFileAttachment,
   type WebviewImage,
   type WebviewMessage,
   type WebviewModel,
@@ -28,12 +29,14 @@ import { SessionsView } from '@ext/webview/components/SessionsView';
 import { SessionSwitcher } from '@ext/webview/components/SessionSwitcher';
 import { ConversationSidebar } from '@ext/webview/components/ConversationSidebar';
 import { ModelPickerView } from '@ext/webview/components/ModelPickerView';
+import { WelcomeSplash } from '@ext/webview/components/WelcomeSplash';
 import {
   ChatIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   CollapseIcon,
   JsonIcon,
+  PaperclipIcon,
   PencilIcon,
 } from '@ext/webview/components/Icons';
 import { ChangesPanel } from '@ext/webview/components/ChangesPanel';
@@ -93,13 +96,23 @@ export function App(): React.JSX.Element {
   // in refs rather than render state so typing doesn't re-render the transcript.
   const composerDraftRef = React.useRef('');
   const composerDraftImagesRef = React.useRef<WebviewImage[]>([]);
+  const composerDraftFilesRef = React.useRef<WebviewFileAttachment[]>([]);
   const persistComposerDraft = React.useCallback(
-    (draft: string, images: WebviewImage[]): void => {
+    (
+      draft: string,
+      images: WebviewImage[],
+      files: WebviewFileAttachment[]
+    ): void => {
       composerDraftRef.current = draft;
       composerDraftImagesRef.current = images;
+      composerDraftFilesRef.current = files;
     },
     []
   );
+  // Files dropped anywhere on the chat, handed to the composer to stage as
+  // attachments; cleared once consumed.
+  const [droppedFiles, setDroppedFiles] = React.useState<File[] | null>(null);
+  const [dropActive, setDropActive] = React.useState(false);
   // The committed user message being edited in place (Copilot-style): its
   // bubble is replaced by a full composer pre-filled with the message, the rest
   // of the chat grays out, and submitting re-sends from that point in history
@@ -114,6 +127,7 @@ export function App(): React.JSX.Element {
   const editWrapRef = React.useRef<HTMLDivElement | null>(null);
   const persistEditDraft = React.useCallback(
     (draft: string, images: WebviewImage[]): void => {
+      // Edits re-send history; file attachments aren't part of that flow.
       editDraftRef.current = draft;
       editImagesRef.current = images;
     },
@@ -234,10 +248,114 @@ export function App(): React.JSX.Element {
   const stickToBottomRef = React.useRef(true);
 
   // Subscribe to host messages once, and ask for the initial snapshot.
+  // DroppedFilesLoaded is handled here rather than in the reducer: it carries
+  // raw bytes that become File objects for the composer's staging pipeline,
+  // not UI state.
   React.useEffect(() => {
-    const unsubscribe = onHostMessage(dispatch);
+    const unsubscribe = onHostMessage((message) => {
+      if (message.type === HostMessageType.DroppedFilesLoaded) {
+        const files = message.files.map((file) => {
+          const bytes = Uint8Array.from(atob(file.base64), (c) =>
+            c.charCodeAt(0)
+          );
+          return new File([bytes], file.name, {
+            type: file.mediaType ?? '',
+          });
+        });
+        if (files.length > 0) setDroppedFiles(files);
+        return;
+      }
+      dispatch(message);
+    });
     postToHost({ type: WebviewMessageType.Init });
     return unsubscribe;
+  }, []);
+
+  // Drag-and-drop of files onto the chat. Listeners live on the window (capture
+  // phase) rather than a React root: VS Code's webview swallows drags that
+  // aren't explicitly claimed, and preventDefault on dragover/dragenter is what
+  // makes the webview a valid drop target at all. Drops arrive either as File
+  // objects (OS drags) or as `text/uri-list` paths (VS Code explorer drags) —
+  // the latter are read by the host, which can access the disk.
+  React.useEffect(() => {
+    const isFileDrag = (event: DragEvent): boolean => {
+      const types = Array.from(event.dataTransfer?.types ?? []);
+      return (
+        types.includes('Files') ||
+        types.includes('text/uri-list') ||
+        // VS Code explorer/editor-tab drags use a prefixed uri-list type.
+        types.some((type) => type.endsWith('uri-list'))
+      );
+    };
+    const onDragEnter = (event: DragEvent): void => {
+      // Diagnostic breadcrumb: if this never logs while dragging, the drag
+      // isn't reaching the webview at all (VS Code blocks OS drags unless
+      // Shift is held) — check via "Developer: Open Webview Developer Tools".
+      console.log(
+        '[JustCode] dragenter, types:',
+        Array.from(event.dataTransfer?.types ?? [])
+      );
+    };
+    const onDragOver = (event: DragEvent): void => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      setDropActive(true);
+    };
+    const onDragLeave = (event: DragEvent): void => {
+      // Only clear when the drag actually leaves the window (no related target).
+      if (event.relatedTarget === null) setDropActive(false);
+    };
+    const onDrop = (event: DragEvent): void => {
+      console.log(
+        '[JustCode] drop, types:',
+        Array.from(event.dataTransfer?.types ?? []),
+        'files:',
+        event.dataTransfer?.files.length ?? 0
+      );
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setDropActive(false);
+      const transfer = event.dataTransfer;
+      if (!transfer) return;
+      const files = Array.from(transfer.files);
+      if (files.length > 0) {
+        setDroppedFiles(files);
+        return;
+      }
+      // No File payloads: fall back to dropped URIs (explorer drags). VS Code
+      // uses a prefixed uri-list type for drags that originate inside it.
+      const uriList =
+        transfer.getData('text/uri-list') ||
+        transfer.getData('application/vnd.code.uri-list');
+      const paths = uriList
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith('file://'))
+        .map((line) => {
+          try {
+            return decodeURIComponent(line.slice('file://'.length));
+          } catch {
+            return '';
+          }
+        })
+        .filter((path) => path.startsWith('/') || /^[A-Za-z]:/.test(path));
+      if (paths.length > 0) {
+        postToHost({ type: WebviewMessageType.AttachDroppedPaths, paths });
+      }
+    };
+    window.addEventListener('dragenter', onDragEnter, true);
+    window.addEventListener('dragover', onDragOver, true);
+    window.addEventListener('dragleave', onDragLeave, true);
+    window.addEventListener('drop', onDrop, true);
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter, true);
+      window.removeEventListener('dragover', onDragOver, true);
+      window.removeEventListener('dragleave', onDragLeave, true);
+      window.removeEventListener('drop', onDrop, true);
+    };
   }, []);
 
   // Persist changes-panel resolutions to the host whenever they change, so they
@@ -418,7 +536,11 @@ export function App(): React.JSX.Element {
     return () => cancelAnimationFrame(raf);
   }, [state.approval, state.input, pinToBottom]);
 
-  const sendNow = (content: string, images: WebviewImage[]): void => {
+  const sendNow = (
+    content: string,
+    images: WebviewImage[],
+    files: WebviewFileAttachment[] = []
+  ): void => {
     // Host-only commands (e.g. `/usage`) aren't model turns: the host answers
     // them with a transient notice and never runs the agent, so it never sends
     // `TurnComplete`. Post them straight through without the optimistic submit —
@@ -431,7 +553,14 @@ export function App(): React.JSX.Element {
     // Sending a new message should always snap to it, even if the user had
     // scrolled up while reading the previous turn.
     stickToBottomRef.current = true;
-    dispatch({ type: LocalActionType.OptimisticSubmit, content, images });
+    dispatch({
+      type: LocalActionType.OptimisticSubmit,
+      content,
+      images,
+      ...(files.length
+        ? { attachmentNames: files.map((file) => file.name) }
+        : {}),
+    });
     // Pin explicitly on the next frame rather than leaning only on the content
     // ResizeObserver. When the changes panel is open it sits outside the scroll
     // container and can absorb the layout change, so the observer may not fire
@@ -442,25 +571,30 @@ export function App(): React.JSX.Element {
       type: WebviewMessageType.Submit,
       content,
       ...(images.length ? { images } : {}),
+      ...(files.length ? { files } : {}),
     });
   };
 
-  const submit = (content: string, images: WebviewImage[]): void => {
+  const submit = (
+    content: string,
+    images: WebviewImage[],
+    files: WebviewFileAttachment[] = []
+  ): void => {
     // Host-only commands (e.g. `/usage`) run immediately and independently of
     // the turn — never queued or mirrored into the steering queue (which would
     // fold them into the running turn as actual model input). `sendNow` routes
     // them straight to the host.
     if (HOST_COMMANDS.has(content.trim())) {
-      sendNow(content, images);
+      sendNow(content, images, files);
       return;
     }
     // A turn is in flight — hold this message and send it once the agent is idle
     // instead of erroring. It's shown as a pending pill the user can cancel.
     if (state.busy) {
-      dispatch({ type: LocalActionType.QueueMessage, content, images });
+      dispatch({ type: LocalActionType.QueueMessage, content, images, files });
       return;
     }
-    sendNow(content, images);
+    sendNow(content, images, files);
   };
 
   // Flush the queue once the active turn finishes: combine the held messages into
@@ -475,21 +609,27 @@ export function App(): React.JSX.Element {
       .filter((c) => c.trim().length > 0)
       .join('\n\n');
     const images = state.queuedMessages.flatMap((m) => m.images);
+    const files = state.queuedMessages.flatMap((m) => m.files ?? []);
     dispatch({ type: LocalActionType.ClearQueue });
-    sendNow(content, images);
+    sendNow(content, images, files);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.busy, state.queuedMessages, editingQueuedId]);
 
   // Mirror the text follow-ups to the host so the in-flight turn can steer on
   // them at its next step instead of waiting for the turn to finish. Only
-  // text-only entries are steerable — an image-bearing follow-up stays queued
-  // and sends as its own turn once the current one ends. Re-sent on every queue
-  // change (add/edit/delete) so the host always has the latest editable state.
+  // text-only entries are steerable — an image- or file-bearing follow-up stays
+  // queued and sends as its own turn once the current one ends. Re-sent on every
+  // queue change (add/edit/delete) so the host always has the latest state.
   React.useEffect(() => {
     postToHost({
       type: WebviewMessageType.SyncSteeringQueue,
       messages: state.queuedMessages
-        .filter((m) => m.images.length === 0 && m.content.trim().length > 0)
+        .filter(
+          (m) =>
+            m.images.length === 0 &&
+            (m.files?.length ?? 0) === 0 &&
+            m.content.trim().length > 0
+        )
         .map((m) => ({ id: m.id, content: m.content })),
     });
   }, [state.queuedMessages]);
@@ -932,6 +1072,10 @@ export function App(): React.JSX.Element {
             <p className="no-provider-desc">
               Connect a provider to start chatting.
             </p>
+            {/* A host failure (services/config error) falls back to this screen
+                with a notice explaining what broke — show it so the real error
+                isn't mistaken for a missing provider connection. */}
+            {state.notice ? <div className="notice">{state.notice}</div> : null}
             <button
               type="button"
               className="no-provider-btn"
@@ -947,7 +1091,7 @@ export function App(): React.JSX.Element {
       <SessionsView
         loading={state.status === ChatStatus.Loading}
         sessions={state.sessions}
-        activeSessionId={state.activeSessionId}
+        activeSessionIds={state.activeSessionIds}
         onOpen={openSession}
         onRename={renameSession}
         onDelete={deleteSession}
@@ -1074,6 +1218,13 @@ export function App(): React.JSX.Element {
     <div
       className={`app${editingMessageId !== null ? ' editing-message' : ''}`}
     >
+      {dropActive ? (
+        <div className="drop-overlay" aria-hidden="true">
+          <span className="drop-overlay-pill">
+            <PaperclipIcon size={14} /> Drop to attach as context
+          </span>
+        </div>
+      ) : null}
       <div className="chat-header">
         <button
           type="button"
@@ -1157,6 +1308,11 @@ export function App(): React.JSX.Element {
                 they're visible regardless of scroll position. */}
             {state.notice && !state.noticeTimeoutMs && !state.noticeLoading ? (
               <div className="notice">{state.notice}</div>
+            ) : null}
+
+            {/* Brand-new conversation: greet with the logo instead of a void. */}
+            {state.messages.length === 0 && !state.busy ? (
+              <WelcomeSplash />
             ) : null}
 
             {hiddenMessageCount > 0 ? (
@@ -1450,9 +1606,11 @@ export function App(): React.JSX.Element {
           {state.queuedMessages.map((m) => {
             const editing = editingQueuedId === m.id;
             // Text-only follow-ups steer the running turn at its next step;
-            // image-bearing ones can't be folded in, so they wait for the flush.
+            // image/file-bearing ones can't be folded in, so they wait.
             const steerable =
-              m.images.length === 0 && m.content.trim().length > 0;
+              m.images.length === 0 &&
+              (m.files?.length ?? 0) === 0 &&
+              m.content.trim().length > 0;
             return (
               <div
                 key={m.id}
@@ -1526,7 +1684,10 @@ export function App(): React.JSX.Element {
         onSubmit={submit}
         initialDraft={composerDraftRef.current}
         initialImages={composerDraftImagesRef.current}
+        initialFiles={composerDraftFilesRef.current}
         onDraftChange={persistComposerDraft}
+        droppedFiles={droppedFiles}
+        onDroppedFilesHandled={() => setDroppedFiles(null)}
       />
 
       {openSubAgentRun ? (

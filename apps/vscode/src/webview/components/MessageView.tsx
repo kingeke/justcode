@@ -5,6 +5,7 @@ import { DiffView } from '@ext/webview/components/DiffView';
 import {
   CheckIcon,
   CopyIcon,
+  FileIcon,
   PencilIcon,
   RefreshIcon,
 } from '@ext/webview/components/Icons';
@@ -197,6 +198,16 @@ function MessageViewImpl({
   return (
     <div id={domId} className={`msg msg-${message.role}`}>
       <div className="msg-body">
+        {message.attachments?.length ? (
+          <div className="msg-attachments">
+            {message.attachments.map((name, index) => (
+              <span key={index} className="msg-attachment" title={name}>
+                <FileIcon size={13} />
+                <span className="msg-attachment-name">{name}</span>
+              </span>
+            ))}
+          </div>
+        ) : null}
         {message.images?.length ? (
           <div className="msg-images">
             {message.images.map((image, index) => {

@@ -52,4 +52,16 @@ describe('SessionsList focus behavior', () => {
     expect(next.sessions).toHaveLength(1);
     expect(next.hasConnectedProvider).toBe(true);
   });
+
+  it('tracks every session with a running turn, not just one', () => {
+    const next = reducer(inChat, {
+      type: HostMessageType.SessionsList,
+      sessions: [],
+      hasConnectedProvider: true,
+      focus: false,
+      activeSessionIds: ['s1', 's2'],
+    });
+
+    expect(next.activeSessionIds).toEqual(['s1', 's2']);
+  });
 });

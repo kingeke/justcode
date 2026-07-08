@@ -13,6 +13,7 @@ Always:
 - Prioritize reusing enums instead of raw strings
 - Always use ENUMS instead of strings, if you see raw strings being used as checks, switch to ENUMS
 - When changing one app confirm if it affects other apps as well
+- Do not assume limits, always ask the user for limit clarifications and do not assume a limit.
 
 Treat full repository reads as a last resort.
 

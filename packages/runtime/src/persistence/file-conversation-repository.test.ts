@@ -197,6 +197,57 @@ describe('FileConversationRepository', () => {
     expect(await readdir(directory)).toEqual([]);
     await expect(repository.list()).resolves.toEqual([]);
   });
+
+  it('skips a corrupt summary file instead of failing the whole list', async () => {
+    const repository = new FileConversationRepository(directory);
+    const healthy = createConversation('healthy');
+    healthy.messages.push(createMessage(MessageRole.User, 'hi'));
+    await repository.save(healthy);
+    // Trailing garbage after valid JSON — the shape a torn/interleaved write
+    // leaves behind ("unexpected non-whitespace character after JSON").
+    await writeFile(
+      sessionFilePath(directory, 'corrupt'),
+      '{"sessionId":"corrupt","messageCount":1}\ngarbage}',
+      'utf8'
+    );
+
+    const sessions = await repository.list();
+
+    expect(sessions.map((s) => s.sessionId)).toEqual(['healthy']);
+  });
+
+  it('writes atomically: concurrent saves never interleave into corrupt JSON', async () => {
+    const repository = new FileConversationRepository(directory);
+    const conversation = createConversation('contended');
+    conversation.messages.push(
+      createMessage(MessageRole.User, 'x'.repeat(50_000))
+    );
+
+    // Hammer the same session from many concurrent writers; every observed
+    // file state must be complete, parseable JSON (last write wins).
+    await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        repository.save({
+          ...conversation,
+          title: `writer-${i}`,
+        })
+      )
+    );
+
+    const summary = JSON.parse(
+      await readFileText(sessionFilePath(directory, 'contended'))
+    ) as { sessionId: string };
+    const full = JSON.parse(
+      await readFileText(sessionMessagesFilePath(directory, 'contended'))
+    ) as { messages: unknown[] };
+    expect(summary.sessionId).toBe('contended');
+    expect(full.messages).toHaveLength(1);
+    // No temp litter left behind.
+    const leftovers = (await readdir(directory)).filter((name) =>
+      name.endsWith('.tmp')
+    );
+    expect(leftovers).toEqual([]);
+  });
 });
 
 async function readFileText(path: string): Promise<string> {

@@ -7,7 +7,12 @@ import {
   WebviewSubAgentStatus,
   type SubAgentActivityMessage,
 } from '@ext/shared/protocol';
-import { initialState, reducer, type ChatState } from '@ext/webview/state';
+import {
+  initialState,
+  LocalActionType,
+  reducer,
+  type ChatState,
+} from '@ext/webview/state';
 
 function activity(
   overrides: Partial<SubAgentActivityMessage> = {}
@@ -141,5 +146,32 @@ describe('sub agent activity state', () => {
     expect(state.subAgents).toHaveLength(2);
     expect(state.subAgents[0]?.status).toBe(WebviewSubAgentStatus.Failed);
     expect(state.subAgents[1]?.status).toBe(WebviewSubAgentStatus.Running);
+  });
+
+  it('retires finished runs to the session list when a new turn starts', () => {
+    // A turn ran a sub agent to completion…
+    let state: ChatState = reducer(initialState, activity());
+    state = reducer(
+      state,
+      activity({
+        phase: WebviewSubAgentPhase.End,
+        status: WebviewSubAgentStatus.Completed,
+        summary: 'done',
+      })
+    );
+
+    // …then the user sends a new message: the live list clears, but the run
+    // must move to the session list so the floating robot button keeps it.
+    state = reducer(state, {
+      type: LocalActionType.OptimisticSubmit,
+      content: 'next question',
+      images: [],
+    });
+
+    expect(state.subAgents).toHaveLength(0);
+    expect(state.sessionSubAgents.map((run) => run.runId)).toContain('run-1');
+    expect(
+      state.sessionSubAgents.find((r) => r.runId === 'run-1')?.status
+    ).toBe(WebviewSubAgentStatus.Completed);
   });
 });

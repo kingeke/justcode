@@ -7,6 +7,7 @@ import {
   type ApprovalRequestMessage,
   type HostToWebview,
   type UserInputRequestMessage,
+  type WebviewFileAttachment,
   type WebviewImage,
   type WebviewMessage,
   type WebviewModel,
@@ -86,6 +87,8 @@ export interface QueuedMessage {
   id: string;
   content: string;
   images: WebviewImage[];
+  /** File attachments staged with the queued message, if any. */
+  files?: WebviewFileAttachment[];
 }
 
 export type ChatView = 'sessions' | 'chat' | 'model-picker';
@@ -112,8 +115,8 @@ export interface ChatState {
   hasConnectedProvider: boolean;
   /** The session currently open in the chat view. */
   sessionId?: string | undefined;
-  /** The session with a turn running in the host, shown as loading in the list. */
-  activeSessionId?: string | undefined;
+  /** Sessions with a turn running in the host, shown as loading in the list. */
+  activeSessionIds?: string[] | undefined;
   // The fields below are cleared back to `undefined` on session resets, so they
   // carry an explicit `| undefined` (required under exactOptionalPropertyTypes).
   providerId?: string | undefined;
@@ -252,7 +255,7 @@ export const initialState: ChatState = {
   sessions: [],
   hasConnectedProvider: false,
   sessionId: undefined,
-  activeSessionId: undefined,
+  activeSessionIds: undefined,
   models: [],
   providerErrors: [],
   messages: [],
@@ -329,6 +332,8 @@ export type LocalAction =
       type: LocalActionType.OptimisticSubmit;
       content: string;
       images: WebviewImage[];
+      /** Names of attached files, echoed as chips on the optimistic message. */
+      attachmentNames?: string[];
     }
   | { type: LocalActionType.OptimisticRetry; messageId: string }
   | {
@@ -364,6 +369,7 @@ export type LocalAction =
       type: LocalActionType.QueueMessage;
       content: string;
       images: WebviewImage[];
+      files?: WebviewFileAttachment[];
     }
   | { type: LocalActionType.DequeueMessage; id: string }
   | { type: LocalActionType.UpdateQueuedMessage; id: string; content: string }
@@ -382,6 +388,21 @@ export type Action = HostToWebview | LocalAction;
  * the streaming/thinking/tools fields are transient scratch space for the
  * in-flight turn and get cleared whenever the host hands us a fresh snapshot.
  */
+/**
+ * Folds the previous turn's live sub agent runs into the session's persisted
+ * list before a new turn clears the live state. Without this, finished runs
+ * vanish from the floating robot button the moment a new message is sent, and
+ * only reappear once a Ready snapshot reloads them from disk.
+ */
+function retireLiveSubAgents(state: ChatState): SubAgentRunView[] {
+  if (state.subAgents.length === 0) return state.sessionSubAgents;
+  const liveIds = new Set(state.subAgents.map((run) => run.runId));
+  return [
+    ...state.sessionSubAgents.filter((run) => !liveIds.has(run.runId)),
+    ...state.subAgents,
+  ];
+}
+
 export function reducer(state: ChatState, action: Action): ChatState {
   switch (action.type) {
     case HostMessageType.Ready:
@@ -546,7 +567,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
           ...state,
           sessions: action.sessions,
           hasConnectedProvider: action.hasConnectedProvider,
-          activeSessionId: action.activeSessionId,
+          activeSessionIds: action.activeSessionIds,
         };
       }
       return {
@@ -555,7 +576,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         view: 'sessions',
         sessions: action.sessions,
         hasConnectedProvider: action.hasConnectedProvider,
-        activeSessionId: action.activeSessionId,
+        activeSessionIds: action.activeSessionIds,
         busy: false,
         approval: undefined,
         input: undefined,
@@ -583,6 +604,9 @@ export function reducer(state: ChatState, action: Action): ChatState {
                   })),
                 }
               : {}),
+            ...(action.attachmentNames?.length
+              ? { attachments: action.attachmentNames }
+              : {}),
           },
         ],
         busy: true,
@@ -593,6 +617,9 @@ export function reducer(state: ChatState, action: Action): ChatState {
         turnStartedAt: Date.now(),
         turnFirstTokenAt: 0,
         tools: [],
+        // The previous turn's finished runs retire to the session list so the
+        // floating robot button keeps them reviewable across turns.
+        sessionSubAgents: retireLiveSubAgents(state),
         subAgents: [],
         subAgentTranscripts: {},
         liveTurnItems: [],
@@ -617,6 +644,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         turnStartedAt: Date.now(),
         turnFirstTokenAt: 0,
         tools: [],
+        sessionSubAgents: retireLiveSubAgents(state),
         subAgents: [],
         subAgentTranscripts: {},
         liveTurnItems: [],
@@ -657,6 +685,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         turnStartedAt: Date.now(),
         turnFirstTokenAt: 0,
         tools: [],
+        sessionSubAgents: retireLiveSubAgents(state),
         subAgents: [],
         subAgentTranscripts: {},
         liveTurnItems: [],
@@ -907,6 +936,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
             id: `queued-${Date.now()}-${state.queuedMessages.length}`,
             content: action.content,
             images: action.images,
+            ...(action.files?.length ? { files: action.files } : {}),
           },
         ],
       };

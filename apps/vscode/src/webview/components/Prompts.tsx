@@ -70,18 +70,20 @@ export function InputPrompt({
     <div className="prompt prompt-input">
       <div className="prompt-head">{request.question}</div>
       {request.options && request.options.length > 0 ? (
-        <div className="prompt-options">
-          {request.options.map((option) => (
-            <button
-              key={option}
-              type="button"
-              className="btn"
-              onClick={() => onRespond(option)}
-            >
-              {option}
-            </button>
+        <ol className="prompt-options">
+          {request.options.map((option, index) => (
+            <li key={option}>
+              <button
+                type="button"
+                className="btn prompt-option"
+                onClick={() => onRespond(option)}
+              >
+                <span className="prompt-option-number">{index + 1}.</span>
+                <span className="prompt-option-label">{option}</span>
+              </button>
+            </li>
           ))}
-        </div>
+        </ol>
       ) : null}
       <form
         className="prompt-form"

@@ -1,12 +1,7 @@
-import {
-  mkdir,
-  readdir,
-  readFile,
-  rm,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+
+import { writeFileAtomic } from '@runtime/persistence/atomic-write';
 
 import {
   createConversation,
@@ -76,11 +71,14 @@ export class FileConversationRepository implements ConversationRepository {
 
     // Write the full conversation first (the source of truth), then derive the
     // lean summary from it. If a crash lands between the two, the summary is at
-    // worst stale — the next save reconciles it.
-    await writeFile(
+    // worst stale — the next save reconciles it. Writes are atomic
+    // (temp + rename): concurrent saves for the same session (e.g. a
+    // fire-and-forget stats save racing the turn's conversation save) then
+    // each land whole with last-write-wins instead of interleaving into
+    // corrupt JSON.
+    await writeFileAtomic(
       this.getMessagesFilePath(conversation.sessionId),
-      `${JSON.stringify(conversation, null, 2)}\n`,
-      'utf8'
+      `${JSON.stringify(conversation, null, 2)}\n`
     );
 
     const summary: ConversationSummary = {
@@ -94,10 +92,9 @@ export class FileConversationRepository implements ConversationRepository {
         conversation.messages.length +
         (conversation.previousMessages?.length ?? 0),
     };
-    await writeFile(
+    await writeFileAtomic(
       this.getFilePath(conversation.sessionId),
-      `${JSON.stringify(summary, null, 2)}\n`,
-      'utf8'
+      `${JSON.stringify(summary, null, 2)}\n`
     );
   }
 
@@ -116,12 +113,24 @@ export class FileConversationRepository implements ConversationRepository {
           )
           .map(async (entry) => {
             const filePath = join(this.sessionsDirectory, entry.name);
-            const raw = await readFile(filePath, 'utf8');
-            // Either a lean summary (new layout) or a full conversation (a
-            // legacy file not yet migrated) — both carry the summary fields, and
-            // a legacy file still has `messages` to count.
-            const record = JSON.parse(raw) as ConversationSummary &
-              Partial<Conversation>;
+            // One unreadable/corrupt summary must not sink the whole sessions
+            // list (which the UI treats as "nothing configured at all") — skip
+            // it and keep listing the healthy sessions.
+            let record: ConversationSummary & Partial<Conversation>;
+            try {
+              const raw = await readFile(filePath, 'utf8');
+              // Either a lean summary (new layout) or a full conversation (a
+              // legacy file not yet migrated) — both carry the summary fields,
+              // and a legacy file still has `messages` to count.
+              record = JSON.parse(raw) as ConversationSummary &
+                Partial<Conversation>;
+            } catch (error) {
+              console.error(
+                `Skipping unreadable session file ${filePath}`,
+                error
+              );
+              return undefined;
+            }
             const messageCount =
               record.messageCount ?? record.messages?.length ?? 0;
             const needsStat =
@@ -139,9 +148,9 @@ export class FileConversationRepository implements ConversationRepository {
           })
       );
 
-      return sessions.sort(
-        (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)
-      );
+      return sessions
+        .filter((session): session is ConversationSummary => !!session)
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
     } catch (error) {
       if (isFileMissingError(error)) {
         return [];

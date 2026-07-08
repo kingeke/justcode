@@ -13,8 +13,8 @@ import {
 interface SessionsViewProps {
   loading: boolean;
   sessions: WebviewSessionSummary[];
-  /** Session with a turn still running in the host — shown as loading. */
-  activeSessionId?: string | undefined;
+  /** Sessions with a turn still running in the host — shown as loading. */
+  activeSessionIds?: string[] | undefined;
   onOpen: (sessionId: string) => void;
   onRename: (sessionId: string, title: string) => void;
   onDelete: (sessionId: string) => void;
@@ -25,7 +25,7 @@ interface SessionsViewProps {
 export function SessionsView({
   loading,
   sessions,
-  activeSessionId,
+  activeSessionIds,
   onOpen,
   onRename,
   onDelete,
@@ -163,7 +163,8 @@ export function SessionsView({
                 {folded
                   ? null
                   : groupSessions.map((session) => {
-                      const isActive = session.sessionId === activeSessionId;
+                      const isActive =
+                        activeSessionIds?.includes(session.sessionId) ?? false;
                       const isEditing = session.sessionId === editingId;
                       const isOpening = session.sessionId === openingId;
                       return (

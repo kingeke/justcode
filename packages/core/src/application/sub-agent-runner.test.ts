@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  DEFAULT_SUB_AGENT_MAX_ITERATIONS,
-  runSubAgent,
-} from '@core/application/sub-agent-runner';
+import { runSubAgent } from '@core/application/sub-agent-runner';
 import type {
   ChatRequest,
   ChatResult,
@@ -140,29 +137,42 @@ describe('runSubAgent', () => {
     expect(errorMessage?.content).toContain('Unknown tool: missing');
   });
 
-  it('stops at the iteration cap instead of looping forever', async () => {
+  it('has no iteration cap: runs until the model stops calling tools', async () => {
+    const rounds = 40;
+    const responses: ChatResult[] = Array.from({ length: rounds }, (_, i) => ({
+      content: '',
+      toolCalls: [{ id: `call-${i}`, name: 'echo', arguments: '{}' }],
+    }));
+    responses.push({ content: 'finished' });
+
+    let index = 0;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Ollama,
+      async sendChat() {
+        const response = responses[index];
+        index += 1;
+        return response ?? { content: '' };
+      },
+      async listModels() {
+        return [];
+      },
+      getDefaultModel() {
+        return undefined;
+      },
+    };
+
     const result = await runSubAgent({
-      provider: providerFromResponses([
-        {
-          content: '',
-          toolCalls: [{ id: 'call-1', name: 'echo', arguments: '{}' }],
-        },
-      ]),
+      provider,
       model: 'test-model',
       tools: [new EchoTool()],
       prompt: 'loop',
       systemPrompt: 'sub agent',
       workspaceRoot: '/workspace',
       sessionId: 'subagent-test',
-      maxIterations: 3,
     });
 
-    expect(result.toolUseCount).toBe(3);
-    expect(result.summary).toContain('3-iteration limit');
-  });
-
-  it('has a sane default iteration cap', () => {
-    expect(DEFAULT_SUB_AGENT_MAX_ITERATIONS).toBeGreaterThan(0);
+    expect(result.toolUseCount).toBe(rounds);
+    expect(result.summary).toBe('finished');
   });
 
   it('throws an AbortError when the signal is already aborted', async () => {

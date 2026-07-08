@@ -7,9 +7,6 @@ import type { ProviderClient, TokenUsage } from '@core/ports/chat-model';
 import type { Tool, ToolInvocationView } from '@core/ports/tool';
 import { buildSystemPrompt } from '@core/application/system-prompt';
 
-/** Hard cap on model round-trips so a confused sub agent can't loop forever. */
-export const DEFAULT_SUB_AGENT_MAX_ITERATIONS = 25;
-
 export interface SubAgentToolActivity {
   toolName: string;
   view: ToolInvocationView;
@@ -33,7 +30,6 @@ export interface RunSubAgentInput {
    */
   sessionId: string;
   signal?: AbortSignal;
-  maxIterations?: number;
   /** Fired for every message appended to the sub agent's transcript. */
   onMessage?: (message: ChatMessage) => void;
   /** Fired before each tool call executes, for live progress display. */
@@ -51,14 +47,15 @@ export interface RunSubAgentResult {
 
 /**
  * A minimal agentic loop for sub agents: send the transcript, execute any tool
- * calls, and repeat until the model replies without tools (or the iteration cap
- * is hit). Deliberately independent of `ChatSessionService` — no persistence,
- * approvals, compaction, or titles; the caller owns all of that.
+ * calls, and repeat until the model replies without tools (or the run is
+ * aborted). Deliberately independent of `ChatSessionService` — no persistence,
+ * approvals, compaction, or titles; the caller owns all of that. There is no
+ * round-trip cap: the sub agent works until done, and the abort signal is the
+ * user's stop.
  */
 export async function runSubAgent(
   input: RunSubAgentInput
 ): Promise<RunSubAgentResult> {
-  const maxIterations = input.maxIterations ?? DEFAULT_SUB_AGENT_MAX_ITERATIONS;
   const toolsByName = new Map(
     input.tools.map((tool) => [tool.definition.name, tool])
   );
@@ -78,7 +75,7 @@ export async function runSubAgent(
   let usage: TokenUsage | undefined;
   let toolUseCount = 0;
 
-  for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+  for (;;) {
     throwIfAborted(input.signal);
 
     const response = await input.provider.sendChat({
@@ -168,11 +165,6 @@ export async function runSubAgent(
       );
     }
   }
-
-  // Cap reached: return whatever the transcript holds rather than looping on.
-  const summary = `Sub agent stopped after reaching the ${maxIterations}-iteration limit without finishing.`;
-  append(createMessage(MessageRole.Assistant, summary));
-  return { summary, messages, toolUseCount, ...(usage ? { usage } : {}) };
 }
 
 function describeSafely(tool: Tool, rawArguments: string): ToolInvocationView {

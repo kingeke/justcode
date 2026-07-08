@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { rm, writeFile } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 
 import {
   createConversation,
@@ -9,6 +10,7 @@ import {
   type SessionStats,
 } from '@core/domain/conversation';
 import { APP_NAME } from '@core/branding';
+import { notifyOS } from '@ext/host/os-notifier';
 import {
   createMessage,
   MessageRole,
@@ -91,6 +93,7 @@ import {
   WebviewMessageType,
   WebviewRole,
   type HostToWebview,
+  type WebviewFileAttachment,
   type WebviewImage,
   type WebviewMessage,
   type WebviewStats,
@@ -106,6 +109,8 @@ import {
   type WebviewSkillCommand,
   type TokenMessage,
   type ThinkingMessage,
+  type ApprovalRequestMessage,
+  type UserInputRequestMessage,
   type ToolActivityMessage,
   type SubAgentActivityMessage,
   type WebviewSubAgentRunSnapshot,
@@ -127,6 +132,78 @@ import {
 const RESULT_PREVIEW_LIMIT = 2000;
 
 /**
+ * Everything scoped to one in-flight turn, keyed by its session id. Turns run
+ * concurrently — at most one per session — so nothing turn-scoped may live on
+ * the bridge itself: a turn keeps running (and must keep its own state) after
+ * the user navigates to another session.
+ */
+interface ActiveTurn {
+  readonly sessionId: string;
+  readonly abortController: AbortController;
+  /** The turn's evolving conversation — authoritative while the turn runs. */
+  conversation: Conversation;
+  /**
+   * The user message that started this turn. The service doesn't persist it
+   * until its own save, so reopening the session mid-turn must append this to
+   * the loaded transcript or the just-sent message would vanish from view.
+   */
+  readonly pendingUserMessage: ChatMessage;
+  /**
+   * The turn's output as an ordered, coalesced stream of the webview messages
+   * that produced it (token/thinking runs + tool/sub-agent activity). Reopening
+   * the turn's session mid-turn replays these through the same reducer,
+   * rebuilding the live thinking, tool cards, and streaming answer exactly.
+   */
+  liveTurnEvents: Array<
+    | TokenMessage
+    | ThinkingMessage
+    | ToolActivityMessage
+    | SubAgentActivityMessage
+  >;
+  /**
+   * Live sub agent runs, keyed by run id. Each value is the run object the
+   * task tool mutates as the sub agent works, so serving a transcript request
+   * reads the freshest messages. Finished turns' runs live on
+   * `conversation.subAgentRuns` instead.
+   */
+  readonly liveSubAgentRuns: Map<string, SubAgentRun>;
+  /**
+   * The webview's editable follow-up queue for this turn, mirrored in via
+   * `SyncSteeringQueue` and drained a step at a time by the agent loop.
+   */
+  steeringQueue: { id: string; content: string }[];
+  /** Epoch ms of the turn's start and first token, for the live tok/s base. */
+  startedAtMs: number;
+  firstTokenAtMs: number | undefined;
+  /**
+   * The session's cumulative usage/stats, seeded from the bridge's viewed
+   * totals when the turn starts and persisted under this session when it ends.
+   * Kept here (not on the bridge) so a background turn can't corrupt the
+   * metrics of whatever session the user is looking at.
+   */
+  cumulativeUsage: Required<Omit<WebviewUsage, 'lastInputTokens'>>;
+  costKnown: boolean;
+  avgTokensPerSecond: number;
+  completedTurnCount: number;
+  lastInputTokens: number;
+  lastTurnStats: { ttftMs: number; tokensPerSecond: number } | undefined;
+  /** Approval/input request ids opened by this turn, dropped when it ends. */
+  readonly pendingRequestIds: Set<string>;
+  /**
+   * Approval/input prompts this turn is currently waiting on, keyed by request
+   * id. A prompt stays here until it's answered (or the turn ends), so
+   * reopening the turn's session re-poses any question that's still open —
+   * whether it was raised while the user was away, or shown and then left
+   * behind by navigating to another session (the Ready snapshot clears the
+   * webview's prompt state).
+   */
+  readonly openPrompts: Map<
+    string,
+    ApprovalRequestMessage | UserInputRequestMessage
+  >;
+}
+
+/**
  * Owns a single chat session and translates between the webview's message
  * protocol and `ChatSessionService`. It is deliberately ignorant of VSCode: the
  * host hands it a `post` function and forwards inbound webview messages, which
@@ -145,35 +222,14 @@ export class ChatBridge {
   // Providers whose last model-list fetch failed, mirrored to the picker so an
   // unreachable provider surfaces its error instead of silently disappearing.
   private providerErrors: WebviewProviderError[] = [];
-  // The webview's current text follow-up queue, mirrored here so the running
-  // turn can steer on it. Drained (and cleared) a step at a time by the agent
-  // loop via `drainSteering`; reset when a fresh turn starts.
-  private steeringQueue: { id: string; content: string }[] = [];
-  private abortController: AbortController | undefined;
-  // Session id of the turn currently in flight, if any. Lets the sessions list
-  // flag that session as loading and a reopened session restore its busy state,
-  // since a turn keeps running in the host after the user navigates away.
-  private activeTurnSessionId: string | undefined;
-  // The in-flight turn's output as an ordered, coalesced stream of the webview
-  // messages that produced it (token/thinking runs + tool activity). Reopening
-  // the session mid-turn replays these through the same reducer, rebuilding the
-  // live thinking, tool cards, and streaming answer exactly — with their
-  // original ordering, which the host otherwise can't reconstruct. Reset per turn.
-  private liveTurnEvents: Array<
-    | TokenMessage
-    | ThinkingMessage
-    | ToolActivityMessage
-    | SubAgentActivityMessage
-  > = [];
-  // Live sub agent runs of the in-flight turn, keyed by run id. Each value is
-  // the run object the task tool mutates as the sub agent works, so serving a
-  // transcript request reads the freshest messages. Reset per turn; finished
-  // turns' runs live on `conversation.subAgentRuns` instead.
-  private liveSubAgentRuns = new Map<string, SubAgentRun>();
-  // Epoch ms of the in-flight turn's start and first token, sent on resume so
-  // the webview's live tok/s keeps its original time base. Undefined off-turn.
-  private turnStartedAtMs: number | undefined;
-  private turnFirstTokenAtMs: number | undefined;
+  // The in-flight turns, keyed by session id — at most one per session, and
+  // turns in different sessions run concurrently. All turn-scoped state (abort
+  // handle, live events, steering, metrics) lives on the turn itself so a
+  // background turn can't leak into whatever session the user is viewing.
+  private readonly activeTurns = new Map<string, ActiveTurn>();
+  // The in-flight compaction's abort handle, if any. Compactions pin the user
+  // to their session (see refuseNavigationWhileCompacting), so one at a time.
+  private compactionAbort: AbortController | undefined;
   private readonly pendingApprovals = new Map<
     string,
     (approved: boolean) => void
@@ -306,7 +362,16 @@ export class ChatBridge {
       relativePath: string,
       baseline: string,
       created: boolean
-    ) => void
+    ) => void,
+    /**
+     * Whether the VS Code window currently has OS focus; injected by the view
+     * provider. Drives OS notifications: when the user is elsewhere, a finished
+     * turn or a waiting question raises a native toast so they can come back.
+     * Absent (e.g. in tests) means "focused" — never notify.
+     */
+    private readonly isWindowFocused: () => boolean = () => true,
+    /** Absolute path to the app logo for OS notifications, when available. */
+    private readonly notificationIconPath?: string
   ) {
     // The extension host's cwd isn't the workspace, and anchoring to the
     // workspace root would scatter a debug.log into every project (and force the
@@ -324,7 +389,7 @@ export class ChatBridge {
         await this.sendSessionsList();
         return;
       case WebviewMessageType.Submit:
-        await this.submit(message.content, message.images);
+        await this.submit(message.content, message.images, message.files);
         return;
       case WebviewMessageType.Retry:
         await this.retry(
@@ -334,16 +399,23 @@ export class ChatBridge {
             : undefined
         );
         return;
-      case WebviewMessageType.Cancel:
-        this.abortController?.abort();
+      case WebviewMessageType.Cancel: {
+        // Stop applies to what the user is looking at: the viewed session's
+        // turn, or the compaction (which pins the user to its session).
+        const viewedTurn = this.activeTurns.get(this.sessionId);
+        if (viewedTurn) viewedTurn.abortController.abort();
+        else this.compactionAbort?.abort();
         return;
+      }
       case WebviewMessageType.ApprovalResponse:
         this.pendingApprovals.get(message.id)?.(message.approved);
         this.pendingApprovals.delete(message.id);
+        this.closeTurnPrompt(message.id);
         return;
       case WebviewMessageType.UserInputResponse:
         this.pendingInputs.get(message.id)?.(message.value);
         this.pendingInputs.delete(message.id);
+        this.closeTurnPrompt(message.id);
         return;
       case WebviewMessageType.SelectModel:
         this.activeModel = message.modelId;
@@ -463,17 +535,24 @@ export class ChatBridge {
         // textarea and saves — which reconnects servers live (see reloadMcp).
         this.onOpenSettings?.(SettingsSection.Mcp);
         return;
-      case WebviewMessageType.SyncSteeringQueue:
+      case WebviewMessageType.SyncSteeringQueue: {
         // Mirror the webview's editable follow-up queue so the in-flight turn
         // can fold it in at the next step. Replace wholesale — the webview sends
-        // the full current snapshot on every change (queue/edit/delete).
-        this.steeringQueue = message.messages;
+        // the full current snapshot on every change (queue/edit/delete). The
+        // queue belongs to the session the user is viewing, so it steers that
+        // session's turn only.
+        const steeredTurn = this.activeTurns.get(this.sessionId);
+        if (steeredTurn) steeredTurn.steeringQueue = message.messages;
         return;
+      }
       case WebviewMessageType.RequestWorkspaceFiles:
         await this.sendWorkspaceFiles();
         return;
       case WebviewMessageType.RequestSubAgentTranscript:
         await this.sendSubAgentTranscript(message.runId);
+        return;
+      case WebviewMessageType.AttachDroppedPaths:
+        await this.attachDroppedPaths(message.paths);
         return;
       case WebviewMessageType.RequestFileSymbols:
         await this.sendFileSymbols(message.path);
@@ -488,8 +567,13 @@ export class ChatBridge {
    * persisted on the conversation for finished turns.
    */
   private async sendSubAgentTranscript(runId: string): Promise<void> {
+    let liveRun: SubAgentRun | undefined;
+    for (const turn of this.activeTurns.values()) {
+      liveRun = turn.liveSubAgentRuns.get(runId);
+      if (liveRun) break;
+    }
     const run =
-      this.liveSubAgentRuns.get(runId) ??
+      liveRun ??
       this.conversation?.subAgentRuns?.find((entry) => entry.id === runId);
     if (!run) return;
     try {
@@ -513,6 +597,41 @@ export class ChatBridge {
     } catch {
       // A failed conversion just leaves the popup empty; nothing to surface.
     }
+  }
+
+  /**
+   * Reads files the user dropped as paths (`text/uri-list` — e.g. a drag from
+   * the VS Code explorer, where no File objects cross into the webview) and
+   * sends their bytes back so the composer stages them like any other drop.
+   * Reading arbitrary paths is fine here: it's a direct user gesture.
+   */
+  private async attachDroppedPaths(paths: string[]): Promise<void> {
+    const files: Array<{ name: string; mediaType?: string; base64: string }> =
+      [];
+    const failed: string[] = [];
+    for (const path of paths.slice(0, 50)) {
+      try {
+        const stats = statSync(path);
+        if (!stats.isFile()) {
+          failed.push(`${basename(path)} (not a file)`);
+          continue;
+        }
+        const bytes = readFileSync(path);
+        const mediaType = imageMediaType(path);
+        files.push({
+          name: basename(path),
+          ...(mediaType ? { mediaType } : {}),
+          base64: bytes.toString('base64'),
+        });
+      } catch {
+        failed.push(basename(path));
+      }
+    }
+    this.post({
+      type: HostMessageType.DroppedFilesLoaded,
+      files,
+      ...(failed.length ? { failed } : {}),
+    });
   }
 
   /** Serves the workspace file list for the composer's `@file` completions. */
@@ -540,7 +659,10 @@ export class ChatBridge {
   }
 
   public dispose(): void {
-    this.abortController?.abort();
+    for (const turn of this.activeTurns.values()) {
+      turn.abortController.abort();
+    }
+    this.compactionAbort?.abort();
     this.pendingApprovals.clear();
     this.pendingInputs.clear();
     // Kill any MCP server processes this session spawned.
@@ -1051,18 +1173,34 @@ export class ChatBridge {
    * (or null when nothing is queued). Tells the webview which pills were consumed
    * so they disappear and the message shows in the transcript right away.
    */
-  private drainSteering(): string | null {
-    const queued = this.steeringQueue;
+  private drainSteering(turn: ActiveTurn): string | null {
+    const queued = turn.steeringQueue;
     if (queued.length === 0) return null;
     const ids = queued.map((m) => m.id);
     const content = queued
       .map((m) => m.content)
       .filter((c) => c.trim().length > 0)
       .join('\n\n');
-    this.steeringQueue = [];
+    turn.steeringQueue = [];
     if (!content.trim()) return null;
-    this.post({ type: HostMessageType.SteeringConsumed, ids, content });
+    this.postTurn(turn, {
+      type: HostMessageType.SteeringConsumed,
+      ids,
+      content,
+    });
     return content;
+  }
+
+  /**
+   * Posts a turn-scoped message only while the user is viewing the turn's
+   * session. A turn keeps running after the user navigates away; its live
+   * output must not paint onto whatever session is showing instead. The turn's
+   * recorded events (and pending prompts) are replayed when its session is
+   * reopened — see openSession/replayLiveTurn.
+   */
+  private postTurn(turn: ActiveTurn, message: HostToWebview): void {
+    if (this.sessionId !== turn.sessionId) return;
+    this.post(message);
   }
 
   /**
@@ -1076,12 +1214,12 @@ export class ChatBridge {
     messageId: string,
     edit?: { content: string; images?: WebviewImage[] | undefined }
   ): Promise<void> {
-    if (this.abortController || this.compacting) {
+    if (this.activeTurns.has(this.sessionId) || this.compacting) {
       this.post({
         type: HostMessageType.Error,
         message: this.compacting
           ? 'Compaction is in progress — try again when it finishes.'
-          : 'A turn is already in progress.',
+          : 'A turn is already in progress in this session.',
       });
       return;
     }
@@ -1146,7 +1284,8 @@ export class ChatBridge {
   /** Runs one agent turn, streaming tokens, tool activity, and approvals. */
   private async submit(
     content: string,
-    images?: WebviewImage[]
+    images?: WebviewImage[],
+    files?: WebviewFileAttachment[]
   ): Promise<void> {
     // `/usage` is a host command, not a turn: show the provider-reported plan
     // usage (Claude Code) as a transient notice instead of running the model.
@@ -1157,12 +1296,19 @@ export class ChatBridge {
       return;
     }
 
-    if (this.abortController || this.compacting) {
+    // Only one turn per session — other sessions' turns run concurrently, so a
+    // background turn elsewhere never blocks sending here.
+    if (this.activeTurns.has(this.conversation?.sessionId ?? this.sessionId)) {
       this.post({
         type: HostMessageType.Error,
-        message: this.compacting
-          ? 'Compaction is in progress — try again when it finishes.'
-          : 'A turn is already in progress.',
+        message: 'A turn is already in progress in this session.',
+      });
+      return;
+    }
+    if (this.compacting) {
+      this.post({
+        type: HostMessageType.Error,
+        message: 'Compaction is in progress — try again when it finishes.',
       });
       return;
     }
@@ -1176,26 +1322,61 @@ export class ChatBridge {
       return;
     }
 
-    const abortController = new AbortController();
-    this.abortController = abortController;
-    this.activeTurnSessionId = this.conversation.sessionId;
-    this.liveTurnEvents = [];
-    this.liveSubAgentRuns.clear();
-
-    // A fresh turn starts with an empty steering queue; follow-ups the user adds
-    // while this turn runs are mirrored in via `SyncSteeringQueue`.
-    this.steeringQueue = [];
+    // Files attached in the composer become message attachments up front: text
+    // inline, binary written to disk with the path attached (see
+    // materializeFileAttachments). Created before the turn so the pending user
+    // message carries them (chips survive a mid-turn session reopen).
+    const fileAttachments = files?.length
+      ? await materializeFileAttachments(files)
+      : [];
 
     // Timing for the TTFT / tok-s footer. `firstTokenMs` is stamped by the first
     // streamed token (visible or thinking), matching the CLI's measurement.
     const startMs = Date.now();
-    this.turnStartedAtMs = startMs;
-    this.turnFirstTokenAtMs = undefined;
+    const turn: ActiveTurn = {
+      sessionId: this.conversation.sessionId,
+      abortController: new AbortController(),
+      conversation: this.conversation,
+      pendingUserMessage: createMessage(
+        MessageRole.User,
+        content,
+        new Date(),
+        fileAttachments.length ? fileAttachments : undefined,
+        images?.length
+          ? {
+              images: images.map((image) => ({
+                mediaType: image.mediaType,
+                data: image.data,
+              })),
+            }
+          : undefined
+      ),
+      liveTurnEvents: [],
+      liveSubAgentRuns: new Map(),
+      // A fresh turn starts with an empty steering queue; follow-ups the user
+      // adds while this turn runs are mirrored in via `SyncSteeringQueue`.
+      steeringQueue: [],
+      startedAtMs: startMs,
+      firstTokenAtMs: undefined,
+      // Seed the turn's session totals from the viewed ones — at submit time
+      // the viewed session is the turn's session, so these are its stats.
+      cumulativeUsage: { ...this.cumulativeUsage },
+      costKnown: this.costKnown,
+      avgTokensPerSecond: this.avgTokensPerSecond,
+      completedTurnCount: this.completedTurnCount,
+      lastInputTokens: this.lastInputTokens,
+      lastTurnStats: this.lastTurnStats,
+      pendingRequestIds: new Set(),
+      openPrompts: new Map(),
+    };
+    this.activeTurns.set(turn.sessionId, turn);
+    const abortController = turn.abortController;
+
     let firstTokenMs: number | null = null;
     const markFirstToken = (): void => {
       if (firstTokenMs === null) {
         firstTokenMs = Date.now();
-        this.turnFirstTokenAtMs = firstTokenMs;
+        turn.firstTokenAtMs = firstTokenMs;
       }
     };
 
@@ -1229,8 +1410,13 @@ export class ChatBridge {
       } catch {
         attachments = undefined;
       }
+      // Composer file attachments ride the same channel as `@file` mentions:
+      // named file-context blocks appended to the prompt (materialized above).
+      if (fileAttachments.length) {
+        attachments = [...(attachments ?? []), ...fileAttachments];
+      }
       const result = await services.chatSessionService.submitMessage({
-        conversation: this.conversation,
+        conversation: turn.conversation,
         model: skillTurn?.model ?? this.activeModel,
         content,
         ...(skillTurn ? { systemPromptOverride: skillTurn.systemPrompt } : {}),
@@ -1254,33 +1440,33 @@ export class ChatBridge {
           ? { reasoningMandatory: true }
           : {}),
         signal: abortController.signal,
-        drainSteering: () => this.drainSteering(),
+        drainSteering: () => this.drainSteering(turn),
         onToken: (token) => {
           markFirstToken();
           streamedContent += token;
-          this.recordLiveTurnToken(token);
-          this.post({ type: HostMessageType.Token, token });
+          this.recordLiveTurnToken(turn, token);
+          this.postTurn(turn, { type: HostMessageType.Token, token });
         },
         onThinkingToken: (token) => {
           markFirstToken();
           if (thinkingStartMs === 0) thinkingStartMs = Date.now();
           streamedThinking += token;
-          this.recordLiveTurnThinking(token);
-          this.post({ type: HostMessageType.Thinking, token });
+          this.recordLiveTurnThinking(turn, token);
+          this.postTurn(turn, { type: HostMessageType.Thinking, token });
         },
         onUsage: (stepUsage) => {
           // Accumulate each response's usage as it arrives and push a live
           // snapshot, so the footer metrics track the turn in progress.
-          this.accumulateUsage(stepUsage);
-          this.post({
+          this.accumulateTurnUsage(turn, stepUsage);
+          this.postTurn(turn, {
             type: HostMessageType.UsageUpdate,
-            usage: this.usageSnapshot(),
+            usage: this.turnUsageSnapshot(turn),
           });
         },
         onSubAgentActivity: (event) => {
           // Keep the live run object so transcript requests can read its
           // messages while the sub agent is still working.
-          if (event.run) this.liveSubAgentRuns.set(event.runId, event.run);
+          if (event.run) turn.liveSubAgentRuns.set(event.runId, event.run);
           const message: SubAgentActivityMessage = {
             type: HostMessageType.SubAgentActivity,
             phase: event.phase as string as WebviewSubAgentPhase,
@@ -1298,8 +1484,8 @@ export class ChatBridge {
               : {}),
             ...(event.summary !== undefined ? { summary: event.summary } : {}),
           };
-          this.liveTurnEvents.push(message);
-          this.post(message);
+          turn.liveTurnEvents.push(message);
+          this.postTurn(turn, message);
         },
         onToolActivity: (event) => {
           // A tool call is the model's first output for turns that act before
@@ -1308,7 +1494,7 @@ export class ChatBridge {
           // climbing for the whole turn and tok/s isn't divided by a
           // milliseconds-long window (mirrors the CLI).
           if (event.phase === ToolActivityPhase.Start) markFirstToken();
-          this.postToolActivity(event);
+          this.postToolActivity(turn, event);
         },
         // Auto-approve runs approval-gated tools without prompting. Express that
         // as an explicit `allowUnattended` opt-in — the engine fails closed when
@@ -1316,17 +1502,20 @@ export class ChatBridge {
         // requestApproval would (correctly) reject every gated tool.
         ...(this.autoApprove
           ? { allowUnattended: true }
-          : { requestApproval: (request) => this.requestApproval(request) }),
-        requestUserInput: (request) => this.requestUserInput(request),
+          : {
+              requestApproval: (request) => this.requestApproval(request, turn),
+            }),
+        requestUserInput: (request) => this.requestUserInput(request, turn),
         onTitle: (_sessionId, title) => {
           // Fold the generated title into the in-memory conversation so the next
           // turn's save preserves it. Without this, the following submit writes
           // this title-less conversation back over the persisted file, and the
           // title is lost when the chat is reopened.
-          if (this.conversation) {
+          turn.conversation = { ...turn.conversation, title };
+          if (this.sessionId === turn.sessionId && this.conversation) {
             this.conversation = { ...this.conversation, title };
           }
-          this.post({ type: HostMessageType.TitleUpdate, title });
+          this.postTurn(turn, { type: HostMessageType.TitleUpdate, title });
         },
       });
 
@@ -1335,10 +1524,11 @@ export class ChatBridge {
       // come back title-less even after one was generated. Keep the title we
       // already have rather than letting the fresh result drop it (mirrors the
       // CLI), so the next save persists it.
-      this.conversation =
-        result.conversation.title || !this.conversation?.title
+      turn.conversation =
+        result.conversation.title || !turn.conversation.title
           ? result.conversation
-          : { ...result.conversation, title: this.conversation.title };
+          : { ...result.conversation, title: turn.conversation.title };
+      this.syncViewedConversation(turn);
 
       // Usage was already folded in live via onUsage above; don't add it again.
 
@@ -1347,38 +1537,46 @@ export class ChatBridge {
         const ttftMs = Math.max(firstTokenMs - startMs, 0);
         const genSeconds = Math.max(endMs - firstTokenMs, 1) / 1000;
         const tokensPerSecond = (result.usage?.outputTokens ?? 0) / genSeconds;
-        this.completedTurnCount += 1;
-        this.avgTokensPerSecond +=
-          (tokensPerSecond - this.avgTokensPerSecond) / this.completedTurnCount;
-        this.lastTurnStats = { ttftMs, tokensPerSecond };
+        turn.completedTurnCount += 1;
+        turn.avgTokensPerSecond +=
+          (tokensPerSecond - turn.avgTokensPerSecond) / turn.completedTurnCount;
+        turn.lastTurnStats = { ttftMs, tokensPerSecond };
         stats = {
           ttftMs,
           tokensPerSecond,
-          avgTokensPerSecond: this.avgTokensPerSecond,
+          avgTokensPerSecond: turn.avgTokensPerSecond,
         };
+        this.syncTurnMetricsToViewed(turn);
       }
 
       // Persist the footer metrics with the conversation so a resumed session
       // restores them instead of starting from zero.
-      this.persistSessionStats(services);
+      this.persistTurnStats(services, turn);
 
       const hasUsage =
-        this.cumulativeUsage.inputTokens > 0 ||
-        this.cumulativeUsage.outputTokens > 0;
-      this.post({
+        turn.cumulativeUsage.inputTokens > 0 ||
+        turn.cumulativeUsage.outputTokens > 0;
+      this.postTurn(turn, {
         type: HostMessageType.TurnComplete,
         messages: await toWebviewMessages(
           result.conversation,
           services,
           this.toolViewsByCallId
         ),
-        ...(hasUsage ? { usage: this.usageSnapshot() } : {}),
+        ...(hasUsage ? { usage: this.turnUsageSnapshot(turn) } : {}),
         ...(stats ? { stats } : {}),
       });
       turnSucceeded = true;
+      // Let a user who tabbed away know the agent is done. Deliberately terse
+      // (no response excerpt): the reply may be sensitive, and the toast's job
+      // is just "come back".
+      this.notifyIfUnfocused(
+        this.notificationTitle(turn),
+        'New chat response.'
+      );
     } catch (error) {
       const aborted = isAbortError(error);
-      if (this.conversation) {
+      {
         // On abort, the service persisted everything the interrupted turn
         // produced — the user prompt, completed tool rounds, per-step
         // thinking, and the partial streamed answer — and attached the saved
@@ -1397,31 +1595,18 @@ export class ChatBridge {
           ? getInterruptedConversation(error)
           : undefined;
         if (interruptedConversation) {
-          this.conversation =
-            interruptedConversation.title || !this.conversation.title
+          turn.conversation =
+            interruptedConversation.title || !turn.conversation.title
               ? interruptedConversation
               : {
                   ...interruptedConversation,
-                  title: this.conversation.title,
+                  title: turn.conversation.title,
                 };
         } else {
           // Plain failures land here (aborts too, if the service's persist
           // failed): rebuild the exchange from this bridge's streaming
           // buffers and save it ourselves.
-          const userMessage = createMessage(
-            MessageRole.User,
-            content,
-            new Date(),
-            undefined,
-            images?.length
-              ? {
-                  images: images.map((image) => ({
-                    mediaType: image.mediaType,
-                    data: image.data,
-                  })),
-                }
-              : undefined
-          );
+          const userMessage = turn.pendingUserMessage;
           const trimmedThinking = streamedThinking.trim();
           const partialAssistant =
             streamedContent.trim() || trimmedThinking
@@ -1445,10 +1630,10 @@ export class ChatBridge {
                   }
                 )
               : undefined;
-          this.conversation = {
-            ...this.conversation,
+          turn.conversation = {
+            ...turn.conversation,
             messages: [
-              ...this.conversation.messages,
+              ...turn.conversation.messages,
               userMessage,
               ...(partialAssistant ? [partialAssistant] : []),
             ],
@@ -1457,38 +1642,45 @@ export class ChatBridge {
           // Persist now so the interrupted exchange survives a reload even if
           // no further turn is taken (a later turn would otherwise be the
           // first save).
-          await services.chatSessionService.saveConversation(this.conversation);
+          await services.chatSessionService.saveConversation(turn.conversation);
         }
+        this.syncViewedConversation(turn);
         // Keep whatever usage the completed steps reported before the interrupt.
-        this.persistSessionStats(services);
-        this.post({
+        this.persistTurnStats(services, turn);
+        this.postTurn(turn, {
           type: HostMessageType.TurnComplete,
           messages: await toWebviewMessages(
-            this.conversation,
+            turn.conversation,
             services,
             this.toolViewsByCallId
           ),
-          ...(this.cumulativeUsage.inputTokens > 0 ||
-          this.cumulativeUsage.outputTokens > 0
-            ? { usage: this.usageSnapshot() }
+          ...(turn.cumulativeUsage.inputTokens > 0 ||
+          turn.cumulativeUsage.outputTokens > 0
+            ? { usage: this.turnUsageSnapshot(turn) }
             : {}),
         });
       }
-      this.post({
+      this.postTurn(turn, {
         type: HostMessageType.Error,
         message: aborted ? 'Request cancelled.' : errorMessage(error),
         aborted,
       });
+      // An abort is the user's own action; only real failures warrant a toast.
+      if (!aborted) {
+        this.notifyIfUnfocused(
+          this.notificationTitle(turn),
+          'The turn failed.'
+        );
+      }
     } finally {
-      this.abortController = undefined;
-      this.activeTurnSessionId = undefined;
-      this.liveTurnEvents = [];
-      this.turnStartedAtMs = undefined;
-      this.turnFirstTokenAtMs = undefined;
+      this.activeTurns.delete(turn.sessionId);
       // Any approval/input prompts still open belong to the turn that just
       // ended; drop them so a late webview reply can't resolve a stale promise.
-      this.pendingApprovals.clear();
-      this.pendingInputs.clear();
+      for (const id of turn.pendingRequestIds) {
+        this.pendingApprovals.delete(id);
+        this.pendingInputs.delete(id);
+      }
+      turn.openPrompts.clear();
       // Refresh the sessions list (if it's showing) so the loading indicator
       // clears once the turn finishes.
       void this.sendSessionsList(false);
@@ -1505,6 +1697,10 @@ export class ChatBridge {
     )?.contextWindow;
     if (
       turnSucceeded &&
+      // Compaction runs against the viewed conversation; skip it when the user
+      // has navigated away — reopening the session can compact on a later turn.
+      this.sessionId === turn.sessionId &&
+      this.conversation?.sessionId === turn.sessionId &&
       this.autoCompactThresholdPercent > 0 &&
       contextWindow != null &&
       contextWindow > 0
@@ -1512,7 +1708,7 @@ export class ChatBridge {
       const threshold = this.autoCompactThresholdPercent;
       const pct = Math.min(
         100,
-        Math.round((this.lastInputTokens / contextWindow) * 100)
+        Math.round((turn.lastInputTokens / contextWindow) * 100)
       );
       if (pct >= threshold) {
         await this.compactSession();
@@ -1556,6 +1752,76 @@ export class ChatBridge {
     };
   }
 
+  /**
+   * Folds one step's usage into the turn's session totals (see
+   * {@link accumulateUsage}) and mirrors them onto the viewed totals when the
+   * user is still looking at the turn's session.
+   */
+  private accumulateTurnUsage(turn: ActiveTurn, usage: TokenUsage): void {
+    const cost = usage.cost ?? this.estimateCost(usage);
+    if (usage.cost !== undefined || this.activeModelHasPricing()) {
+      turn.costKnown = true;
+    }
+    turn.lastInputTokens = usage.inputTokens;
+    turn.cumulativeUsage = {
+      inputTokens: turn.cumulativeUsage.inputTokens + usage.inputTokens,
+      outputTokens: turn.cumulativeUsage.outputTokens + usage.outputTokens,
+      cachedTokens: turn.cumulativeUsage.cachedTokens + usage.cachedTokens,
+      cost: turn.cumulativeUsage.cost + cost,
+    };
+    this.syncTurnMetricsToViewed(turn);
+  }
+
+  /**
+   * Mirrors a turn's session totals onto the bridge's viewed totals — only
+   * while the user is viewing the turn's session, so a background turn can't
+   * corrupt another session's footer metrics.
+   */
+  private syncTurnMetricsToViewed(turn: ActiveTurn): void {
+    if (this.sessionId !== turn.sessionId) return;
+    this.cumulativeUsage = { ...turn.cumulativeUsage };
+    this.costKnown = turn.costKnown;
+    this.avgTokensPerSecond = turn.avgTokensPerSecond;
+    this.completedTurnCount = turn.completedTurnCount;
+    this.lastInputTokens = turn.lastInputTokens;
+    this.lastTurnStats = turn.lastTurnStats;
+  }
+
+  /**
+   * Adopts a turn's conversation as the viewed one — only while the user is
+   * viewing the turn's session; a background turn's result must not clobber
+   * whatever conversation the user switched to.
+   */
+  private syncViewedConversation(turn: ActiveTurn): void {
+    if (this.sessionId !== turn.sessionId) return;
+    this.conversation = turn.conversation;
+  }
+
+  /** The turn's usage payload for the webview (see {@link usageSnapshot}). */
+  private turnUsageSnapshot(turn: ActiveTurn): WebviewUsage {
+    const { cost, ...rest } = turn.cumulativeUsage;
+    return {
+      ...rest,
+      lastInputTokens: turn.lastInputTokens,
+      ...(turn.costKnown ? { cost } : {}),
+    };
+  }
+
+  /**
+   * Persists a turn's footer metrics under the turn's session — never the
+   * viewed one, which may be a different session by the time the turn ends.
+   */
+  private persistTurnStats(services: RuntimeServices, turn: ActiveTurn): void {
+    const stats: SessionStats = {
+      ...turn.cumulativeUsage,
+      lastInputTokens: turn.lastInputTokens,
+      ...(turn.lastTurnStats ? { ...turn.lastTurnStats } : {}),
+      avgTokensPerSecond: turn.avgTokensPerSecond,
+      completedTurnCount: turn.completedTurnCount,
+    };
+    void services.chatSessionService.saveSessionStats(turn.sessionId, stats);
+  }
+
   private activeModelHasPricing(): boolean {
     return !!this.models.find((m) => m.id === this.activeModel)?.pricing;
   }
@@ -1584,8 +1850,13 @@ export class ChatBridge {
     this.lastInputTokens = 0;
     this.autoCompactWarnedMilestone = null;
     this.lastTurnStats = undefined;
-    this.toolViewsByCallId.clear();
-    this.capturedDeletions.clear();
+    // Tool views and deletion captures are keyed by tool-call id and shared
+    // with any turn still running in the background — clearing them mid-turn
+    // would lose that turn's pre-edit diffs, so only clear when nothing runs.
+    if (this.activeTurns.size === 0) {
+      this.toolViewsByCallId.clear();
+      this.capturedDeletions.clear();
+    }
   }
 
   /**
@@ -1675,7 +1946,7 @@ export class ChatBridge {
     void services.chatSessionService.saveSessionStats(this.sessionId, stats);
   }
 
-  private postToolActivity(event: ToolActivityEvent): void {
+  private postToolActivity(turn: ActiveTurn, event: ToolActivityEvent): void {
     const view = toToolView(event.view);
 
     // Bash is the only path to a file deletion (there's no delete tool), and it
@@ -1724,7 +1995,7 @@ export class ChatBridge {
     if (this.toolViewsByCallId.get(event.toolCallId)?.diff) {
       void writeToolViews(
         cacheDirectory(),
-        this.sessionId,
+        turn.sessionId,
         this.toolViewsByCallId
       );
     }
@@ -1744,41 +2015,58 @@ export class ChatBridge {
           }
         : {}),
     };
-    this.liveTurnEvents.push(message);
-    this.post(message);
+    turn.liveTurnEvents.push(message);
+    this.postTurn(turn, message);
   }
 
   // Coalesce consecutive answer/thinking tokens into a single recorded event so a
   // resume replays a handful of messages, not one per token. The reducer treats
   // a Token/Thinking message's payload as opaque text to append, so a merged run
   // rebuilds identically.
-  private recordLiveTurnToken(token: string): void {
-    const last = this.liveTurnEvents.at(-1);
+  private recordLiveTurnToken(turn: ActiveTurn, token: string): void {
+    const last = turn.liveTurnEvents.at(-1);
     if (last?.type === HostMessageType.Token) {
       last.token += token;
     } else {
-      this.liveTurnEvents.push({ type: HostMessageType.Token, token });
+      turn.liveTurnEvents.push({ type: HostMessageType.Token, token });
     }
   }
 
-  private recordLiveTurnThinking(token: string): void {
-    const last = this.liveTurnEvents.at(-1);
+  private recordLiveTurnThinking(turn: ActiveTurn, token: string): void {
+    const last = turn.liveTurnEvents.at(-1);
     if (last?.type === HostMessageType.Thinking) {
       last.token += token;
     } else {
-      this.liveTurnEvents.push({ type: HostMessageType.Thinking, token });
+      turn.liveTurnEvents.push({ type: HostMessageType.Thinking, token });
     }
   }
 
   /**
-   * Replays the in-flight turn's recorded events to the webview, in order, so a
+   * Replays an in-flight turn's recorded events to the webview, in order, so a
    * freshly reopened session rebuilds the live thinking/tool/answer state through
    * the normal reducer path. Posted right after the resume `Ready` (which clears
-   * the transient live state); subsequent live events append as usual.
+   * the transient live state); subsequent live events append as usual. Any
+   * approval/input prompt the turn is still waiting on is re-posed last —
+   * whether it was raised while the user was away or shown and then abandoned
+   * by navigating off — and a live usage snapshot restores the footer's
+   * in-turn totals. Open prompts stay on the turn until actually answered, so
+   * bouncing between sessions re-poses them every time.
    */
-  private replayLiveTurn(): void {
-    for (const event of this.liveTurnEvents) {
+  private replayLiveTurn(turn: ActiveTurn): void {
+    for (const event of turn.liveTurnEvents) {
       this.post(event);
+    }
+    for (const prompt of turn.openPrompts.values()) {
+      this.post(prompt);
+    }
+    if (
+      turn.cumulativeUsage.inputTokens > 0 ||
+      turn.cumulativeUsage.outputTokens > 0
+    ) {
+      this.post({
+        type: HostMessageType.UsageUpdate,
+        usage: this.turnUsageSnapshot(turn),
+      });
     }
   }
 
@@ -1830,7 +2118,10 @@ export class ChatBridge {
     return { path: deleted.path, oldText: deleted.oldText, newText: '' };
   }
 
-  private requestApproval(request: ToolApprovalRequest): Promise<boolean> {
+  private requestApproval(
+    request: ToolApprovalRequest,
+    turn: ActiveTurn
+  ): Promise<boolean> {
     // Auto-approve may have been flipped on mid-turn (e.g. the user clicked
     // "Approve all tools" on an earlier prompt). The callback is wired for the
     // whole turn, so re-check here to skip prompting for the remaining tools.
@@ -1838,7 +2129,8 @@ export class ChatBridge {
     return new Promise<boolean>((resolve) => {
       const id = randomUUID();
       this.pendingApprovals.set(id, resolve);
-      this.post({
+      turn.pendingRequestIds.add(id);
+      this.postTurnPrompt(turn, {
         type: HostMessageType.ApprovalRequest,
         id,
         toolName: request.toolName,
@@ -1847,17 +2139,78 @@ export class ChatBridge {
     });
   }
 
-  private requestUserInput(request: UserQuestionRequest): Promise<string> {
+  private requestUserInput(
+    request: UserQuestionRequest,
+    turn: ActiveTurn
+  ): Promise<string> {
     return new Promise<string>((resolve) => {
       const id = randomUUID();
       this.pendingInputs.set(id, resolve);
-      this.post({
+      turn.pendingRequestIds.add(id);
+      this.postTurnPrompt(turn, {
         type: HostMessageType.UserInputRequest,
         id,
         question: request.question,
         ...(request.options ? { options: request.options } : {}),
       });
     });
+  }
+
+  /**
+   * Posts a turn's approval/input prompt when the user is viewing its session
+   * (never cross-session — the user would be approving a tool they can't see)
+   * and records it on the turn either way. The record lives until the prompt
+   * is answered (see closeTurnPrompt), so reopening the session re-poses any
+   * question that's still waiting — including one that was shown and then
+   * abandoned by navigating away (the Ready snapshot clears the webview's
+   * prompt state).
+   */
+  private postTurnPrompt(
+    turn: ActiveTurn,
+    prompt: ApprovalRequestMessage | UserInputRequestMessage
+  ): void {
+    turn.openPrompts.set(prompt.id, prompt);
+    if (this.sessionId === turn.sessionId) {
+      this.post(prompt);
+    }
+    // The turn now waits on the user — make sure they know if they're away.
+    this.notifyIfUnfocused(
+      this.notificationTitle(turn),
+      prompt.type === HostMessageType.ApprovalRequest
+        ? 'Needs your approval to run a tool.'
+        : 'Asked you a question.'
+    );
+  }
+
+  /**
+   * Notification title mirroring VS Code's own chat toasts: the app name plus
+   * the session's title when one exists (e.g. "JustCode: Songwriting request").
+   */
+  private notificationTitle(turn: ActiveTurn): string {
+    const title = turn.conversation.title?.trim();
+    return title ? `${APP_NAME}: ${title}` : APP_NAME;
+  }
+
+  /**
+   * Raises a native OS notification when the VS Code window isn't focused, so
+   * the user working elsewhere knows the agent finished or needs them.
+   */
+  private notifyIfUnfocused(title: string, message: string): void {
+    if (this.isWindowFocused()) return;
+    notifyOS({
+      title,
+      message,
+      ...(this.notificationIconPath
+        ? { iconPath: this.notificationIconPath }
+        : {}),
+    });
+  }
+
+  /** Marks a prompt answered so session reopens stop re-posing it. */
+  private closeTurnPrompt(id: string): void {
+    for (const turn of this.activeTurns.values()) {
+      if (turn.openPrompts.delete(id)) return;
+    }
   }
 
   private async sendSessionsList(focus = true): Promise<void> {
@@ -1884,16 +2237,26 @@ export class ChatBridge {
         })),
         hasConnectedProvider: services.allProviders.length > 0,
         focus,
-        ...(this.activeTurnSessionId
-          ? { activeSessionId: this.activeTurnSessionId }
+        ...(this.activeTurns.size > 0
+          ? { activeSessionIds: [...this.activeTurns.keys()] }
           : {}),
       });
     } catch (error) {
+      // Never render the "no providers" empty state silently: log the real
+      // failure (visible in Help → Toggle Developer Tools) and tell the user
+      // what actually broke, so a services/config problem is debuggable
+      // instead of masquerading as a missing provider connection.
+      console.error(`[${APP_NAME}] failed to list sessions`, error);
       this.post({
         type: HostMessageType.SessionsList,
         sessions: [],
         hasConnectedProvider: false,
         focus,
+      });
+      this.post({
+        type: HostMessageType.Notice,
+        notice: `Failed to load sessions: ${errorMessage(error)}`,
+        timeoutMs: 10000,
       });
     }
   }
@@ -1902,6 +2265,7 @@ export class ChatBridge {
     this.sessionId = sessionId;
     this.conversation = undefined;
     this.resetMetrics();
+    const activeTurn = this.activeTurns.get(sessionId);
 
     // Fast path: switching sessions doesn't change the provider or its model
     // list, so skip the `startSession` model fetch that `sendReady` runs — a
@@ -1922,8 +2286,19 @@ export class ChatBridge {
             this.toolViewsByCallId.set(callId, view);
           }
         }
-        const conversation =
-          await this.services.chatSessionService.loadConversation(sessionId);
+        // A running turn's user prompt isn't persisted until the service's own
+        // save, so the disk copy would be missing the message the user just
+        // sent. Render the turn's in-memory snapshot plus that prompt instead;
+        // the replayed live events below rebuild the turn's output on top.
+        const conversation = activeTurn
+          ? {
+              ...activeTurn.conversation,
+              messages: [
+                ...activeTurn.conversation.messages,
+                activeTurn.pendingUserMessage,
+              ],
+            }
+          : await this.services.chatSessionService.loadConversation(sessionId);
         this.conversation = conversation;
         this.restoreStats(conversation);
         const resolvedFiles = await readResolvedFiles(configDir, sessionId);
@@ -1961,22 +2336,20 @@ export class ChatBridge {
             ? { sessionTitle: conversation.title }
             : {}),
           ...this.statsSnapshot(),
-          // Reopening the session whose turn is still running: restore its busy
+          // Reopening a session whose turn is still running: restore its busy
           // state and timing; the recorded live-turn events (replayed just below)
           // rebuild the thinking/tool/answer state.
-          ...(this.activeTurnSessionId === sessionId
+          ...(activeTurn
             ? {
                 busy: true,
-                ...(this.turnStartedAtMs !== undefined
-                  ? { turnStartedAt: this.turnStartedAtMs }
-                  : {}),
-                ...(this.turnFirstTokenAtMs !== undefined
-                  ? { turnFirstTokenAt: this.turnFirstTokenAtMs }
+                turnStartedAt: activeTurn.startedAtMs,
+                ...(activeTurn.firstTokenAtMs !== undefined
+                  ? { turnFirstTokenAt: activeTurn.firstTokenAtMs }
                   : {}),
               }
             : {}),
         });
-        if (this.activeTurnSessionId === sessionId) this.replayLiveTurn();
+        if (activeTurn) this.replayLiveTurn(activeTurn);
         return;
       } catch {
         // Any failure (e.g. the conversation couldn't be read) falls through to
@@ -2004,6 +2377,10 @@ export class ChatBridge {
 
     const confirmed = (await this.onConfirmDeleteSession?.(title)) ?? false;
     if (!confirmed) return;
+
+    // Deleting a session stops any turn still running in it — nothing should
+    // keep working (or saving) on a conversation that no longer exists.
+    this.activeTurns.get(sessionId)?.abortController.abort();
 
     try {
       await services.chatSessionService.clearSession(sessionId);
@@ -2075,6 +2452,11 @@ export class ChatBridge {
     const label = `all ${summaries.length} session${summaries.length === 1 ? '' : 's'}`;
     const confirmed = (await this.onConfirmDeleteSession?.(label)) ?? false;
     if (!confirmed) return;
+
+    // Clearing everything stops every running turn with it.
+    for (const turn of this.activeTurns.values()) {
+      turn.abortController.abort();
+    }
 
     await Promise.allSettled(
       summaries.map((s) =>
@@ -2336,7 +2718,14 @@ export class ChatBridge {
    * conversation is untouched and the error rides the final CompactStatus.
    */
   private async compactSession(): Promise<void> {
-    if (this.compacting || this.abortController) return;
+    // Blocked while this session has a turn running; turns in other sessions
+    // don't matter — they never touch the conversation being compacted.
+    if (
+      this.compacting ||
+      this.activeTurns.has(this.conversation?.sessionId ?? this.sessionId)
+    ) {
+      return;
+    }
     const services = await this.ensureServices();
     if (!this.conversation || !this.activeModel) return;
     const [firstMessage] = this.conversation.messages;
@@ -2354,11 +2743,11 @@ export class ChatBridge {
     }
 
     this.compacting = true;
-    // Compaction takes the same abort slot as a turn, so the webview's Stop
-    // button (a Cancel message) tears it down exactly like an in-flight turn.
-    // Nothing is saved until the summary lands, so a cancel is always safe.
+    // The webview's Stop button (a Cancel message) tears a compaction down
+    // exactly like an in-flight turn (see the Cancel handler). Nothing is
+    // saved until the summary lands, so a cancel is always safe.
     const abortController = new AbortController();
-    this.abortController = abortController;
+    this.compactionAbort = abortController;
     // If the user navigates to another session while this runs, the result
     // must not be painted onto (or adopted as) that other conversation.
     const compactingSessionId = this.conversation.sessionId;
@@ -2439,9 +2828,8 @@ export class ChatBridge {
       }
     } finally {
       this.compacting = false;
-      // Only release the slot if it's still ours — never clobber a turn's.
-      if (this.abortController === abortController) {
-        this.abortController = undefined;
+      if (this.compactionAbort === abortController) {
+        this.compactionAbort = undefined;
       }
     }
   }
@@ -2814,9 +3202,15 @@ export class ChatBridge {
   private async resetSession(): Promise<void> {
     // Clicking "+" while the current session has no messages reuses it instead
     // of minting another — repeated clicks shouldn't scatter empty sessions.
+    // A session with a running turn is never "empty" though: during a session's
+    // first turn the host's conversation still shows 0 messages (it's only
+    // updated when the turn ends), and reusing its id would make the "new" chat
+    // the very session whose turn is running — its live output would paint here
+    // and submits would be refused as a duplicate turn.
     let reuseEmptySession =
       this.conversation !== undefined &&
-      this.conversation.messages.length === 0;
+      this.conversation.messages.length === 0 &&
+      !this.activeTurns.has(this.conversation.sessionId);
     if (!reuseEmptySession) {
       // Coming from a chat with messages: adopt the most recent already-empty
       // session (a leftover "New chat") before minting another, so "+" never
@@ -2893,7 +3287,13 @@ export class ChatBridge {
     try {
       const services = await this.ensureServices();
       const summaries = await services.chatSessionService.listSessions();
-      return summaries.find((summary) => summary.messageCount === 0)?.sessionId;
+      // A session whose turn is running only *looks* empty (its first turn
+      // persists no messages until it ends) — adopting it would hijack that
+      // turn's session, so skip any session with an active turn.
+      return summaries.find(
+        (summary) =>
+          summary.messageCount === 0 && !this.activeTurns.has(summary.sessionId)
+      )?.sessionId;
     } catch {
       return undefined;
     }
@@ -3024,6 +3424,63 @@ function toToolView(view: ToolInvocationView): WebviewToolView {
  * so a reopened session still lists them (robot popup) and can open each run's
  * transcript. Tool-use counts are recomputed from the stored messages.
  */
+/**
+ * Turns the composer's file attachments into message attachments. Text files
+ * attach inline; binary files (carried as base64) are written to a temp file
+ * and attached as a pointer to that path — inlining base64 would burn massive
+ * context on bytes most models can't decode, while a real file lets the agent
+ * read, convert, or extract from it with its tools.
+ */
+export async function materializeFileAttachments(
+  files: WebviewFileAttachment[],
+  attachmentsDirectory = join(tmpdir(), 'justcode-attachments')
+): Promise<MessageAttachment[]> {
+  const attachments: MessageAttachment[] = [];
+  for (const file of files) {
+    if (file.encoding !== 'base64') {
+      attachments.push({ path: file.name, content: file.content });
+      continue;
+    }
+    // basename guards against a hostile "name" escaping the temp dir.
+    const target = join(randomUUID(), basename(file.name));
+    const absolute = join(attachmentsDirectory, target);
+    try {
+      await mkdir(join(attachmentsDirectory, target, '..'), {
+        recursive: true,
+      });
+      await writeFile(absolute, Buffer.from(file.content, 'base64'));
+      attachments.push({
+        path: file.name,
+        content: [
+          `(binary file${file.mediaType ? `, ${file.mediaType}` : ''} — saved to ${absolute})`,
+          'Use your tools to read, convert, or extract from it.',
+        ].join('\n'),
+      });
+    } catch (error) {
+      attachments.push({
+        path: file.name,
+        content: `(binary file attached but could not be saved to disk: ${errorMessage(error)})`,
+      });
+    }
+  }
+  return attachments;
+}
+
+/** MIME type for image extensions, so dropped image paths stage as images. */
+function imageMediaType(path: string): string | undefined {
+  const extension = path.toLowerCase().split('.').pop() ?? '';
+  const types: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    bmp: 'image/bmp',
+    svg: 'image/svg+xml',
+  };
+  return types[extension];
+}
+
 export function toSubAgentSnapshots(
   conversation: Conversation
 ): WebviewSubAgentRunSnapshot[] {
@@ -3121,6 +3578,13 @@ export async function toWebviewMessages(
               mediaType: image.mediaType,
               data: image.data,
             })),
+          }
+        : {}),
+      ...(message.role === MessageRole.User && message.attachments?.length
+        ? {
+            attachments: message.attachments.map(
+              (attachment) => attachment.path
+            ),
           }
         : {}),
     });

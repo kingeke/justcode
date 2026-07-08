@@ -28,6 +28,7 @@ import {
   useTerminalDimensions,
 } from '@opentui/react';
 import { copyToClipboard, readClipboardImage } from '@cli/ui/clipboard.js';
+import { rewriteDroppedPaths } from '@cli/ui/dropped-paths.js';
 import { Spinner } from '@cli/ui/spinner.js';
 import { ansiToStyledText } from '@cli/ui/ansi-to-styled-text.js';
 
@@ -4379,11 +4380,36 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             // A terminal forwards a paste over stdin, but pasted image data is
             // not part of it — so when a paste carries no text, check the OS
             // clipboard for an image and attach it instead of inserting nothing.
+            // A paste that IS text may be a file drag-and-drop (terminals paste
+            // the dropped file's path): rewrite workspace paths into @mentions
+            // so the file content is pulled into the prompt on send.
             onPaste={(event: {
               bytes?: Uint8Array;
               preventDefault: () => void;
             }) => {
-              if (event.bytes && event.bytes.length > 0) return;
+              if (event.bytes && event.bytes.length > 0) {
+                const pasted = new TextDecoder().decode(event.bytes);
+                const rewritten = rewriteDroppedPaths(pasted, process.cwd());
+                if (rewritten !== null && rewritten.trim() !== pasted.trim()) {
+                  event.preventDefault();
+                  // Defer out of the paste event (see attachClipboardImage):
+                  // mutating the buffer mid-paste leaves layout/cursor stale.
+                  setTimeout(() => {
+                    const area = promptAreaRef.current;
+                    const existing =
+                      area && !area.isDestroyed
+                        ? area.plainText
+                        : inputRef.current;
+                    const lead =
+                      existing.length > 0 && !existing.endsWith(' ') ? ' ' : '';
+                    setInputWithCursorAtEnd(`${existing}${lead}${rewritten}`);
+                  }, 0);
+                  setStatus(
+                    'File attached as @mention — its content is pulled in on send'
+                  );
+                }
+                return;
+              }
               if (attachClipboardImage()) {
                 event.preventDefault();
               }

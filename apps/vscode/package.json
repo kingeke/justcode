@@ -46,6 +46,10 @@
         "title": "Open Chat"
       },
       {
+        "command": "justcode.attachFileToChat",
+        "title": "JustCode: Attach File to Chat"
+      },
+      {
         "command": "justcode.newSession",
         "title": "New Session",
         "icon": "$(add)"
@@ -62,6 +66,20 @@
           "command": "justcode.openSettings",
           "when": "view == justcode.chatView",
           "group": "navigation@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "justcode.attachFileToChat",
+          "when": "!explorerResourceIsFolder",
+          "group": "9_justcode@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "justcode.attachFileToChat",
+          "when": "resourceScheme == file",
+          "group": "9_justcode@1"
         }
       ]
     }

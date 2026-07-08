@@ -38,6 +38,8 @@ export enum HostMessageType {
   SteeringConsumed = 'steeringConsumed',
   WorkspaceFiles = 'workspaceFiles',
   FileSymbols = 'fileSymbols',
+  /** Dropped file paths the host read from disk, ready to stage as chips. */
+  DroppedFilesLoaded = 'droppedFilesLoaded',
   Error = 'error',
 }
 
@@ -92,6 +94,12 @@ export enum WebviewMessageType {
   RequestWorkspaceFiles = 'requestWorkspaceFiles',
   RequestSubAgentTranscript = 'requestSubAgentTranscript',
   RequestFileSymbols = 'requestFileSymbols',
+  /**
+   * The user dropped files that arrived as paths (`text/uri-list`, e.g. a drag
+   * from the VS Code explorer) rather than File objects; the host reads them
+   * from disk and answers with DroppedFilesLoaded.
+   */
+  AttachDroppedPaths = 'attachDroppedPaths',
 }
 
 /** Roles the transcript renders. Mirrors the persisted message roles. */
@@ -126,6 +134,25 @@ export interface WebviewImage {
 export interface WebviewMessageImage {
   mediaType: string;
   data: string;
+}
+
+/**
+ * A file the user attached to the composer (dropped or picked), sent with the
+ * prompt as file context. `id` is webview-only, for keying the chip. Text
+ * files carry their content verbatim; binary files carry base64 bytes — the
+ * host materializes those to disk and hands the model the path, so any file
+ * type can be attached and processed with tools.
+ */
+export interface WebviewFileAttachment {
+  id: string;
+  /** The file's name (no path — it came from outside the workspace view). */
+  name: string;
+  /** Text content, or base64 bytes when `encoding` is 'base64'. */
+  content: string;
+  /** How `content` is encoded; defaults to 'text'. */
+  encoding?: 'text' | 'base64';
+  /** MIME type when known (binary files), e.g. "application/pdf". */
+  mediaType?: string;
 }
 
 /** A session summary for the sessions-list screen. */
@@ -292,6 +319,8 @@ export interface WebviewMessage {
   };
   /** Images attached to a user message, rendered as thumbnails. */
   images?: WebviewMessageImage[];
+  /** Names of files attached to a user message, rendered as chips above it. */
+  attachments?: string[];
   /**
    * True on the user message that opens a post-compaction epoch (it carries the
    * summary of compacted-away history); the transcript draws a divider on it.
@@ -482,11 +511,11 @@ export interface SessionsListMessage {
    */
   focus?: boolean;
   /**
-   * The session whose turn is currently running, if any. A turn keeps running in
-   * the host after the user navigates back here, so the list marks this one as
-   * loading.
+   * The sessions whose turns are currently running, if any. Turns keep running
+   * in the host after the user navigates back here (one per session, and they
+   * run concurrently), so the list marks each of these as loading.
    */
-  activeSessionId?: string;
+  activeSessionIds?: string[];
 }
 
 /** The session title was generated; updates the chat header live. */
@@ -754,8 +783,27 @@ export interface FileSymbolsMessage {
   symbols: string[];
 }
 
+/**
+ * The host read dropped file paths from disk (see
+ * {@link AttachDroppedPathsMessage}); the webview stages them as attachment
+ * chips exactly like files dropped as File objects.
+ */
+export interface DroppedFilesLoadedMessage {
+  type: HostMessageType.DroppedFilesLoaded;
+  files: Array<{
+    name: string;
+    /** MIME type when derivable from the extension (images especially). */
+    mediaType?: string;
+    /** The file's raw bytes, base64-encoded. */
+    base64: string;
+  }>;
+  /** Paths that couldn't be read, surfaced so the drop isn't silently lost. */
+  failed?: string[];
+}
+
 export type HostToWebview =
   | ReadyMessage
+  | DroppedFilesLoadedMessage
   | ModelsUpdateMessage
   | McpStatusMessage
   | ModeUpdateMessage
@@ -792,6 +840,8 @@ export interface SubmitMessage {
   content: string;
   /** Images pasted into the composer, sent alongside the prompt. */
   images?: WebviewImage[];
+  /** Files attached to the composer (dropped or picked), sent as context. */
+  files?: WebviewFileAttachment[];
 }
 
 /**
@@ -1104,9 +1154,21 @@ export interface RequestFileSymbolsMessage {
   path: string;
 }
 
+/**
+ * The user dropped files that arrived as paths (`text/uri-list` — a drag from
+ * the VS Code explorer, or an OS drag the browser exposed as URIs). The
+ * webview can't read arbitrary disk paths, so the host does and answers with
+ * {@link DroppedFilesLoadedMessage}.
+ */
+export interface AttachDroppedPathsMessage {
+  type: WebviewMessageType.AttachDroppedPaths;
+  paths: string[];
+}
+
 export type WebviewToHost =
   | InitMessage
   | SubmitMessage
+  | AttachDroppedPathsMessage
   | RetryMessage
   | CancelMessage
   | ApprovalResponseMessage

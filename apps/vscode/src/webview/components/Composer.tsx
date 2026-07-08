@@ -21,7 +21,9 @@ import {
   filterSkillCommands,
   getActiveSlashQuery,
 } from '@ext/webview/skill-command-completions';
+import { stageFiles } from '@ext/webview/attachment-files';
 import type {
+  WebviewFileAttachment,
   WebviewImage,
   WebviewMode,
   WebviewModel,
@@ -35,6 +37,8 @@ import {
   CogIcon,
   LayersIcon,
   ModeIcon,
+  FileIcon,
+  PaperclipIcon,
   PlusIcon,
   SendIcon,
   SlidersIcon,
@@ -47,31 +51,8 @@ import {
 // into this browser-targeted webview bundle.
 const CLAUDE_CODE_PROVIDER_ID = 'claude-code';
 
-/**
- * Reads a pasted image File into the base64 form the wire expects (no `data:`
- * URI prefix). Resolves null if the file can't be read.
- */
-function readImageFile(
-  file: File
-): Promise<{ mediaType: string; data: string } | null> {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result !== 'string') {
-        resolve(null);
-        return;
-      }
-      const comma = result.indexOf(',');
-      resolve({
-        mediaType: file.type || 'image/png',
-        data: comma >= 0 ? result.slice(comma + 1) : result,
-      });
-    };
-    reader.onerror = () => resolve(null);
-    reader.readAsDataURL(file);
-  });
-}
+// File reading/staging (images vs text vs rejected binaries) lives in
+// attachment-files.ts, shared with the app-level drag-and-drop overlay.
 
 export interface ComposerProps {
   busy: boolean;
@@ -95,14 +76,31 @@ export interface ComposerProps {
     model: WebviewModel,
     effort: WebviewReasoningChoice
   ) => void;
-  onSubmit: (content: string, images: WebviewImage[]) => void;
+  onSubmit: (
+    content: string,
+    images: WebviewImage[],
+    files?: WebviewFileAttachment[]
+  ) => void;
   onCancel: () => void;
   /** The unsent draft to restore on mount (survives the composer unmounting). */
   initialDraft?: string;
   /** Staged images to restore on mount, paired with {@link initialDraft}. */
   initialImages?: WebviewImage[];
+  /** Staged file attachments to restore on mount, like {@link initialImages}. */
+  initialFiles?: WebviewFileAttachment[];
   /** Mirror the live draft up so it persists while a full-screen view is open. */
-  onDraftChange?: (draft: string, images: WebviewImage[]) => void;
+  onDraftChange?: (
+    draft: string,
+    images: WebviewImage[],
+    files: WebviewFileAttachment[]
+  ) => void;
+  /**
+   * Files dropped onto the chat (the app-level drop overlay), to stage as
+   * attachments. The composer consumes them and calls
+   * {@link onDroppedFilesHandled} so the same drop isn't staged twice.
+   */
+  droppedFiles?: File[] | null;
+  onDroppedFilesHandled?: () => void;
   /** Slash commands from installed skills, for the `/` completions dropdown. */
   skillCommands?: WebviewSkillCommand[];
   /** Workspace files for `@file` completions (fetched lazily, filtered locally). */
@@ -180,7 +178,44 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   const [images, setImages] = React.useState<WebviewImage[]>(
     props.initialImages ?? []
   );
+  const [files, setFiles] = React.useState<WebviewFileAttachment[]>(
+    props.initialFiles ?? []
+  );
+  // Names of files that couldn't be attached (binary/oversized), shown as a
+  // small note under the chips; cleared by the next attach or send.
+  const [attachWarning, setAttachWarning] = React.useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  // Stage a batch of picked/dropped/pasted files: images become image chips,
+  // text files become attachment chips, rejects surface as a note.
+  const attachFiles = React.useCallback(async (raw: File[]): Promise<void> => {
+    if (raw.length === 0) return;
+    const staged = await stageFiles(raw);
+    if (staged.images.length > 0) {
+      setImages((prev) => [...prev, ...staged.images]);
+    }
+    if (staged.files.length > 0) {
+      setFiles((prev) => {
+        // Re-attaching the same file name replaces the stale copy.
+        const names = new Set(staged.files.map((f) => f.name));
+        return [...prev.filter((f) => !names.has(f.name)), ...staged.files];
+      });
+    }
+    setAttachWarning(
+      staged.rejected.length > 0
+        ? `Couldn't attach: ${staged.rejected.join(', ')}`
+        : null
+    );
+  }, []);
+
+  // Files dropped on the app-level overlay land here to be staged.
+  const { droppedFiles, onDroppedFilesHandled } = props;
+  React.useEffect(() => {
+    if (!droppedFiles || droppedFiles.length === 0) return;
+    void attachFiles(droppedFiles);
+    onDroppedFilesHandled?.();
+  }, [droppedFiles, onDroppedFilesHandled, attachFiles]);
 
   // Grow the textarea from MIN_ROWS up to MAX_ROWS as its content changes,
   // measuring the wrapped content height so long/wrapped lines count too.
@@ -195,8 +230,8 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   // full-screen view (model picker, sessions) takes over and unmounts it.
   const { onDraftChange } = props;
   React.useEffect(() => {
-    onDraftChange?.(value, images);
-  }, [value, images, onDraftChange]);
+    onDraftChange?.(value, images, files);
+  }, [value, images, files, onDraftChange]);
   const [showSettings, setShowSettings] = React.useState(false);
   const [showReasoning, setShowReasoning] = React.useState(false);
   const [showTools, setShowTools] = React.useState(false);
@@ -462,13 +497,17 @@ export function Composer(props: ComposerProps): React.JSX.Element {
 
   const submit = (): void => {
     const trimmed = value.trim();
-    // An image-only message is valid (just a pasted screenshot), so allow a
-    // send when there's no prose but at least one image is staged. While a turn
-    // is busy this still fires — the parent queues it rather than sending now.
-    if ((!trimmed && images.length === 0) || disabled) return;
-    props.onSubmit(trimmed, images);
+    // An attachment-only message is valid (just a pasted screenshot or a
+    // dropped file), so allow a send with no prose when something is staged.
+    // While a turn is busy this still fires — the parent queues it.
+    if ((!trimmed && images.length === 0 && files.length === 0) || disabled) {
+      return;
+    }
+    props.onSubmit(trimmed, images, files);
     setValue('');
     setImages([]);
+    setFiles([]);
+    setAttachWarning(null);
   };
 
   // --- /command completions (skill commands) --------------------------------
@@ -696,34 +735,38 @@ export function Composer(props: ComposerProps): React.JSX.Element {
     event: React.ClipboardEvent<HTMLTextAreaElement>
   ): Promise<void> => {
     const items = event.clipboardData.items;
-    const files: File[] = [];
+    const pasted: File[] = [];
     // DataTransferItemList is array-like but not reliably iterable, so index it.
     for (let i = 0; i < items.length; i += 1) {
       const item = items[i];
-      if (item && item.kind === 'file' && item.type.startsWith('image/')) {
+      if (item && item.kind === 'file') {
         const file = item.getAsFile();
-        if (file) files.push(file);
+        if (file) pasted.push(file);
       }
     }
-    if (files.length === 0) return;
+    if (pasted.length === 0) return;
     // Keep the textarea from also inserting a file path / nothing for the paste.
     event.preventDefault();
-    const read = await Promise.all(files.map(readImageFile));
-    const staged = read.filter(
-      (r): r is { mediaType: string; data: string } => r !== null
-    );
-    if (staged.length === 0) return;
-    setImages((prev) => [
-      ...prev,
-      ...staged.map((image, i) => ({
-        id: `img-${Date.now()}-${prev.length + i}`,
-        ...image,
-      })),
-    ]);
+    await attachFiles(pasted);
   };
 
   const removeImage = (id: string): void => {
     setImages((prev) => prev.filter((image) => image.id !== id));
+  };
+
+  const removeFile = (id: string): void => {
+    setFiles((prev) => prev.filter((file) => file.id !== id));
+  };
+
+  // The paperclip button routes through a hidden file input; any file type is
+  // accepted — staging decides image vs text vs rejected.
+  const onFilesPicked = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ): Promise<void> => {
+    const picked = Array.from(event.target.files ?? []);
+    // Reset so picking the same file again re-fires the change event.
+    event.target.value = '';
+    await attachFiles(picked);
   };
 
   const imageLabel = (index: number): string =>
@@ -800,8 +843,26 @@ export function Composer(props: ComposerProps): React.JSX.Element {
           busy ? 'composer-busy' : ''
         }`}
       >
-        {images.length > 0 ? (
+        {files.length > 0 || images.length > 0 ? (
           <div className="composer-attachments">
+            {files.map((file) => (
+              <div key={file.id} className="composer-attachment composer-file">
+                <button
+                  type="button"
+                  className="composer-attachment-remove"
+                  title="Remove file"
+                  onClick={() => removeFile(file.id)}
+                >
+                  ×
+                </button>
+                <span className="composer-file-icon" aria-hidden="true">
+                  <FileIcon size={14} />
+                </span>
+                <span className="composer-attachment-label" title={file.name}>
+                  {file.name}
+                </span>
+              </div>
+            ))}
             {images.map((image, index) => {
               const src = `data:${image.mediaType};base64,${image.data}`;
               return (
@@ -833,6 +894,9 @@ export function Composer(props: ComposerProps): React.JSX.Element {
               );
             })}
           </div>
+        ) : null}
+        {attachWarning ? (
+          <div className="composer-attach-warning">{attachWarning}</div>
         ) : null}
         {slashOpen ? (
           <ul className="composer-mentions" role="listbox">
@@ -928,6 +992,23 @@ export function Composer(props: ComposerProps): React.JSX.Element {
             >
               <PlusIcon />
             </button>
+
+            <button
+              type="button"
+              className="icon-btn"
+              title="Attach a file as context — or drop files onto the chat (hold Shift while dropping from outside VS Code)"
+              disabled={props.compacting}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <PaperclipIcon />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="composer-file-input"
+              onChange={onFilesPicked}
+            />
 
             <span className="toolbar-divider" />
 
@@ -1690,7 +1771,10 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                 type="button"
                 className="icon-btn icon-btn-send"
                 title="Send (Enter)"
-                disabled={disabled || (!value.trim() && images.length === 0)}
+                disabled={
+                  disabled ||
+                  (!value.trim() && images.length === 0 && files.length === 0)
+                }
                 onClick={submit}
               >
                 <SendIcon />

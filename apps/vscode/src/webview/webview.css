@@ -27,6 +27,8 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  /* Anchors the file-drop overlay (absolute inset: 0). */
+  position: relative;
 }
 
 /* --- Transcript ----------------------------------------------------------- */
@@ -42,6 +44,8 @@ body {
   flex-direction: column;
 }
 
+/* Floating buttons are see-through at rest so the transcript stays readable
+   underneath; hovering (or keyboard focus) makes them solid and legible. */
 .jump-to-bottom-btn {
   position: absolute;
   right: 16px;
@@ -55,30 +59,61 @@ body {
   padding: 0;
   border-radius: 50%;
   border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.35));
+  background: transparent;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  opacity: 0.4;
+  box-shadow: none;
+  transition:
+    opacity 0.1s ease,
+    background 0.1s ease,
+    box-shadow 0.1s ease;
+}
+
+.jump-to-bottom-btn:hover,
+.jump-to-bottom-btn:focus-visible {
+  opacity: 1;
   background: var(
     --vscode-editorWidget-background,
     var(--vscode-editor-background)
   );
-  color: var(--vscode-foreground);
-  cursor: pointer;
-  opacity: 0.92;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-  transition:
-    opacity 0.1s ease,
-    background 0.1s ease;
-}
-
-.jump-to-bottom-btn:hover {
-  opacity: 1;
-  background: var(
-    --vscode-toolbar-hoverBackground,
-    var(--vscode-list-hoverBackground)
-  );
 }
 
 /* Stacked directly above the jump-to-bottom button, same styling. */
 .jump-to-top-btn {
   bottom: 48px;
+}
+
+/* Empty-conversation greeting: logo + invitation dead-center in the visible
+   chat area. Absolutely fills .transcript-wrap (the positioned shell around
+   the transcript) so centering is exact regardless of transcript padding;
+   pointer-events off so it never blocks clicks or scrolling. */
+.welcome-splash {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 18px;
+  padding: 24px;
+  color: var(--vscode-foreground);
+  pointer-events: none;
+}
+
+.welcome-splash-logo {
+  width: 72px;
+  height: 72px;
+}
+
+.welcome-splash-text {
+  margin: 0;
+  max-width: 320px;
+  font-size: 1.15em;
+  line-height: 1.5;
+  opacity: 0.85;
 }
 
 .transcript {
@@ -1148,12 +1183,39 @@ body {
   word-break: break-word;
 }
 
-.prompt-actions,
-.prompt-options {
+.prompt-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
+}
+
+/* Question options render as a numbered vertical list — one option per line —
+   with the free-text input below as the "custom" escape hatch. */
+.prompt-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.prompt-option {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+}
+
+.prompt-option-number {
+  opacity: 0.7;
+  flex: none;
+}
+
+.prompt-option-label {
+  word-break: break-word;
 }
 
 .prompt-form {
@@ -1462,7 +1524,8 @@ textarea:focus {
   bottom: 120px;
 }
 
-/* The trigger: a round button matching the jump arrows. */
+/* The trigger: a round button matching the jump arrows — see-through at rest
+   so the transcript shows underneath, solid on hover/focus. */
 .conversation-sidebar-tab {
   display: flex;
   align-items: center;
@@ -1472,21 +1535,21 @@ textarea:focus {
   padding: 0;
   border-radius: 50%;
   border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.35));
-  background: var(
-    --vscode-editorWidget-background,
-    var(--vscode-editor-background)
-  );
+  background: transparent;
   color: var(--vscode-foreground);
   cursor: pointer;
-  opacity: 0.92;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  opacity: 0.4;
+  box-shadow: none;
   transition:
     opacity 0.1s ease,
-    background 0.1s ease;
+    background 0.1s ease,
+    box-shadow 0.1s ease;
 }
 
-.conversation-sidebar:hover .conversation-sidebar-tab {
+.conversation-sidebar:hover .conversation-sidebar-tab,
+.conversation-sidebar:focus-within .conversation-sidebar-tab {
   opacity: 1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   background: var(
     --vscode-toolbar-hoverBackground,
     var(--vscode-list-hoverBackground)
@@ -2354,6 +2417,63 @@ textarea:focus {
   margin-bottom: 6px;
 }
 
+/* A staged file-context chip: file icon + name. */
+.composer-file-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.composer-file .composer-attachment-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Files that couldn't be attached (binary/oversized), named so the user
+   knows why the chip didn't appear. */
+.composer-attach-warning {
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--vscode-errorForeground);
+  opacity: 0.9;
+}
+
+/* The paperclip's hidden file input — the button triggers it. */
+.composer-file-input {
+  display: none;
+}
+
+/* Full-panel overlay while a file drag is over the chat: a light translucent
+   veil with a centered pill, matching the drop affordance in editors. */
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(127, 127, 127, 0.18);
+  pointer-events: none;
+}
+
+.drop-overlay-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.35));
+  background: var(
+    --vscode-editorWidget-background,
+    var(--vscode-editor-background)
+  );
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
 .composer-attachment {
   display: inline-flex;
   align-items: center;
@@ -2453,6 +2573,33 @@ textarea:focus {
 }
 
 /* Image thumbnails on a user message in the transcript. */
+/* File chips above a user message that carried attachments. */
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.msg-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.3));
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background, transparent);
+  font-size: 12px;
+  max-width: 260px;
+}
+
+.msg-attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .msg-images {
   display: flex;
   flex-wrap: wrap;

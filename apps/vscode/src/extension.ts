@@ -111,7 +111,32 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('justcode.openSettings', () => {
       provider.openSettings();
-    })
+    }),
+    // Right-click → attach: the no-modifier alternative to drag-and-drop
+    // (VS Code only lets OS drags reach webviews while Shift is held). Works
+    // from the Explorer context menu (single or multi-select) and the editor
+    // title menu; with no uri it attaches the active editor's file.
+    vscode.commands.registerCommand(
+      'justcode.attachFileToChat',
+      async (uri?: vscode.Uri, selected?: vscode.Uri[]) => {
+        const uris =
+          selected?.length && selected.length > 0
+            ? selected
+            : uri
+              ? [uri]
+              : vscode.window.activeTextEditor
+                ? [vscode.window.activeTextEditor.document.uri]
+                : [];
+        const paths = uris
+          .filter((entry) => entry.scheme === 'file')
+          .map((entry) => entry.fsPath);
+        if (paths.length === 0) return;
+        await vscode.commands.executeCommand(
+          `${ChatViewProvider.viewType}.focus`
+        );
+        await provider.attachFiles(paths);
+      }
+    )
   );
 }
 
