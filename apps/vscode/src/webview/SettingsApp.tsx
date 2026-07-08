@@ -1816,7 +1816,7 @@ function PromptsTab({
   );
 
   return (
-    <div className="settings-section">
+    <div className="settings-section prompts-section">
       <h2 className="settings-section-title">Agents &amp; Prompts</h2>
       <p className="settings-hint">
         System prompts holds the chat modes (each sends its own prompt) and

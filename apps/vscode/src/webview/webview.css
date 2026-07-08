@@ -3446,6 +3446,22 @@ textarea:focus {
 
 /* --- Agents & Prompts tab: flat agent-catalog rows ------------------------ */
 
+/* Give the tab/list area breathing room from the panel edges so it lines
+   up with the section title and never hugs the border. */
+.prompts-section .prompt-list-actions,
+.prompts-section .provider-list,
+.prompts-section .provider-row-wrap {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+/* Use margin (not padding) for the tabs so the underline border doesn't
+   extend past the text into the edge. */
+.prompts-section .prompt-tabs {
+  margin-left: 12px;
+  margin-right: 12px;
+}
+
 /* Underlined sub-tabs splitting mode prompts from sub agents. */
 .prompt-tabs {
   display: flex;
