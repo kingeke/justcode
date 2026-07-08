@@ -293,9 +293,16 @@ export function App(): React.JSX.Element {
     if (el.scrollTop !== before) programmaticScrollRef.current = true;
   }, []);
 
+  // The previous scroll position, so a scroll event's direction is known.
+  // Programmatic pins only ever move DOWN (to the bottom), so an upward move
+  // is always the user scrolling back to read — that's the only unstick.
+  const lastScrollTopRef = React.useRef(0);
+
   const onTranscriptScroll = (): void => {
     const el = transcriptRef.current;
     if (!el) return;
+    const lastScrollTop = lastScrollTopRef.current;
+    lastScrollTopRef.current = el.scrollTop;
     if (programmaticScrollRef.current) {
       programmaticScrollRef.current = false;
       setShowJumpToBottom(false);
@@ -304,7 +311,17 @@ export function App(): React.JSX.Element {
       return;
     }
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    stickToBottomRef.current = distanceFromBottom <= 24;
+    // Stick when the user parks near the bottom; unstick only when they
+    // actively scroll UP while away from it. Deriving unstick from distance
+    // alone raced with streaming: two back-to-back pins share one boolean
+    // flag, so the second pin's scroll event read as "user scrolled" at a
+    // moment the content had already grown past the threshold, silently
+    // killing auto-scroll mid-turn.
+    if (distanceFromBottom <= 24) {
+      stickToBottomRef.current = true;
+    } else if (el.scrollTop < lastScrollTop) {
+      stickToBottomRef.current = false;
+    }
     // A larger threshold than the auto-scroll pin so the button doesn't flicker
     // in and out on the last sliver of scroll.
     setShowJumpToBottom(distanceFromBottom > 120);
@@ -317,6 +334,30 @@ export function App(): React.JSX.Element {
     setShowJumpToTop(false);
     pinToBottom();
   };
+
+  // Unsticking is driven by explicit user intent (an upward wheel), not only
+  // by scroll-event inference — during streaming, programmatic pins and their
+  // async scroll events interleave in ways that made the inference misfire and
+  // silently kill auto-scroll. A wheel-up can only come from the user.
+  const onTranscriptWheel = (event: React.WheelEvent): void => {
+    if (event.deltaY < 0) stickToBottomRef.current = false;
+  };
+
+  // Belt and braces for following the live turn: pin on every streaming/
+  // thinking/commit update while stuck. The ResizeObserver below covers late
+  // height (images, highlighting), but must not be the only trigger — if it
+  // misses a beat mid-turn the transcript stops following entirely.
+  React.useEffect(() => {
+    if (!stickToBottomRef.current) return;
+    const raf = requestAnimationFrame(pinToBottom);
+    return () => cancelAnimationFrame(raf);
+  }, [
+    state.streaming,
+    state.thinking,
+    state.messages.length,
+    state.liveTurnItems,
+    pinToBottom,
+  ]);
 
   const jumpToTop = (): void => {
     const el = transcriptRef.current;
@@ -1106,6 +1147,7 @@ export function App(): React.JSX.Element {
           className="transcript"
           ref={transcriptRef}
           onScroll={onTranscriptScroll}
+          onWheel={onTranscriptWheel}
         >
           {/* Single wrapper around everything scrollable so the auto-scroll
               ResizeObserver sees every height change in one place. */}
