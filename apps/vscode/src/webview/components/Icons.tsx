@@ -132,6 +132,14 @@ export function ChevronLeftIcon({ size = 16 }: IconProps): React.JSX.Element {
   );
 }
 
+export function ChevronRightIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M9 6l6 6-6 6" />
+    </svg>
+  );
+}
+
 export function ChevronDownIcon({ size = 16 }: IconProps): React.JSX.Element {
   return (
     <svg {...svgProps(size)} aria-hidden="true">

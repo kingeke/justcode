@@ -22,6 +22,23 @@ export enum SubAgentRunStatus {
 }
 
 /**
+ * A user-created sub agent as persisted in config, keyed by its id. Custom
+ * agents ride the same `task` tool as the built-ins: the model picks them by
+ * id, they run with either the read-only (Explorer) or full (General) toolset,
+ * and their system prompt falls back to the General prompt when unset.
+ */
+export interface CustomSubAgentConfig {
+  /** Human label shown in the UIs. */
+  name: string;
+  /** One-line description advertised to the model in the task tool schema. */
+  summary?: string;
+  /** Optional override; when omitted the agent uses the General prompt. */
+  systemPrompt?: string;
+  /** When true the agent runs with the read-only Explorer toolset. */
+  readOnly?: boolean;
+}
+
+/**
  * One sub agent execution, persisted on the conversation (like
  * `previousMessages`, never sent to the model) so its full transcript stays
  * reviewable after the fact.
@@ -29,7 +46,8 @@ export enum SubAgentRunStatus {
 export interface SubAgentRun {
   /** The parent `task` tool call's id, linking the run to its transcript row. */
   id: string;
-  agentType: SubAgentType;
+  /** A {@link SubAgentType}, or a custom sub agent's config id. */
+  agentType: SubAgentType | string;
   /** Short human label for the run (e.g. "Find auth bug"). */
   description: string;
   /** The full prompt the parent model delegated. */
@@ -54,7 +72,8 @@ export enum SubAgentActivityPhase {
 export interface SubAgentActivityEvent {
   phase: SubAgentActivityPhase;
   runId: string;
-  agentType: SubAgentType;
+  /** A {@link SubAgentType}, or a custom sub agent's config id. */
+  agentType: SubAgentType | string;
   description: string;
   /** One-line summary of what the sub agent just did (a tool view title). */
   latestActivity?: string;
@@ -130,4 +149,93 @@ export const SUB_AGENT_CONFIGS: Record<SubAgentType, SubAgentConfig> = {
 /** Whether a raw string names a known sub agent type. */
 export function isSubAgentType(value: string): value is SubAgentType {
   return (Object.values(SubAgentType) as string[]).includes(value);
+}
+
+/**
+ * Resolves any agent type — built-in or custom — to the effective config the
+ * task tool runs it with. Custom agents get the Explorer toolset when
+ * `readOnly`, the General toolset otherwise, and fall back to the General
+ * prompt when they don't define one. Returns undefined for unknown types.
+ */
+export function resolveSubAgentConfig(
+  agentType: string,
+  customSubAgents: Record<string, CustomSubAgentConfig> = {}
+): SubAgentConfig | undefined {
+  if (isSubAgentType(agentType)) return SUB_AGENT_CONFIGS[agentType];
+  const custom = customSubAgents[agentType];
+  if (!custom) return undefined;
+  return {
+    allowedTools: custom.readOnly ? EXPLORER_TOOLS : GENERAL_TOOLS,
+    summary:
+      custom.summary?.trim() ||
+      `Custom sub agent "${custom.name}"${custom.readOnly ? ' (read-only)' : ''}.`,
+    systemPrompt:
+      custom.systemPrompt?.trim() ||
+      SUB_AGENT_CONFIGS[SubAgentType.General].systemPrompt,
+  };
+}
+
+/**
+ * Slugifies a sub agent name into an id that collides with neither a built-in
+ * type nor an existing custom agent (mirrors `uniqueModeId` for chat modes).
+ */
+export function uniqueSubAgentId(
+  name: string,
+  existing: Record<string, CustomSubAgentConfig> = {}
+): string {
+  const base =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'agent';
+  let id = base;
+  let n = 2;
+  while (isSubAgentType(id) || existing[id]) {
+    id = `${base}-${n}`;
+    n += 1;
+  }
+  return id;
+}
+
+/**
+ * Adds a custom sub agent to a config map, returning the new map and the
+ * created agent's id. Returns null when the name is blank. The input map is
+ * not mutated.
+ */
+export function addCustomSubAgent(
+  name: string,
+  options: Omit<CustomSubAgentConfig, 'name'> = {},
+  existing: Record<string, CustomSubAgentConfig> = {}
+): {
+  id: string;
+  customSubAgents: Record<string, CustomSubAgentConfig>;
+} | null {
+  const trimmedName = name.trim();
+  if (!trimmedName) return null;
+  const customSubAgents = { ...existing };
+  const id = uniqueSubAgentId(trimmedName, customSubAgents);
+  const summary = options.summary?.trim();
+  const systemPrompt = options.systemPrompt?.trim();
+  customSubAgents[id] = {
+    name: trimmedName,
+    ...(summary ? { summary } : {}),
+    ...(systemPrompt ? { systemPrompt } : {}),
+    ...(options.readOnly ? { readOnly: true } : {}),
+  };
+  return { id, customSubAgents };
+}
+
+/**
+ * Removes a custom sub agent from a config map, returning the new map. Returns
+ * null when the id doesn't name a custom agent (built-ins can't be deleted).
+ * The input map is not mutated.
+ */
+export function removeCustomSubAgent(
+  id: string,
+  existing: Record<string, CustomSubAgentConfig> = {}
+): { customSubAgents: Record<string, CustomSubAgentConfig> } | null {
+  if (!existing[id]) return null;
+  const customSubAgents = { ...existing };
+  delete customSubAgents[id];
+  return { customSubAgents };
 }

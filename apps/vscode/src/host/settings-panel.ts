@@ -9,7 +9,12 @@ import {
   PLAN_SYSTEM_PROMPT,
 } from '@core/application/system-prompt';
 import { DEFAULT_COMPACT_PROMPT } from '@core/application/compact-prompt';
-import { SUB_AGENT_CONFIGS, SubAgentType } from '@core/domain/sub-agent';
+import {
+  SUB_AGENT_CONFIGS,
+  SubAgentType,
+  addCustomSubAgent,
+  removeCustomSubAgent,
+} from '@core/domain/sub-agent';
 import {
   BUILD_MODE_ID,
   BUILT_IN_MODES,
@@ -29,6 +34,7 @@ import { join } from 'node:path';
 import {
   SettingsHostMessageType,
   SettingsWebviewMessageType,
+  SUB_AGENT_PROMPT_ID_PREFIX,
   type SettingsAppInfo,
   type SettingsHostToWebview,
   type SettingsMcpServerStatus,
@@ -271,6 +277,14 @@ export class SettingsPanel {
       case SettingsWebviewMessageType.CreateMode:
         await this.createMode(message.name, message.prompt);
         return;
+      case SettingsWebviewMessageType.CreateSubAgent:
+        await this.createSubAgent(
+          message.name,
+          message.summary,
+          message.prompt,
+          message.readOnly
+        );
+        return;
       case SettingsWebviewMessageType.DeleteMode:
         await this.deleteMode(message.modeId);
         return;
@@ -418,6 +432,28 @@ export class SettingsPanel {
       if (override) next[builtIn.configKey] = override;
       else delete next[builtIn.configKey];
       await writeGlobalConfig(configDir, next);
+    } else if (modeId.startsWith(SUB_AGENT_PROMPT_ID_PREFIX)) {
+      // A custom sub agent's prompt lives on its own config entry; empty means
+      // "fall back to the General sub agent prompt".
+      const agentId = modeId.slice(SUB_AGENT_PROMPT_ID_PREFIX.length);
+      const existing = config.customSubAgents?.[agentId];
+      if (!existing) {
+        this.post({
+          type: SettingsHostMessageType.PromptSaveResult,
+          modeId,
+          success: false,
+          error: 'This sub agent no longer exists.',
+        });
+        return;
+      }
+      const { systemPrompt: _dropped, ...rest } = existing;
+      await writeGlobalConfig(configDir, {
+        ...config,
+        customSubAgents: {
+          ...config.customSubAgents,
+          [agentId]: { ...rest, ...(trimmed ? { systemPrompt: trimmed } : {}) },
+        },
+      });
     } else {
       const existing = config.customModes?.[modeId];
       if (!existing) {
@@ -484,14 +520,83 @@ export class SettingsPanel {
   }
 
   /**
-   * Deletes a custom mode from the System Prompts tab. Built-ins are refused by
-   * `removeCustomMode`. When the deleted mode was the active one, the active
-   * mode falls back to Build so the chat never sits on a mode that no longer
-   * exists.
+   * Creates a new custom sub agent from the System Prompts tab. It is offered
+   * to the model by the `task` tool immediately via onPromptsChanged. An empty
+   * prompt falls back to the General sub agent prompt; `readOnly` restricts
+   * the agent to the read-only Explorer toolset.
+   */
+  private async createSubAgent(
+    name: string,
+    summary: string,
+    prompt: string,
+    readOnly: boolean
+  ): Promise<void> {
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    const created = addCustomSubAgent(
+      name,
+      { summary, systemPrompt: prompt, readOnly },
+      config.customSubAgents ?? {}
+    );
+    if (!created) {
+      this.post({
+        type: SettingsHostMessageType.PromptSaveResult,
+        modeId: '',
+        success: false,
+        error: 'A sub agent name is required.',
+      });
+      return;
+    }
+    await writeGlobalConfig(configDir, {
+      ...config,
+      customSubAgents: created.customSubAgents,
+    });
+    this.onPromptsChanged();
+    this.post({
+      type: SettingsHostMessageType.PromptSaveResult,
+      modeId: `${SUB_AGENT_PROMPT_ID_PREFIX}${created.id}`,
+      success: true,
+    });
+    await this.sendPrompts();
+  }
+
+  /**
+   * Deletes a custom mode — or a custom sub agent, addressed by its
+   * `subagent-<id>` prompt id — from the System Prompts tab. Built-ins are
+   * refused. When the deleted mode was the active one, the active mode falls
+   * back to Build so the chat never sits on a mode that no longer exists.
    */
   private async deleteMode(modeId: string): Promise<void> {
     const configDir = cacheDirectory();
     const config = await readGlobalConfig(configDir);
+    if (modeId.startsWith(SUB_AGENT_PROMPT_ID_PREFIX)) {
+      const agentId = modeId.slice(SUB_AGENT_PROMPT_ID_PREFIX.length);
+      const removedAgent = removeCustomSubAgent(
+        agentId,
+        config.customSubAgents ?? {}
+      );
+      if (!removedAgent) {
+        this.post({
+          type: SettingsHostMessageType.PromptSaveResult,
+          modeId,
+          success: false,
+          error: 'Only custom sub agents can be deleted.',
+        });
+        return;
+      }
+      await writeGlobalConfig(configDir, {
+        ...config,
+        customSubAgents: removedAgent.customSubAgents,
+      });
+      this.onPromptsChanged();
+      this.post({
+        type: SettingsHostMessageType.PromptSaveResult,
+        modeId,
+        success: true,
+      });
+      await this.sendPrompts();
+      return;
+    }
     const removed = removeCustomMode(modeId, config.customModes ?? {});
     if (!removed) {
       this.post({
@@ -731,12 +836,18 @@ const BUILT_IN_PROMPTS: Record<
  * custom modes (whose prompt may be empty = "uses the Build prompt").
  */
 function listPromptInfos(config: GlobalConfig): SettingsPromptInfo[] {
+  const modeDescriptions: Record<string, string> = {
+    build: 'The default agent: edits files and runs commands to do the work.',
+    ask: 'Answers and explanations without changing the codebase.',
+    plan: 'Lays out an approach for review before any changes are made.',
+  };
   const builtIns = BUILT_IN_MODES.map((mode) => {
     const entry = BUILT_IN_PROMPTS[mode.id];
     const override = entry ? config[entry.configKey] : undefined;
     return {
       id: mode.id,
       name: mode.name,
+      description: modeDescriptions[mode.id] ?? '',
       custom: false,
       prompt: override ?? entry?.default ?? '',
       // A stored prompt identical to the built-in default doesn't count as a
@@ -754,6 +865,8 @@ function listPromptInfos(config: GlobalConfig): SettingsPromptInfo[] {
         {
           id: 'compact',
           name: 'Compaction',
+          description:
+            'Summarizes the conversation when it is compacted to free context.',
           custom: false,
           prompt: compactOverride ?? compactEntry.default,
           overridden:
@@ -766,10 +879,10 @@ function listPromptInfos(config: GlobalConfig): SettingsPromptInfo[] {
   // reset) the same way, so they ride along after Compaction.
   const subAgents = (
     [
-      ['subagent-explorer', 'Explorer sub agent'],
-      ['subagent-general', 'General sub agent'],
+      ['subagent-explorer', 'Explorer', SubAgentType.Explorer],
+      ['subagent-general', 'General', SubAgentType.General],
     ] as const
-  ).flatMap(([id, name]) => {
+  ).flatMap(([id, name, type]) => {
     const entry = BUILT_IN_PROMPTS[id];
     if (!entry) return [];
     const override = config[entry.configKey];
@@ -777,22 +890,38 @@ function listPromptInfos(config: GlobalConfig): SettingsPromptInfo[] {
       {
         id,
         name,
+        description: SUB_AGENT_CONFIGS[type].summary,
         custom: false,
         prompt: override ?? entry.default,
         overridden: override !== undefined && override !== entry.default,
       },
     ];
   });
+  // User-created sub agents, addressed as `subagent-<id>` so their ids can't
+  // collide with custom mode ids in the shared save/delete routing.
+  const customSubAgents = Object.entries(config.customSubAgents ?? {}).map(
+    ([id, agentConfig]) => ({
+      id: `${SUB_AGENT_PROMPT_ID_PREFIX}${id}`,
+      name: agentConfig.name,
+      description:
+        agentConfig.summary ??
+        `Custom sub agent${agentConfig.readOnly ? ' (read-only)' : ''}.`,
+      custom: true,
+      prompt: agentConfig.systemPrompt ?? '',
+      overridden: false,
+    })
+  );
   const custom = Object.entries(config.customModes ?? {}).map(
     ([id, modeConfig]) => ({
       id,
       name: modeConfig.name,
+      description: 'Custom chat mode.',
       custom: true,
       prompt: modeConfig.systemPrompt ?? '',
       overridden: false,
     })
   );
-  return [...builtIns, ...compact, ...subAgents, ...custom];
+  return [...builtIns, ...compact, ...subAgents, ...customSubAgents, ...custom];
 }
 
 /**

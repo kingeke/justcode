@@ -59,6 +59,11 @@ import {
 } from '@core/domain/sub-agent';
 import { SubAgentTranscript } from '@cli/ui/sub-agent-transcript.js';
 import {
+  SubAgentsPicker,
+  type SubAgentDraft,
+  type SubAgentEntry,
+} from '@cli/ui/sub-agents-picker.js';
+import {
   createConversation,
   type Conversation,
   type SessionStats,
@@ -240,6 +245,24 @@ interface ChatAppProps {
   onDeleteMode?: (
     modeId: string
   ) => { modes: ChatMode[]; modeId: string } | null;
+  /** The sub agents the task tool can spawn, listed by `/sub-agents`. */
+  subAgents?: SubAgentEntry[];
+  /**
+   * Create a custom sub agent. The host persists it and pushes it to the task
+   * tool, returning the updated list so the picker reflects it immediately.
+   */
+  onCreateSubAgent?: (
+    name: string,
+    draft: SubAgentDraft
+  ) => SubAgentEntry[] | null;
+  /** Delete a custom sub agent, returning the updated list (null = refused). */
+  onDeleteSubAgent?: (id: string) => SubAgentEntry[] | null;
+  /**
+   * Persist a sub agent's system prompt: a built-in's is stored as a config
+   * override, a custom agent keeps it on its own entry. Returns the updated
+   * list (null = unknown agent).
+   */
+  onSaveSubAgentPrompt?: (id: string, prompt: string) => SubAgentEntry[] | null;
   initialMaxReadLines?: number;
   onMaxReadLinesChange?: (lines: number) => void;
   initialMaxHistoryMessages?: number;
@@ -262,7 +285,8 @@ interface ChatAppProps {
 /** One sub agent run's live progress, shown in the sub agent panel. */
 interface SubAgentPanelEntry {
   runId: string;
-  agentType: SubAgentType;
+  /** A built-in {@link SubAgentType} or a custom sub agent's id. */
+  agentType: SubAgentType | string;
   description: string;
   toolUseCount: number;
   latestActivity?: string;
@@ -925,6 +949,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   // switched/created via the `/mode` picker.
   const [modes, setModes] = useState<ChatMode[]>(props.modes ?? []);
   const [showModePicker, setShowModePicker] = useState(false);
+  const [showSubAgentsPicker, setShowSubAgentsPicker] = useState(false);
+  // The sub agents listed by /sub-agents; updated by create/delete/edit there.
+  const [subAgents, setSubAgents] = useState<SubAgentEntry[]>(
+    props.subAgents ?? []
+  );
   const [activeMode, setActiveMode] = useState(
     props.initialMode ?? BUILD_MODE_ID
   );
@@ -1474,6 +1503,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       showReasoningPicker ||
       showToolsPicker ||
       showModePicker ||
+      showSubAgentsPicker ||
       // The full-screen sub agent transcript owns the keyboard while open.
       openSubAgentRunId !== null
     )
@@ -2406,6 +2436,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           return;
         }
         setShowModePicker(true);
+        return;
+      }
+
+      case CommandName.SubAgents: {
+        setShowSubAgentsPicker(true);
         return;
       }
 
@@ -3581,6 +3616,46 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           setStatus(`Deleted mode: ${deleted?.name ?? modeId}`);
         }}
         onCancel={() => setShowModePicker(false)}
+      />
+    );
+  }
+
+  if (showSubAgentsPicker) {
+    return (
+      <SubAgentsPicker
+        agents={subAgents}
+        onCreate={(name, draft) => {
+          const result = props.onCreateSubAgent?.(name, draft);
+          setShowSubAgentsPicker(false);
+          if (!result) {
+            setStatus('Could not create sub agent');
+            return;
+          }
+          setSubAgents(result);
+          setStatus(`Created sub agent: ${name}`);
+        }}
+        onDelete={(id) => {
+          const deleted = subAgents.find((agent) => agent.id === id);
+          const result = props.onDeleteSubAgent?.(id);
+          if (!result) {
+            setStatus('Could not delete sub agent');
+            return;
+          }
+          setSubAgents(result);
+          setStatus(`Deleted sub agent: ${deleted?.name ?? id}`);
+        }}
+        onSavePrompt={(id, prompt) => {
+          const result = props.onSaveSubAgentPrompt?.(id, prompt);
+          setShowSubAgentsPicker(false);
+          if (!result) {
+            setStatus('Could not save sub agent prompt');
+            return;
+          }
+          setSubAgents(result);
+          const saved = result.find((agent) => agent.id === id);
+          setStatus(`Saved prompt: ${saved?.name ?? id}`);
+        }}
+        onCancel={() => setShowSubAgentsPicker(false)}
       />
     );
   }

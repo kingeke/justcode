@@ -63,6 +63,8 @@ export enum SettingsWebviewMessageType {
   SavePrompt = 'savePrompt',
   /** Create a new custom mode (name + optional prompt). */
   CreateMode = 'createMode',
+  /** Create a new custom sub agent (name + optional summary/prompt). */
+  CreateSubAgent = 'createSubAgent',
   /** Delete a custom mode (built-ins can never be deleted). */
   DeleteMode = 'deleteMode',
   /** Open the raw `config.json` in a VS Code editor tab. */
@@ -76,6 +78,14 @@ export enum SettingsWebviewMessageType {
   /** Update an installed skill from its repository. */
   UpdateSkill = 'updateSkill',
 }
+
+/**
+ * Prefix that scopes sub agent entries in the prompt list's id namespace
+ * (`subagent-explorer`, `subagent-<custom id>`), so they can't collide with
+ * mode ids in the shared save/delete routing and so both sides can section the
+ * list without duplicating the literal.
+ */
+export const SUB_AGENT_PROMPT_ID_PREFIX = 'subagent-';
 
 /** Per-server outcome of loading MCP, shown after a save. */
 export interface SettingsMcpServerStatus {
@@ -91,6 +101,8 @@ export interface SettingsPromptInfo {
   id: string;
   /** Human label shown as the card title. */
   name: string;
+  /** One-line blurb shown under the name (a mode's role / an agent's summary). */
+  description: string;
   /** Whether the user created this mode (vs. a built-in). */
   custom: boolean;
   /**
@@ -359,9 +371,26 @@ export interface SettingsCreateModeMessage {
 }
 
 /**
- * Delete a custom mode from the System Prompts tab. The host removes it from
- * config (switching the active mode to Build when it was the deleted one) and
- * replies with PromptSaveResult and a fresh Prompts list.
+ * Create a new custom sub agent from the System Prompts tab. The id is derived
+ * from the name (deduped against the built-in agent types and existing custom
+ * agents). An empty prompt means the agent falls back to the General sub agent
+ * prompt; `readOnly` restricts it to the read-only Explorer toolset. The host
+ * replies with PromptSaveResult (modeId = `subagent-<id>`) and a fresh Prompts
+ * list.
+ */
+export interface SettingsCreateSubAgentMessage {
+  type: SettingsWebviewMessageType.CreateSubAgent;
+  name: string;
+  summary: string;
+  prompt: string;
+  readOnly: boolean;
+}
+
+/**
+ * Delete a custom mode (or custom sub agent, by its `subagent-<id>` prompt id)
+ * from the System Prompts tab. The host removes it from config (switching the
+ * active mode to Build when it was the deleted one) and replies with
+ * PromptSaveResult and a fresh Prompts list.
  */
 export interface SettingsDeleteModeMessage {
   type: SettingsWebviewMessageType.DeleteMode;
@@ -419,6 +448,7 @@ export type SettingsWebviewToHost =
   | SettingsGetPromptsMessage
   | SettingsSavePromptMessage
   | SettingsCreateModeMessage
+  | SettingsCreateSubAgentMessage
   | SettingsDeleteModeMessage
   | SettingsOpenConfigFileMessage
   | SettingsGetSkillsMessage

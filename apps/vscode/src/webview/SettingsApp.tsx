@@ -9,6 +9,7 @@ import {
 import {
   SettingsHostMessageType,
   SettingsWebviewMessageType,
+  SUB_AGENT_PROMPT_ID_PREFIX,
   type SettingsAppInfo,
   type SettingsMcpServerStatus,
   type SettingsPromptInfo,
@@ -20,7 +21,11 @@ import {
   onSettingsMessage,
   postSettingsToHost,
 } from '@ext/webview/vscode-api';
-import { PlusIcon } from '@ext/webview/components/Icons';
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  PlusIcon,
+} from '@ext/webview/components/Icons';
 import { JsonEditor } from '@ext/webview/components/JsonEditor';
 import { APP_NAME } from '@core/branding';
 import { CRYPTO_WALLETS, KOFI_URL } from '@core/support';
@@ -282,6 +287,23 @@ export function SettingsApp(): React.JSX.Element {
     });
   };
 
+  const createSubAgent = (
+    name: string,
+    summary: string,
+    prompt: string,
+    readOnly: boolean
+  ): void => {
+    setPromptSaving(true);
+    setPromptSaveState(undefined);
+    postSettingsToHost({
+      type: SettingsWebviewMessageType.CreateSubAgent,
+      name,
+      summary,
+      prompt,
+      readOnly,
+    });
+  };
+
   const deleteMode = (modeId: string): void => {
     setPromptSaving(true);
     setPromptSaveState(undefined);
@@ -424,6 +446,7 @@ export function SettingsApp(): React.JSX.Element {
               saveState={promptSaveState}
               onSave={savePrompt}
               onCreate={createMode}
+              onCreateSubAgent={createSubAgent}
               onDelete={deleteMode}
             />
           ) : (
@@ -1739,12 +1762,19 @@ function McpSaveSummary({
 // System Prompts tab — view and edit every mode's system prompt
 // ---------------------------------------------------------------------------
 
+/** The two sub-tabs of the Agents & Prompts section. */
+enum PromptSection {
+  Prompts = 'prompts',
+  SubAgents = 'subagents',
+}
+
 function PromptsTab({
   prompts,
   saving,
   saveState,
   onSave,
   onCreate,
+  onCreateSubAgent,
   onDelete,
 }: {
   prompts: SettingsPromptInfo[] | undefined;
@@ -1752,96 +1782,90 @@ function PromptsTab({
   saveState: PromptSaveState | undefined;
   onSave: (modeId: string, prompt: string) => void;
   onCreate: (name: string, prompt: string) => void;
+  onCreateSubAgent: (
+    name: string,
+    summary: string,
+    prompt: string,
+    readOnly: boolean
+  ) => void;
   onDelete: (modeId: string) => void;
 }): React.JSX.Element {
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
+  const [section, setSection] = React.useState<PromptSection>(
+    PromptSection.Prompts
+  );
   const [showCreateForm, setShowCreateForm] = React.useState(false);
+  const [showCreateSubAgentForm, setShowCreateSubAgentForm] =
+    React.useState(false);
 
   if (!prompts) {
     return (
       <div className="settings-section">
-        <h2 className="settings-section-title">System Prompts</h2>
+        <h2 className="settings-section-title">Agents &amp; Prompts</h2>
         <p className="settings-hint">Loading…</p>
       </div>
     );
   }
 
-  const subAgents = prompts.filter(
-    (p) => !p.custom && p.id.startsWith('subagent-')
+  // Two tabs: the chat-mode prompts (incl. Compaction) and the task tool's
+  // sub agents. Within each, one flat catalog whose rows carry badges
+  // (custom / edited) instead of subsections.
+  const onSubAgentsTab = section === PromptSection.SubAgents;
+  const visible = prompts.filter(
+    (p) => p.id.startsWith(SUB_AGENT_PROMPT_ID_PREFIX) === onSubAgentsTab
   );
-  const builtIns = prompts.filter(
-    (p) => !p.custom && !p.id.startsWith('subagent-')
-  );
-  const custom = prompts.filter((p) => p.custom);
 
   return (
     <div className="settings-section">
-      <h2 className="settings-section-title">System Prompts</h2>
+      <h2 className="settings-section-title">Agents &amp; Prompts</h2>
       <p className="settings-hint">
-        Each chat mode sends its own system prompt, Compaction is the prompt
-        used to summarize a conversation when it's compacted, and the sub agent
-        prompts steer agents spawned by the task tool. Edit any of them here —
-        including the built-in defaults. Changes apply to the next message.
+        System prompts holds the chat modes (each sends its own prompt) and
+        Compaction; Sub agents holds the agents the task tool can spawn. Open
+        any row to edit its prompt — including the built-in defaults. Changes
+        apply to the next message.
       </p>
 
-      <div className="settings-subhead">Built-in prompts</div>
-      <div className="provider-list">
-        {builtIns.map((prompt) => (
-          <PromptCard
-            key={prompt.id}
-            prompt={prompt}
-            expanded={expandedId === prompt.id}
-            onToggle={() =>
-              setExpandedId(expandedId === prompt.id ? null : prompt.id)
-            }
-            saving={saving}
-            saveState={saveState?.modeId === prompt.id ? saveState : undefined}
-            onSave={onSave}
-          />
-        ))}
+      <div className="prompt-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!onSubAgentsTab}
+          className={`prompt-tab ${!onSubAgentsTab ? 'prompt-tab-active' : ''}`}
+          onClick={() => setSection(PromptSection.Prompts)}
+        >
+          System prompts
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={onSubAgentsTab}
+          className={`prompt-tab ${onSubAgentsTab ? 'prompt-tab-active' : ''}`}
+          onClick={() => setSection(PromptSection.SubAgents)}
+        >
+          Sub agents
+        </button>
       </div>
 
-      <div className="settings-subhead">Built-in sub-agents prompts</div>
-      <div className="provider-list">
-        {subAgents.map((prompt) => (
-          <PromptCard
-            key={prompt.id}
-            prompt={prompt}
-            expanded={expandedId === prompt.id}
-            onToggle={() =>
-              setExpandedId(expandedId === prompt.id ? null : prompt.id)
-            }
-            saving={saving}
-            saveState={saveState?.modeId === prompt.id ? saveState : undefined}
-            onSave={onSave}
-          />
-        ))}
-      </div>
-
-      <div className="settings-subhead">Custom modes</div>
-      <div className="provider-list">
-        {custom.map((prompt) => (
-          <PromptCard
-            key={prompt.id}
-            prompt={prompt}
-            expanded={expandedId === prompt.id}
-            onToggle={() =>
-              setExpandedId(expandedId === prompt.id ? null : prompt.id)
-            }
-            saving={saving}
-            saveState={saveState?.modeId === prompt.id ? saveState : undefined}
-            onSave={onSave}
-            onDelete={onDelete}
-          />
-        ))}
-        <div className="provider-row-wrap">
-          <div className="provider-row">
-            <div className="provider-row-main">
-              <span className="provider-name">Add custom mode</span>
-              <span className="provider-desc">
-                A new chat mode with its own system prompt
-              </span>
-            </div>
+      <div className="prompt-list-actions">
+        <span className="settings-subhead prompt-list-actions-title">
+          {onSubAgentsTab ? 'Available sub agents' : 'Available prompts'}
+        </span>
+        <div className="prompt-list-actions-buttons">
+          {onSubAgentsTab ? (
+            <button
+              type="button"
+              className="provider-action"
+              onClick={() => setShowCreateSubAgentForm((prev) => !prev)}
+            >
+              {showCreateSubAgentForm ? (
+                'Cancel'
+              ) : (
+                <>
+                  <PlusIcon size={13} /> New sub agent
+                </>
+              )}
+            </button>
+          ) : (
             <button
               type="button"
               className="provider-action"
@@ -1851,22 +1875,169 @@ function PromptsTab({
                 'Cancel'
               ) : (
                 <>
-                  <PlusIcon size={13} /> Add
+                  <PlusIcon size={13} /> New mode
                 </>
               )}
             </button>
-          </div>
-          {showCreateForm ? (
-            <CreateModeForm
-              saving={saving}
-              saveState={saveState}
-              onCreate={onCreate}
-              onDone={() => setShowCreateForm(false)}
-            />
-          ) : null}
+          )}
         </div>
       </div>
+
+      {!onSubAgentsTab && showCreateForm ? (
+        <div className="provider-row-wrap">
+          <CreateModeForm
+            saving={saving}
+            saveState={saveState}
+            onCreate={onCreate}
+            onDone={() => setShowCreateForm(false)}
+          />
+        </div>
+      ) : null}
+      {onSubAgentsTab && showCreateSubAgentForm ? (
+        <div className="provider-row-wrap">
+          <CreateSubAgentForm
+            saving={saving}
+            saveState={saveState}
+            onCreate={onCreateSubAgent}
+            onDone={() => setShowCreateSubAgentForm(false)}
+          />
+        </div>
+      ) : null}
+
+      <div className="provider-list">
+        {visible.map((prompt) => (
+          <PromptCard
+            key={prompt.id}
+            prompt={prompt}
+            expanded={expandedId === prompt.id}
+            onToggle={() =>
+              setExpandedId(expandedId === prompt.id ? null : prompt.id)
+            }
+            saving={saving}
+            saveState={saveState?.modeId === prompt.id ? saveState : undefined}
+            onSave={onSave}
+            {...(prompt.custom ? { onDelete } : {})}
+          />
+        ))}
+      </div>
     </div>
+  );
+}
+
+function CreateSubAgentForm({
+  saving,
+  saveState,
+  onCreate,
+  onDone,
+}: {
+  saving: boolean;
+  saveState: PromptSaveState | undefined;
+  onCreate: (
+    name: string,
+    summary: string,
+    prompt: string,
+    readOnly: boolean
+  ) => void;
+  onDone: () => void;
+}): React.JSX.Element {
+  const [name, setName] = React.useState('');
+  const [summary, setSummary] = React.useState('');
+  const [prompt, setPrompt] = React.useState('');
+  const [readOnly, setReadOnly] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  // Only react to save results for a create this form submitted, not to a
+  // PromptCard save that happens to land while the form is open.
+  const submittedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!submittedRef.current || saving || !saveState) return;
+    submittedRef.current = false;
+    if (saveState.success) onDone();
+    else setError(saveState.error ?? 'Failed to create the sub agent.');
+  }, [saving, saveState, onDone]);
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>): void => {
+    e.preventDefault();
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError('A sub agent name is required.');
+      return;
+    }
+    setError(null);
+    submittedRef.current = true;
+    onCreate(trimmedName, summary, prompt, readOnly);
+  };
+
+  return (
+    <form className="prompt-editor-wrap" onSubmit={handleSubmit}>
+      <div className="provider-connect-field">
+        <label
+          className="provider-connect-label"
+          htmlFor="create-subagent-name"
+        >
+          Name
+        </label>
+        <input
+          id="create-subagent-name"
+          className="provider-connect-input"
+          type="text"
+          placeholder="My Agent"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            setError(null);
+          }}
+          // eslint-disable-next-line jsx-a11y/no-autofocus
+          autoFocus
+          autoComplete="off"
+          spellCheck={false}
+        />
+      </div>
+      <div className="provider-connect-field">
+        <label
+          className="provider-connect-label"
+          htmlFor="create-subagent-summary"
+        >
+          Summary
+        </label>
+        <input
+          id="create-subagent-summary"
+          className="provider-connect-input"
+          type="text"
+          placeholder="One line telling the model when to pick this agent…"
+          value={summary}
+          onChange={(e) => setSummary(e.target.value)}
+          autoComplete="off"
+          spellCheck={false}
+        />
+      </div>
+      <textarea
+        className="prompt-editor"
+        value={prompt}
+        spellCheck={false}
+        placeholder="System prompt — leave empty to use the General sub agent prompt…"
+        onChange={(e) => setPrompt(e.target.value)}
+        aria-label="New sub agent system prompt"
+      />
+      <label className="settings-checkbox">
+        <input
+          type="checkbox"
+          checked={readOnly}
+          onChange={(e) => setReadOnly(e.target.checked)}
+        />
+        Read-only (search/read tools only — no edits, no commands)
+      </label>
+      {error ? <p className="provider-connect-error">{error}</p> : null}
+      <div className="mcp-actions">
+        <button
+          type="submit"
+          className="provider-action provider-action-primary"
+          disabled={saving}
+        >
+          {saving ? 'Creating…' : 'Create sub agent'}
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -1982,55 +2153,37 @@ function PromptCard({
 
   return (
     <div className="provider-row-wrap">
-      <div className="provider-row">
+      <button
+        type="button"
+        className="provider-row prompt-row"
+        onClick={onToggle}
+        aria-expanded={expanded}
+      >
         <div className="provider-row-main">
-          <span className="provider-name">{prompt.name}</span>
+          <span className="prompt-row-title">
+            <span className="provider-name">{prompt.name}</span>
+            {prompt.custom ? (
+              <span className="provider-badge">custom</span>
+            ) : null}
+            {prompt.overridden ? (
+              <span className="provider-badge">edited</span>
+            ) : null}
+          </span>
           <span className="provider-desc">
-            {prompt.custom && !prompt.prompt
-              ? 'Uses the Build prompt (no prompt of its own yet)'
-              : `${prompt.prompt.length.toLocaleString()} characters`}
+            {prompt.description ||
+              (prompt.custom && !prompt.prompt
+                ? 'Uses the Build prompt (no prompt of its own yet)'
+                : `${prompt.prompt.length.toLocaleString()} characters`)}
           </span>
         </div>
-        <div className="provider-row-buttons">
-          <button type="button" className="provider-action" onClick={onToggle}>
-            {expanded ? 'Close' : 'Edit'}
-          </button>
-          {prompt.custom && onDelete ? (
-            confirmingDelete ? (
-              <>
-                <button
-                  type="button"
-                  className="provider-action provider-action-danger"
-                  disabled={saving}
-                  onClick={() => {
-                    onDelete(prompt.id);
-                    setConfirmingDelete(false);
-                  }}
-                >
-                  Confirm
-                </button>
-                <button
-                  type="button"
-                  className="provider-action"
-                  onClick={() => setConfirmingDelete(false)}
-                >
-                  Cancel
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                className="provider-action"
-                disabled={saving}
-                title={`Delete the ${prompt.name} mode`}
-                onClick={() => setConfirmingDelete(true)}
-              >
-                Delete
-              </button>
-            )
-          ) : null}
-        </div>
-      </div>
+        <span className="prompt-row-chevron">
+          {expanded ? (
+            <ChevronDownIcon size={16} />
+          ) : (
+            <ChevronRightIcon size={16} />
+          )}
+        </span>
+      </button>
 
       {expanded ? (
         <div className="prompt-editor-wrap">
@@ -2065,6 +2218,40 @@ function PromptCard({
               >
                 Reset to default
               </button>
+            ) : null}
+            {prompt.custom && onDelete ? (
+              confirmingDelete ? (
+                <>
+                  <button
+                    type="button"
+                    className="provider-action provider-action-danger"
+                    disabled={saving}
+                    onClick={() => {
+                      onDelete(prompt.id);
+                      setConfirmingDelete(false);
+                    }}
+                  >
+                    Confirm delete
+                  </button>
+                  <button
+                    type="button"
+                    className="provider-action"
+                    onClick={() => setConfirmingDelete(false)}
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="provider-action"
+                  disabled={saving}
+                  title={`Delete ${prompt.name}`}
+                  onClick={() => setConfirmingDelete(true)}
+                >
+                  Delete
+                </button>
+              )
             ) : null}
             {dirty ? (
               <span className="mcp-dirty-hint">Unsaved changes</span>

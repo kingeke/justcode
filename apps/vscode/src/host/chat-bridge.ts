@@ -2641,6 +2641,9 @@ export class ChatBridge {
       config.generalSubAgentPrompt ??
         SUB_AGENT_CONFIGS[SubAgentType.General].systemPrompt
     );
+    // Created/edited/deleted custom sub agents reach the task tool on its next
+    // call (schema and runs alike).
+    this.services?.setCustomSubAgents(config.customSubAgents ?? {});
     this.customModesConfig = config.customModes ?? {};
     this.modes = listModes(this.customModesConfig);
     if (!isKnownMode(this.activeModeId, this.customModesConfig)) {

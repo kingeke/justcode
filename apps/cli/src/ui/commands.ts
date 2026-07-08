@@ -16,6 +16,7 @@ export enum CommandName {
   ExpandTools = 'expand-tools',
   ManageTools = 'manage-tools',
   Mode = 'mode',
+  SubAgents = 'sub-agents',
   Implement = 'implement',
   EditPlan = 'edit-plan',
   CollapseResponses = 'collapse-responses',
@@ -117,6 +118,10 @@ export const COMMANDS: Command[] = [
   {
     name: CommandName.Mode,
     description: 'Switch the chat mode or create a custom one',
+  },
+  {
+    name: CommandName.SubAgents,
+    description: 'View, create, edit, or delete the task tool sub agents',
   },
   {
     name: CommandName.Implement,

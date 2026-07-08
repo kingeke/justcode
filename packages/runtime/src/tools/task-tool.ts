@@ -13,12 +13,15 @@ import {
   SubAgentRunStatus,
   SubAgentType,
   isSubAgentType,
+  resolveSubAgentConfig,
+  type CustomSubAgentConfig,
   type SubAgentRun,
 } from '@core/domain/sub-agent';
 import { runSubAgent } from '@core/application/sub-agent-runner';
 
 interface TaskArguments {
-  agent_type: SubAgentType;
+  /** A built-in {@link SubAgentType} or a custom sub agent's id. */
+  agent_type: string;
   description: string;
   prompt: string;
 }
@@ -45,8 +48,6 @@ export interface TaskToolDependencies {
 export class TaskTool implements Tool {
   public readonly requiresApproval = false;
 
-  public readonly definition: ToolDefinition;
-
   public constructor(
     private readonly resolveDependencies: () => TaskToolDependencies,
     /**
@@ -54,12 +55,38 @@ export class TaskTool implements Tool {
      * edits (settings/config) take effect without a rebuild; falls back to the
      * built-in prompt when unset.
      */
-    private readonly getSystemPrompt?: (type: SubAgentType) => string
-  ) {
-    const typeSummaries = Object.entries(SUB_AGENT_CONFIGS)
-      .map(([type, config]) => `"${type}": ${config.summary}`)
+    private readonly getSystemPrompt?: (type: SubAgentType) => string,
+    /**
+     * Returns the user-created sub agents. Read per call (schema and runs) so
+     * agents created or deleted at runtime take effect without a rebuild.
+     */
+    private readonly getCustomSubAgents?: () => Record<
+      string,
+      CustomSubAgentConfig
+    >
+  ) {}
+
+  /**
+   * Built dynamically so custom sub agents created at runtime appear in the
+   * schema (`agent_type` enum + summaries) the next time tools are advertised.
+   */
+  public get definition(): ToolDefinition {
+    const customSubAgents = this.getCustomSubAgents?.() ?? {};
+    const typeSummaries = [
+      ...Object.entries(SUB_AGENT_CONFIGS).map(
+        ([type, config]) => [type, config.summary] as const
+      ),
+      ...Object.keys(customSubAgents).map(
+        (id) =>
+          [
+            id,
+            resolveSubAgentConfig(id, customSubAgents)?.summary ?? '',
+          ] as const
+      ),
+    ]
+      .map(([type, summary]) => `"${type}": ${summary}`)
       .join(' ');
-    this.definition = {
+    return {
       name: ToolName.Task,
       description:
         'Delegate a self-contained task to a sub agent that works autonomously ' +
@@ -76,7 +103,10 @@ export class TaskTool implements Tool {
         properties: {
           agent_type: {
             type: 'string',
-            enum: Object.values(SubAgentType),
+            enum: [
+              ...Object.values(SubAgentType),
+              ...Object.keys(customSubAgents),
+            ],
             description: 'The kind of sub agent to spawn.',
           },
           description: {
@@ -131,7 +161,19 @@ export class TaskTool implements Tool {
       };
     }
 
-    const config = SUB_AGENT_CONFIGS[parsed.agent_type];
+    const customSubAgents = this.getCustomSubAgents?.() ?? {};
+    const config = resolveSubAgentConfig(parsed.agent_type, customSubAgents);
+    if (!config) {
+      return {
+        content:
+          `Unknown agent_type "${parsed.agent_type}": expected one of ` +
+          [...Object.values(SubAgentType), ...Object.keys(customSubAgents)]
+            .map((type) => `"${type}"`)
+            .join(', ') +
+          '.',
+        isError: true,
+      };
+    }
     const allowed = new Set<string>(config.allowedTools);
     const tools = dependencies.tools.filter(
       (tool) =>
@@ -190,7 +232,11 @@ export class TaskTool implements Tool {
         tools,
         prompt: parsed.prompt,
         systemPrompt:
-          this.getSystemPrompt?.(parsed.agent_type) ?? config.systemPrompt,
+          // Prompt overrides only exist for the built-in types; custom agents
+          // carry their prompt on their config (resolved above).
+          (isSubAgentType(parsed.agent_type)
+            ? this.getSystemPrompt?.(parsed.agent_type)
+            : undefined) ?? config.systemPrompt,
         workspaceRoot: context.workspaceRoot,
         sessionId,
         ...(context.signal ? { signal: context.signal } : {}),
@@ -235,9 +281,10 @@ export class TaskTool implements Tool {
 function tryParse(rawArguments: string): TaskArguments | undefined {
   try {
     const parsed = JSON.parse(rawArguments) as Partial<TaskArguments>;
+    // agent_type is validated against the known types (built-in + custom) in
+    // execute, where the live custom-agent map is available.
     if (
       typeof parsed.agent_type !== 'string' ||
-      !isSubAgentType(parsed.agent_type) ||
       typeof parsed.description !== 'string' ||
       typeof parsed.prompt !== 'string' ||
       parsed.prompt.trim().length === 0

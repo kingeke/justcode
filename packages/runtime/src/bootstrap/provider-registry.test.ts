@@ -16,6 +16,7 @@ function baseConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     compactPrompt: '',
     explorerSubAgentPrompt: '',
     generalSubAgentPrompt: '',
+    customSubAgents: {},
     autoCompactThresholdPercent: 80,
     localModelAutoRefresh: true,
     modelAutoRefresh: true,

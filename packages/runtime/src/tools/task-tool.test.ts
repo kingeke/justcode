@@ -221,4 +221,61 @@ describe('TaskTool', () => {
       'CUSTOM SUB AGENT PROMPT'
     );
   });
+
+  it('advertises custom sub agents in the schema and runs them', async () => {
+    const requests: ChatRequest[] = [];
+    const tool = new TaskTool(
+      () => ({
+        provider: providerFromResponses([{ content: 'reviewed' }], requests),
+        tools: [stubTool(ToolName.ReadFile), stubTool(ToolName.Bash)],
+      }),
+      undefined,
+      () => ({
+        reviewer: {
+          name: 'Reviewer',
+          summary: 'Reviews code.',
+          systemPrompt: 'You review code.',
+          readOnly: true,
+        },
+      })
+    );
+
+    const parameters = tool.definition.parameters as {
+      properties: { agent_type: { enum: string[] } };
+    };
+    expect(parameters.properties.agent_type.enum).toContain('reviewer');
+    expect(tool.definition.description).toContain('"reviewer": Reviews code.');
+
+    const result = await tool.execute(
+      JSON.stringify({
+        agent_type: 'reviewer',
+        description: 'Review the diff',
+        prompt: 'Review the change and report issues.',
+      }),
+      { workspaceRoot: '/workspace', model: 'test-model' }
+    );
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toBe('reviewed');
+    // Custom prompt is used, and read-only agents never see bash.
+    expect(requests[0]?.messages[0]?.content).toContain('You review code.');
+    expect(requests[0]?.tools?.map((t) => t.name)).toEqual([ToolName.ReadFile]);
+  });
+
+  it('rejects an unknown agent type with the known ids', async () => {
+    const tool = new TaskTool(() => ({
+      provider: providerFromResponses([]),
+      tools: [],
+    }));
+    const result = await tool.execute(
+      JSON.stringify({
+        agent_type: 'ghost',
+        description: 'x',
+        prompt: 'do something',
+      }),
+      { workspaceRoot: '/workspace', model: 'test-model' }
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('Unknown agent_type "ghost"');
+    expect(result.content).toContain('"explorer"');
+  });
 });

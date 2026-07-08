@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import type { ReasoningEffort } from '@core/ports/chat-model';
 import type { CustomModeConfig } from '@core/domain/chat-mode';
+import type { CustomSubAgentConfig } from '@core/domain/sub-agent';
 import { ProviderId } from '@core/ports/provider-catalog';
 import { writeSecureFile } from '@runtime/persistence/secure-file';
 import type { ProviderConfig } from '@core/ports/provider-catalog';
@@ -76,6 +77,11 @@ export interface GlobalConfig {
    * without a `systemPrompt` falls back to the Build (agent) prompt.
    */
   customModes?: Record<string, CustomModeConfig>;
+  /**
+   * User-created sub agents, keyed by id. Each is offered to the model by the
+   * `task` tool alongside the built-in Explorer/General agents.
+   */
+  customSubAgents?: Record<string, CustomSubAgentConfig>;
   /** Tunables for how much context the agent reads and sends. */
   cache?: {
     /** Max lines returned by a single file read before it is paged. */

@@ -23,7 +23,11 @@ import {
   DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT,
   DEFAULT_COMPACT_PROMPT,
 } from '@core/application/compact-prompt';
-import { SUB_AGENT_CONFIGS, SubAgentType } from '@core/domain/sub-agent';
+import {
+  SUB_AGENT_CONFIGS,
+  SubAgentType,
+  type CustomSubAgentConfig,
+} from '@core/domain/sub-agent';
 
 export interface AppConfig {
   /** Provider to use on launch, or undefined when nothing is configured yet. */
@@ -43,6 +47,8 @@ export interface AppConfig {
   explorerSubAgentPrompt: string;
   /** General sub agent system prompt (defaults applied). */
   generalSubAgentPrompt: string;
+  /** User-created sub agents offered by the `task` tool, keyed by id. */
+  customSubAgents: Record<string, CustomSubAgentConfig>;
   /** Auto-compact threshold percent (default 80); 0 turns auto-compact off. */
   autoCompactThresholdPercent: number;
   /** Whether local providers refetch their model list on every load (default true). */
@@ -169,6 +175,7 @@ export async function loadAppConfig(
     compactPrompt: configWithDefaults.compactPrompt ?? DEFAULT_COMPACT_PROMPT,
     explorerSubAgentPrompt: configWithDefaults.explorerSubAgentPrompt,
     generalSubAgentPrompt: configWithDefaults.generalSubAgentPrompt,
+    customSubAgents: configWithDefaults.customSubAgents ?? {},
     autoCompactThresholdPercent:
       configWithDefaults.autoCompactThresholdPercent ??
       DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT,

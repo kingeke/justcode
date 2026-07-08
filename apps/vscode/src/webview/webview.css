@@ -3444,8 +3444,98 @@ textarea:focus {
   border-color: var(--vscode-focusBorder, #3b82f6);
 }
 
-.prompt-save-ok {
-  margin-top: 10px;
+/* --- Agents & Prompts tab: flat agent-catalog rows ------------------------ */
+
+/* Underlined sub-tabs splitting mode prompts from sub agents. */
+.prompt-tabs {
+  display: flex;
+  gap: 18px;
+  margin-top: 12px;
+  border-bottom: 1px solid var(--vscode-panel-border, transparent);
+}
+
+.prompt-tab {
+  padding: 6px 2px 8px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--vscode-descriptionForeground, inherit);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.prompt-tab:hover {
+  color: var(--vscode-foreground);
+}
+
+.prompt-tab-active,
+.prompt-tab-active:hover {
+  color: var(--vscode-foreground);
+  border-bottom-color: var(
+    --vscode-panelTitle-activeBorder,
+    var(--vscode-focusBorder, #3b82f6)
+  );
+}
+
+/* Header row above the list: "Available agents" + the create buttons. */
+.prompt-list-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 14px 0 8px;
+}
+
+.prompt-list-actions-title {
+  margin: 0;
+}
+
+.prompt-list-actions-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+/* The whole row is the expand/collapse control (a real <button>). */
+.prompt-row {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.prompt-row-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.prompt-row-chevron {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.6;
+}
+
+/* Checkbox row in settings forms (e.g. a new sub agent's read-only flag). */
+.settings-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, inherit);
+  cursor: pointer;
+}
+
+/* Doubled class to outrank .mcp-result-ok's `margin` shorthand, which is
+   declared later in this file and was zeroing the top margin. */
+.mcp-result-ok.prompt-save-ok {
+  margin-top: 12px;
+  margin-bottom: 12px;
 }
 
 .mcp-result-ok {

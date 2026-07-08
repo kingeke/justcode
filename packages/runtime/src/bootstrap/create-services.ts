@@ -24,7 +24,10 @@ import { QuestionTool } from '@runtime/tools/question-tool';
 import { ViewHistoryTool } from '@runtime/tools/view-history-tool';
 import { PresentPlanTool } from '@runtime/tools/present-plan-tool';
 import { TaskTool } from '@runtime/tools/task-tool';
-import { SubAgentType } from '@core/domain/sub-agent';
+import {
+  SubAgentType,
+  type CustomSubAgentConfig,
+} from '@core/domain/sub-agent';
 import {
   ReadFileTool,
   DEFAULT_MAX_READ_LINES,
@@ -118,6 +121,12 @@ export interface RuntimeServices {
    * settings. Read per run, so it takes effect on the next spawned sub agent.
    */
   setSubAgentPrompt: (type: SubAgentType, prompt: string) => void;
+  /**
+   * Replace the user-created sub agents offered by the `task` tool, used when
+   * the user creates/edits/deletes one. Read per call, so it takes effect on
+   * the next tool advertisement and the next spawned sub agent.
+   */
+  setCustomSubAgents: (agents: Record<string, CustomSubAgentConfig>) => void;
   /**
    * Replace the tool names advertised up front even under lazy loading. The host
    * sets this per chat mode (e.g. `['present_plan']` in Plan mode, `[]` in
@@ -248,6 +257,9 @@ export async function createRuntimeServices(
     [SubAgentType.Explorer]: config.explorerSubAgentPrompt,
     [SubAgentType.General]: config.generalSubAgentPrompt,
   };
+  // Mutable so custom sub agents created/deleted at runtime reach the task
+  // tool: it reads the map per call through the getter below.
+  const customSubAgentsSetting = { value: config.customSubAgents };
   const builtInTools: Tool[] = [
     new WriteFileTool(workspaceFiles),
     new EditFileTool(workspaceFiles),
@@ -279,7 +291,8 @@ export async function createRuntimeServices(
             : {}),
         };
       },
-      (type) => subAgentPromptSettings[type]
+      (type) => subAgentPromptSettings[type],
+      () => customSubAgentsSetting.value
     ),
   ];
   const lazyLoadableTools: LazyLoadableToolDefinition[] = builtInTools.map(
@@ -444,6 +457,9 @@ export async function createRuntimeServices(
     },
     setSubAgentPrompt: (type: SubAgentType, prompt: string) => {
       subAgentPromptSettings[type] = prompt;
+    },
+    setCustomSubAgents: (agents: Record<string, CustomSubAgentConfig>) => {
+      customSubAgentsSetting.value = agents;
     },
     setEagerlyAdvertisedTools: (names: string[]) => {
       eagerToolsSetting.names = names;

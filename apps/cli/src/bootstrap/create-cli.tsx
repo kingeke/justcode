@@ -22,6 +22,16 @@ import {
 } from '@runtime/persistence/global-config';
 import { resetAppState } from '@runtime/persistence/reset-app-state';
 import {
+  SUB_AGENT_CONFIGS,
+  SubAgentType,
+  addCustomSubAgent,
+  removeCustomSubAgent,
+} from '@core/domain/sub-agent';
+import type {
+  SubAgentDraft,
+  SubAgentEntry,
+} from '@cli/ui/sub-agents-picker.js';
+import {
   addCustomMode,
   removeCustomMode,
   BUILD_MODE_ID,
@@ -527,6 +537,42 @@ async function runChat(options: SharedOptions): Promise<void> {
   // prompt to the runtime up front, so the first turn uses the right posture.
   let customModes = savedConfig.customModes ?? {};
   const modes = listModes(customModes);
+
+  // The task tool's sub agents (built-in + custom), as listed by /sub-agents.
+  // Kept in a local map mirroring customModes: create/delete/edit persist to
+  // config and push the new set into the runtime so the task tool sees it on
+  // its next call.
+  let customSubAgents = savedConfig.customSubAgents ?? {};
+  const listSubAgentEntries = (): SubAgentEntry[] => [
+    {
+      id: SubAgentType.Explorer,
+      name: 'Explorer',
+      summary: SUB_AGENT_CONFIGS[SubAgentType.Explorer].summary,
+      prompt:
+        currentConfig.explorerSubAgentPrompt ??
+        SUB_AGENT_CONFIGS[SubAgentType.Explorer].systemPrompt,
+      custom: false,
+      readOnly: true,
+    },
+    {
+      id: SubAgentType.General,
+      name: 'General',
+      summary: SUB_AGENT_CONFIGS[SubAgentType.General].summary,
+      prompt:
+        currentConfig.generalSubAgentPrompt ??
+        SUB_AGENT_CONFIGS[SubAgentType.General].systemPrompt,
+      custom: false,
+      readOnly: false,
+    },
+    ...Object.entries(customSubAgents).map(([id, config]) => ({
+      id,
+      name: config.name,
+      summary: config.summary ?? '',
+      prompt: config.systemPrompt ?? '',
+      custom: true,
+      readOnly: config.readOnly ?? false,
+    })),
+  ];
   const initialMode = isKnownMode(savedConfig.mode ?? '', customModes)
     ? (savedConfig.mode as string)
     : BUILD_MODE_ID;
@@ -663,6 +709,50 @@ async function runChat(options: SharedOptions): Promise<void> {
         if (activeModeId !== currentConfig.mode) applyMode(activeModeId);
         persistConfig({ customModes, mode: activeModeId });
         return { modes: listModes(customModes), modeId: activeModeId };
+      },
+      subAgents: listSubAgentEntries(),
+      onCreateSubAgent: (name: string, draft: SubAgentDraft) => {
+        const created = addCustomSubAgent(name, draft, customSubAgents);
+        if (!created) return null;
+        customSubAgents = created.customSubAgents;
+        persistConfig({ customSubAgents });
+        runtime.setCustomSubAgents(customSubAgents);
+        return listSubAgentEntries();
+      },
+      onDeleteSubAgent: (id: string) => {
+        const removed = removeCustomSubAgent(id, customSubAgents);
+        if (!removed) return null;
+        customSubAgents = removed.customSubAgents;
+        persistConfig({ customSubAgents });
+        runtime.setCustomSubAgents(customSubAgents);
+        return listSubAgentEntries();
+      },
+      onSaveSubAgentPrompt: (id: string, prompt: string) => {
+        const trimmed = prompt.trim();
+        if (id === SubAgentType.Explorer || id === SubAgentType.General) {
+          // A built-in's prompt is a config override; empty (or the default
+          // itself) clears the override back to the built-in prompt.
+          const defaultPrompt = SUB_AGENT_CONFIGS[id].systemPrompt;
+          const override =
+            trimmed && trimmed !== defaultPrompt ? trimmed : undefined;
+          persistConfig(
+            id === SubAgentType.Explorer
+              ? { explorerSubAgentPrompt: override ?? defaultPrompt }
+              : { generalSubAgentPrompt: override ?? defaultPrompt }
+          );
+          runtime.setSubAgentPrompt(id, override ?? defaultPrompt);
+          return listSubAgentEntries();
+        }
+        const existing = customSubAgents[id];
+        if (!existing) return null;
+        const { systemPrompt: _dropped, ...rest } = existing;
+        customSubAgents = {
+          ...customSubAgents,
+          [id]: { ...rest, ...(trimmed ? { systemPrompt: trimmed } : {}) },
+        };
+        persistConfig({ customSubAgents });
+        runtime.setCustomSubAgents(customSubAgents);
+        return listSubAgentEntries();
       },
       initialExpandTools: savedConfig.expandTools ?? true,
       initialMaxReadLines:
