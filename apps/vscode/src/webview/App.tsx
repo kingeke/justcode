@@ -1243,6 +1243,7 @@ export function App(): React.JSX.Element {
           title={state.sessionTitle ?? 'New chat'}
           sessions={state.sessions}
           currentSessionId={state.sessionId}
+          activeSessionIds={state.activeSessionIds}
           disabled={state.compacting}
           onOpen={openSession}
           onRename={renameSession}

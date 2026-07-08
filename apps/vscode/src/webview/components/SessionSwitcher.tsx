@@ -21,6 +21,8 @@ interface SessionSwitcherProps {
   sessions: WebviewSessionSummary[];
   /** The session currently open in the chat view; gets the check mark. */
   currentSessionId?: string | undefined;
+  /** Sessions with a turn still running in the host; shown as "Working…". */
+  activeSessionIds?: string[] | undefined;
   /** Locks the switcher (e.g. while the conversation is compacting). */
   disabled: boolean;
   onOpen: (sessionId: string) => void;
@@ -28,6 +30,8 @@ interface SessionSwitcherProps {
   onDelete: (sessionId: string) => void;
   /** Refresh the session data in place (no view switch) when the popup opens. */
   onRefreshSessions: () => void;
+  /** Start with the popup open (used by static-render tests). */
+  defaultOpen?: boolean | undefined;
 }
 
 /**
@@ -38,7 +42,7 @@ interface SessionSwitcherProps {
 export function SessionSwitcher(
   props: SessionSwitcherProps
 ): React.JSX.Element {
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = React.useState(props.defaultOpen ?? false);
   const [query, setQuery] = React.useState('');
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [draftTitle, setDraftTitle] = React.useState('');
@@ -163,6 +167,10 @@ export function SessionSwitcher(
                           const isCurrent =
                             session.sessionId === props.currentSessionId;
                           const isEditing = session.sessionId === editingId;
+                          const isWorking =
+                            props.activeSessionIds?.includes(
+                              session.sessionId
+                            ) ?? false;
                           return (
                             <div
                               key={session.sessionId}
@@ -199,10 +207,22 @@ export function SessionSwitcher(
                                   }}
                                 >
                                   <span className="session-switcher-item-title">
+                                    {isWorking ? (
+                                      <span
+                                        className="session-loading-dot"
+                                        aria-hidden="true"
+                                      />
+                                    ) : null}
                                     {session.title ?? 'New chat'}
                                   </span>
                                   <span className="session-switcher-item-meta">
-                                    {relativeTime(session.updatedAt)}
+                                    {isWorking ? (
+                                      <span className="session-loading-label">
+                                        Working…
+                                      </span>
+                                    ) : (
+                                      relativeTime(session.updatedAt)
+                                    )}
                                   </span>
                                 </button>
                               )}
