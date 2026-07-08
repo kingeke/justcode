@@ -59,6 +59,20 @@
       "problemMatcher": []
     },
     {
+      "label": "Update local extension",
+      "type": "shell",
+      "command": "npm run vscode:install-local",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "build extension",
       "type": "shell",
       "command": "node esbuild.mjs",

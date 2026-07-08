@@ -2,6 +2,8 @@ node_modules/
 dist/
 dist-bin/
 apps/vscode/media/webview.*
+# vsce output from `npm run vscode:install-local`
+*.vsix
 coverage/
 .DS_Store
 *.tsbuildinfo
