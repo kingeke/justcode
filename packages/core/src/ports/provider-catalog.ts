@@ -3,6 +3,7 @@ import { appUserAgent } from '@core/version';
 import { AlibabaProvider } from '@providers/alibaba/alibaba-provider';
 import { AnthropicProvider } from '@providers/anthropic/anthropic-provider';
 import { ClaudeAgentProvider } from '@providers/claude-code/claude-agent-provider';
+import { CursorAgentProvider } from '@providers/cursor/cursor-agent-provider';
 import { LmStudioProvider } from '@providers/lmstudio/lmstudio-provider';
 import { OllamaProvider } from '@providers/ollama/ollama-provider';
 import { OpenAiProvider } from '@providers/openai/openai-provider';
@@ -49,9 +50,9 @@ export interface ProviderCredentials {
   apiKey?: string | undefined;
   baseUrl: string;
   defaultModel?: string | undefined;
-  /** Claude Code only: custom `claude` executable path (see ProviderConfig). */
+  /** CLI-backed providers (Claude Code, Cursor): custom executable path. */
   executablePath?: string | undefined;
-  /** Claude Code only: `CLAUDE_CONFIG_DIR` selecting the account (see ProviderConfig). */
+  /** CLI-backed providers: config dir selecting the account (see ProviderConfig). */
   configDir?: string | undefined;
   /** Present when the provider was connected via OAuth instead of an API key. */
   oauth?: OAuthCredentials | undefined;
@@ -98,14 +99,15 @@ export interface ProviderConfig {
   baseUrl?: string;
   defaultModel?: string;
   /**
-   * Claude Code only: the `claude` executable the Agent SDK should spawn.
+   * CLI-backed providers only: the executable to spawn (`claude` for Claude
+   * Code, `cursor-agent` for Cursor).
    * Lets users with multiple installs (e.g. `claude` and `claude-w` for work)
    * pick which login/profile powers justcode. Blank uses the SDK's default
    * resolution. Overridable per-run with JUSTCODE_CLAUDE_PATH.
    */
   executablePath?: string;
   /**
-   * Claude Code only: `CLAUDE_CONFIG_DIR` selecting which config/login directory
+   * CLI-backed providers only: the config directory selecting which login
    * (and therefore which account/subscription) the runtime uses. This is what a
    * shell alias like `claude-w` sets (`CLAUDE_CONFIG_DIR=~/.claude-work claude`).
    * A leading `~` is expanded. Blank uses the default (`~/.claude`). Overridable
@@ -124,6 +126,7 @@ export enum ProviderId {
   Openai = 'openai',
   Anthropic = 'anthropic',
   ClaudeCode = 'claude-code',
+  Cursor = 'cursor',
   Copilot = 'copilot',
   Ollama = 'ollama',
   LmStudio = 'lmstudio',
@@ -215,6 +218,33 @@ export const PROVIDERS = [
       const configDir =
         process.env.JUSTCODE_CLAUDE_CONFIG_DIR || credentials.configDir;
       return new ClaudeAgentProvider({
+        ...(executablePath ? { executablePath } : {}),
+        ...(configDir ? { configDir } : {}),
+      });
+    },
+  },
+  {
+    id: ProviderId.Cursor,
+    name: 'Cursor',
+    description: 'Cursor subscription via the official Cursor CLI',
+    apiKeyRequired: false,
+    directConnect: true,
+    baseUrl: '',
+    // No credentials pass through justcode: the provider spawns the official
+    // Cursor CLI, which authenticates with the user's own `cursor-agent login`
+    // session (or CURSOR_API_KEY). Usage bills to the user's Cursor plan.
+    credentialsFromConfig: (config) => ({
+      baseUrl: '',
+      executablePath: config.cursor.executablePath,
+      configDir: config.cursor.configDir,
+    }),
+    create: (credentials) => {
+      // Env vars win so a shell can flip install/account without editing config.
+      const executablePath =
+        process.env.JUSTCODE_CURSOR_PATH || credentials.executablePath;
+      const configDir =
+        process.env.JUSTCODE_CURSOR_CONFIG_DIR || credentials.configDir;
+      return new CursorAgentProvider({
         ...(executablePath ? { executablePath } : {}),
         ...(configDir ? { configDir } : {}),
       });

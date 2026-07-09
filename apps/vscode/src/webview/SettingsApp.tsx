@@ -666,8 +666,42 @@ enum WizardStep {
   BaseUrl = 'base-url',
   Connecting = 'connecting',
   OAuth = 'oauth',
-  /** Credential-less connect (Claude Code): only surfaces errors + retry. */
+  /** Credential-less connect (Claude Code, Cursor): errors + retry only. */
   DirectConnect = 'direct-connect',
+}
+
+// The Cursor provider id (matches `ProviderId.Cursor`). Hardcoded here rather
+// than imported from the catalog, which pulls Node-only provider code into
+// this browser-targeted webview bundle (same pattern as Composer.tsx).
+const CURSOR_PROVIDER_ID = 'cursor';
+
+/** Per-CLI copy for the direct-connect step (Claude Code vs Cursor). */
+function directConnectCopy(providerId: string): {
+  cliName: string;
+  executable: string;
+  configDirPlaceholder: string;
+  hint: string;
+} {
+  if (providerId === CURSOR_PROVIDER_ID) {
+    return {
+      cliName: 'Cursor',
+      executable: 'cursor-agent',
+      configDirPlaceholder: '~/.cursor',
+      hint:
+        'uses your own Cursor CLI sign-in. Confirm or edit the ' +
+        '`cursor-agent` executable to drive — leave blank to auto-detect. ' +
+        "Make sure it's installed and signed in (run `cursor-agent login`).",
+    };
+  }
+  return {
+    cliName: 'Claude',
+    executable: 'claude',
+    configDirPlaceholder: '~/.claude',
+    hint:
+      'uses your own Claude Code sign-in. Confirm or edit the `claude` ' +
+      "executable to drive — leave blank to auto-detect. Make sure it's " +
+      'installed and signed in (run `claude` and use /login).',
+  };
 }
 
 enum AuthChoice {
@@ -1082,22 +1116,20 @@ function ConnectWizard({
           }}
         >
           <p className="provider-connect-hint">
-            {provider.name} uses your own Claude Code sign-in. Confirm or edit
-            the `claude` executable to drive — leave blank to auto-detect. Make
-            sure it's installed and signed in (run `claude` and use /login).
+            {provider.name} {directConnectCopy(provider.id).hint}
           </p>
           <div className="provider-connect-field">
             <label
               className="provider-connect-label"
               htmlFor={`exe-${provider.id}`}
             >
-              Claude executable
+              {directConnectCopy(provider.id).cliName} executable
             </label>
             <input
               id={`exe-${provider.id}`}
               className="provider-connect-input"
               type="text"
-              placeholder="claude"
+              placeholder={directConnectCopy(provider.id).executable}
               value={executablePath}
               onChange={(e) => {
                 setExecutablePath(e.target.value);
@@ -1118,7 +1150,7 @@ function ConnectWizard({
               id={`cfgdir-${provider.id}`}
               className="provider-connect-input"
               type="text"
-              placeholder="~/.claude"
+              placeholder={directConnectCopy(provider.id).configDirPlaceholder}
               value={configDir}
               onChange={(e) => {
                 setConfigDir(e.target.value);
@@ -1138,8 +1170,9 @@ function ConnectWizard({
               </datalist>
             ) : null}
             <p className="provider-connect-subhint">
-              Selects which Claude login/account to use. Leave blank for the
-              default (~/.claude).
+              Selects which {directConnectCopy(provider.id).cliName}{' '}
+              login/account to use. Leave blank for the default (
+              {directConnectCopy(provider.id).configDirPlaceholder}).
             </p>
           </div>
           {error ? <p className="provider-connect-error">{error}</p> : null}

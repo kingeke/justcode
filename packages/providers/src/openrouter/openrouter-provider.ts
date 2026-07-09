@@ -3,6 +3,7 @@ import { APP_NAME, APP_SITE_URL } from '@core/branding';
 import { logModelsResponse } from '@providers/http/log-models';
 
 import {
+  ToolsUnsupportedError,
   type ChatRequest,
   type ChatResult,
   type ModelInfo,
@@ -19,6 +20,7 @@ import {
   requestJson,
   requestSseStream,
 } from '@providers/http/http-client';
+import { isToolsUnsupportedError } from '@providers/http/tools-unsupported';
 import {
   parseOpenAiToolCalls,
   toOpenAiToolDefinitions,
@@ -82,6 +84,23 @@ export class OpenRouterProvider implements ProviderClient {
   }
 
   public async sendChat(request: ChatRequest): Promise<ChatResult> {
+    try {
+      return await this.sendChatRequest(request);
+    } catch (error) {
+      // OpenRouter answers with a 404 ("No endpoints found that support tool
+      // use") when no upstream provider for the model can serve a request that
+      // carries tools. Surface it as a typed error so the agent loop retries the
+      // turn in chat-only mode.
+      if (request.tools?.length && isToolsUnsupportedError(error)) {
+        throw new ToolsUnsupportedError(
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async sendChatRequest(request: ChatRequest): Promise<ChatResult> {
     const messages = toOpenAiWireMessages(request.messages);
     const tools = toOpenAiToolDefinitions(request.tools);
     const headers = {

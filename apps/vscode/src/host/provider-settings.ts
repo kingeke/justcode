@@ -27,6 +27,7 @@ import {
   detectClaudeExecutable,
   detectClaudeConfigDirs,
 } from '@providers/claude-code/detect-claude';
+import { detectCursorExecutable } from '@providers/cursor/detect-cursor';
 
 import {
   WebviewProviderKind,
@@ -67,18 +68,29 @@ export async function listProviders(
   const config = await readGlobalConfig(configDir);
   const configured = new Set(Object.keys(config.providers ?? {}));
 
-  // Auto-detect a `claude` install once so direct-connect entries can prefill
-  // their executable-path input (mirrors how base URLs are prefilled). Only the
-  // saved path, if any, overrides it.
-  const hasDirectConnect = (PROVIDERS as readonly ProviderCatalogEntry[]).some(
-    (entry) => entry.directConnect
-  );
-  const detectedClaude = hasDirectConnect
+  // Auto-detect each direct-connect provider's CLI install once so their
+  // entries can prefill the executable-path input (mirrors how base URLs are
+  // prefilled). Only the saved path, if any, overrides it.
+  const entries = PROVIDERS as readonly ProviderCatalogEntry[];
+  const detectedClaude = entries.some(
+    (entry) => entry.directConnect && entry.id === ProviderId.ClaudeCode
+  )
     ? await detectClaudeExecutable()
     : undefined;
-  const detectedConfigDirs = hasDirectConnect
+  const detectedConfigDirs = detectedClaude
     ? await detectClaudeConfigDirs()
     : [];
+  const detectedCursor = entries.some(
+    (entry) => entry.directConnect && entry.id === ProviderId.Cursor
+  )
+    ? await detectCursorExecutable()
+    : undefined;
+  const detectedExecutableFor = (id: ProviderId): string | undefined =>
+    id === ProviderId.ClaudeCode
+      ? detectedClaude
+      : id === ProviderId.Cursor
+        ? detectedCursor
+        : undefined;
 
   const result: WebviewProvider[] = (
     PROVIDERS as readonly ProviderCatalogEntry[]
@@ -100,9 +112,17 @@ export async function listProviders(
       directConnect: entry.directConnect,
       ...(entry.directConnect
         ? {
-            executablePath: saved?.executablePath ?? detectedClaude ?? '',
+            executablePath:
+              saved?.executablePath ??
+              detectedExecutableFor(entry.id as ProviderId) ??
+              '',
             configDir: saved?.configDir ?? '',
-            configDirOptions: detectedConfigDirs,
+            // Config-dir account discovery only exists for Claude Code
+            // (~/.claude siblings); Cursor accounts live in the OS keychain.
+            configDirOptions:
+              (entry.id as ProviderId) === ProviderId.ClaudeCode
+                ? detectedConfigDirs
+                : [],
           }
         : {}),
     };

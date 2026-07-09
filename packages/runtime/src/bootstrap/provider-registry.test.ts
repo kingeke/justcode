@@ -32,6 +32,10 @@ function baseConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       executablePath: undefined,
       configDir: undefined,
     },
+    cursor: {
+      executablePath: undefined,
+      configDir: undefined,
+    },
     anthropic: {
       apiKey: undefined,
       baseUrl: 'https://api.anthropic.com',

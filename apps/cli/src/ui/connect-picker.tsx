@@ -23,6 +23,7 @@ import {
   detectClaudeExecutable,
   detectClaudeConfigDirs,
 } from '@providers/claude-code/detect-claude';
+import { detectCursorExecutable } from '@providers/cursor/detect-cursor';
 import { getOAuthFlow } from '@runtime/auth/oauth-flows';
 import { openBrowser } from '@runtime/auth/open-browser';
 import {
@@ -55,7 +56,11 @@ const AUTH_METHOD_OPTIONS = [
 ] as const;
 
 function authMethodLabel(entry: ProviderConnectionInfo): string {
-  if (entry.directConnect) return 'subscription · claude login';
+  if (entry.directConnect) {
+    return entry.id === ProviderId.Cursor
+      ? 'subscription · cursor login'
+      : 'subscription · claude login';
+  }
   const methods = (entry as ProviderConnectionInfo).authMethods;
   if (!methods) return 'api key';
   const hasApiKey = methods.includes(AuthMethod.ApiKey);
@@ -119,10 +124,13 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
     useState<ProviderConnectionInfo | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
-  // The `claude` executable path for direct-connect (Claude Code) providers,
-  // prefilled with the saved value or an auto-detected install so users with
-  // several installs (e.g. `claude` and `claude-w`) can confirm or change it.
+  // The CLI executable path for direct-connect providers (`claude` for Claude
+  // Code, `cursor-agent` for Cursor), prefilled with the saved value or an
+  // auto-detected install so users with several installs can confirm it.
   const [executablePath, setExecutablePath] = useState('');
+  // Direct-connect copy differs per CLI (executable name, config dir).
+  const directConnectCursor = selectedProvider?.id === ProviderId.Cursor;
+  const directConnectCliName = directConnectCursor ? 'Cursor' : 'Claude';
   // The CLAUDE_CONFIG_DIR (account/login dir) for direct-connect providers, and
   // the auto-detected candidates (`~/.claude`, `~/.claude-work`, …) shown as a
   // hint so the user can pick which account to use.
@@ -282,13 +290,20 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
         setDetectedConfigDirs([]);
         setStep('executable-path');
         if (!savedExe) {
-          void detectClaudeExecutable().then((detected) => {
+          const detect =
+            entry.id === ProviderId.Cursor
+              ? detectCursorExecutable
+              : detectClaudeExecutable;
+          void detect().then((detected) => {
             // Don't clobber a path the user has already started typing.
             if (detected) setExecutablePath((prev) => prev || detected);
           });
         }
         // Surface the available account dirs for the config-dir step's hint.
-        void detectClaudeConfigDirs().then(setDetectedConfigDirs);
+        // Only Claude Code has discoverable account dirs (~/.claude siblings).
+        if (entry.id === ProviderId.ClaudeCode) {
+          void detectClaudeConfigDirs().then(setDetectedConfigDirs);
+        }
         return;
       }
 
@@ -384,9 +399,9 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
                     : step === 'base-url'
                       ? `Base URL - ${selectedProvider?.name ?? ''}`
                       : step === 'executable-path'
-                        ? `Claude executable - ${selectedProvider?.name ?? ''}`
+                        ? `${directConnectCliName} executable - ${selectedProvider?.name ?? ''}`
                         : step === 'config-dir'
-                          ? `Claude account - ${selectedProvider?.name ?? ''}`
+                          ? `${directConnectCliName} account - ${selectedProvider?.name ?? ''}`
                           : `Fetching models - ${selectedProvider?.name ?? ''}`}
         </text>
         <text fg={MUTED}>
@@ -538,11 +553,15 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
                   ? 'Enter the API key for this provider.'
                   : 'Optional API key. Leave blank and press enter to skip.'
                 : step === 'executable-path'
-                  ? 'Confirm or edit the `claude` executable to use. Leave blank to let the Agent SDK find it.'
+                  ? directConnectCursor
+                    ? 'Confirm or edit the `cursor-agent` executable to use. Leave blank to auto-detect it.'
+                    : 'Confirm or edit the `claude` executable to use. Leave blank to let the Agent SDK find it.'
                   : step === 'config-dir'
-                    ? detectedConfigDirs.length > 1
-                      ? `Which account? Found: ${detectedConfigDirs.join(', ')}. Leave blank for the default (~/.claude).`
-                      : 'Config directory (CLAUDE_CONFIG_DIR) selecting the account. Leave blank for the default (~/.claude).'
+                    ? directConnectCursor
+                      ? 'Config directory (CURSOR_CONFIG_DIR) selecting the account. Leave blank for the default.'
+                      : detectedConfigDirs.length > 1
+                        ? `Which account? Found: ${detectedConfigDirs.join(', ')}. Leave blank for the default (~/.claude).`
+                        : 'Config directory (CLAUDE_CONFIG_DIR) selecting the account. Leave blank for the default (~/.claude).'
                     : `Confirm or edit the base URL for ${selectedProvider?.name ?? ''}.`}
           </text>
 
@@ -578,9 +597,13 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
                   : step === 'api-key'
                     ? 'paste api key...'
                     : step === 'executable-path'
-                      ? 'claude'
+                      ? directConnectCursor
+                        ? 'cursor-agent'
+                        : 'claude'
                       : step === 'config-dir'
-                        ? '~/.claude'
+                        ? directConnectCursor
+                          ? '~/.cursor'
+                          : '~/.claude'
                         : 'base url...'
               }
               placeholderColor={MUTED}

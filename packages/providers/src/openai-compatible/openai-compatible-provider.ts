@@ -16,6 +16,10 @@ import {
   requestSseStream,
 } from '@providers/http/http-client';
 import {
+  isToolsUnsupportedError,
+  recommendsResponsesApi,
+} from '@providers/http/tools-unsupported';
+import {
   parseOpenAiToolCalls,
   toOpenAiToolDefinitions,
   toOpenAiWireMessages,
@@ -418,32 +422,6 @@ function toReasoningParam(request: ChatRequest): {
 }
 
 /**
- * Detects a 400 that means the model rejected tool/function calling (e.g.
- * Ollama's "<model> does not support tools"). Matched on the response body so
- * we don't misclassify unrelated 400s.
- */
-function isToolsUnsupportedError(error: unknown): boolean {
-  if (!(error instanceof HttpError) || error.status !== 400) {
-    return false;
-  }
-
-  const body = error.responseText.toLowerCase();
-  // Some models reject tools only on /chat/completions and tell us to use
-  // /responses instead (see isUnsupportedApiForModelError). That's a routing
-  // problem, not a missing capability — the model DOES support tools — so don't
-  // misclassify it here and permanently flag the model tool-unsupported.
-  if (recommendsResponsesApi(body)) {
-    return false;
-  }
-  return (
-    body.includes('does not support tools') ||
-    body.includes('does not support tool') ||
-    (body.includes('tool') && body.includes('not supported')) ||
-    (body.includes('function calling') && body.includes('not'))
-  );
-}
-
-/**
  * Detects Copilot's 400 for models served only via the Responses API
  * (`unsupported_api_for_model` / "not accessible via the /chat/completions
  * endpoint"), so the turn can be retried on /responses.
@@ -454,22 +432,4 @@ function isUnsupportedApiForModelError(error: unknown): boolean {
   }
 
   return recommendsResponsesApi(error.responseText.toLowerCase());
-}
-
-/**
- * True when a 400 body says the request can't be served on /chat/completions and
- * points to the Responses API instead. Covers both the bare
- * `unsupported_api_for_model` case and the more specific one where only a feature
- * combination is rejected (e.g. Copilot's "Function tools with reasoning_effort
- * are not supported for gpt-5.4 in /v1/chat/completions. Please use /v1/responses
- * instead.") — in every case the fix is to retry on /responses.
- */
-function recommendsResponsesApi(lowerCaseBody: string): boolean {
-  return (
-    lowerCaseBody.includes('unsupported_api_for_model') ||
-    lowerCaseBody.includes('not accessible via the /chat/completions') ||
-    lowerCaseBody.includes('use /v1/responses') ||
-    lowerCaseBody.includes('use the /responses') ||
-    lowerCaseBody.includes('/responses instead')
-  );
 }

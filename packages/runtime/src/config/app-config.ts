@@ -84,6 +84,12 @@ export interface AppConfig {
     /** `CLAUDE_CONFIG_DIR` selecting the account/login dir (blank = ~/.claude). */
     configDir: string | undefined;
   };
+  cursor: {
+    /** Custom `cursor-agent` executable to spawn (blank = auto-detect). */
+    executablePath: string | undefined;
+    /** `CURSOR_CONFIG_DIR` selecting the account (blank = the CLI's default). */
+    configDir: string | undefined;
+  };
   copilot: {
     baseUrl: string;
     oauth: OAuthCredentials | undefined;
@@ -204,6 +210,11 @@ export async function loadAppConfig(
         configWithDefaults.providers?.[ProviderId.ClaudeCode]?.executablePath,
       configDir:
         configWithDefaults.providers?.[ProviderId.ClaudeCode]?.configDir,
+    },
+    cursor: {
+      executablePath:
+        configWithDefaults.providers?.[ProviderId.Cursor]?.executablePath,
+      configDir: configWithDefaults.providers?.[ProviderId.Cursor]?.configDir,
     },
     copilot: {
       baseUrl:
