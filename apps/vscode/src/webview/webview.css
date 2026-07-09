@@ -1518,10 +1518,11 @@ textarea:focus {
   transition: bottom 0.12s ease;
 }
 
-/* The hovered button's popup must paint over the sibling floating buttons
+/* The open/hovered button's popup must paint over the sibling floating buttons
    (e.g. the sub agents robot stacked above "Your messages"). */
 .conversation-sidebar:hover,
-.conversation-sidebar:focus-within {
+.conversation-sidebar:focus-within,
+.conversation-sidebar.is-open {
   z-index: 70;
 }
 
@@ -1561,7 +1562,8 @@ textarea:focus {
 }
 
 .conversation-sidebar:hover .conversation-sidebar-tab,
-.conversation-sidebar:focus-within .conversation-sidebar-tab {
+.conversation-sidebar:focus-within .conversation-sidebar-tab,
+.conversation-sidebar.is-open .conversation-sidebar-tab {
   opacity: 1;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   background: var(
@@ -1570,7 +1572,9 @@ textarea:focus {
   );
 }
 
-/* The popup card, opening upward from the button. Hidden until hover. */
+/* The popup card, opening upward from the button. "Your messages" opens it on
+   click (`.is-open`, set by the component); the sub agents robot still opens
+   on hover. */
 .conversation-sidebar-panel {
   position: absolute;
   bottom: 36px;
@@ -1598,7 +1602,8 @@ textarea:focus {
     visibility 0.14s ease;
 }
 
-.conversation-sidebar:hover .conversation-sidebar-panel {
+.conversation-sidebar.is-open .conversation-sidebar-panel,
+.subagent-sidebar:hover .conversation-sidebar-panel {
   opacity: 1;
   transform: translateY(0);
   visibility: visible;

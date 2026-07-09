@@ -79,7 +79,7 @@ interface ConversationSidebarProps {
 
 /**
  * A ChatGPT-style outline of the current conversation, as a round button
- * stacked above the transcript's jump arrows. Hovering it pops up a card
+ * stacked above the transcript's jump arrows. Clicking it toggles a card
  * listing what the user asked, as truncated plain-text previews. Clicking one
  * scrolls the transcript to that message.
  */
@@ -92,17 +92,40 @@ export function ConversationSidebar({
     () => buildConversationItems(messages),
     [messages]
   );
+  // Click (not hover) reveals the panel; a click outside or Escape closes it.
+  const [open, setOpen] = React.useState(false);
+  const rootRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent): void => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
 
   return (
-    // Hover (CSS) reveals the panel; moving the mouse away closes it again.
     <div
-      className={`conversation-sidebar conversation-sidebar-raised-${stackedButtons}`}
+      ref={rootRef}
+      className={`conversation-sidebar conversation-sidebar-raised-${stackedButtons}${open ? ' is-open' : ''}`}
     >
       <button
         type="button"
         className="conversation-sidebar-tab"
         aria-label="Your messages"
+        aria-expanded={open}
         title="Your messages"
+        onClick={() => setOpen((current) => !current)}
       >
         <ChatIcon size={14} />
       </button>
@@ -121,9 +144,9 @@ export function ConversationSidebar({
                 key={item.messageId}
                 type="button"
                 className="conversation-sidebar-item"
-                onClick={(event) => {
-                  // Drop focus so the panel doesn't linger once the mouse leaves.
-                  event.currentTarget.blur();
+                onClick={() => {
+                  // Picking a message closes the panel before jumping to it.
+                  setOpen(false);
                   onSelect(item.messageId);
                 }}
               >
