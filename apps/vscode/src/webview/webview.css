@@ -385,10 +385,10 @@ body {
 .markdown-body pre {
   margin: 0 0 8px;
   padding: 10px 12px;
-  /* Long code lines scroll inside the block (with this as the bounding box)
-     rather than widening the message and forcing a transcript scrollbar. */
+  /* Long code lines wrap inside the block rather than widening the message
+     and forcing a horizontal scrollbar. */
   max-width: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
   background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.12));
   border: 1px solid var(--vscode-panel-border, transparent);
   border-radius: 6px;
@@ -398,7 +398,9 @@ body {
   background: none;
   padding: 0;
   font-size: 0.85em;
-  white-space: pre;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body a {
@@ -427,7 +429,8 @@ body {
   border-collapse: collapse;
   margin: 0 0 8px;
   display: block;
-  overflow-x: auto;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .markdown-body th,
@@ -666,7 +669,9 @@ body {
   background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.1));
   border-radius: 3px;
   max-height: 240px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
 }
 
 .tool-section-label {
@@ -695,12 +700,14 @@ body {
 
 .diff-body {
   margin: 0;
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .diff-line {
   padding: 0 6px;
-  white-space: pre;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .diff-gutter {
