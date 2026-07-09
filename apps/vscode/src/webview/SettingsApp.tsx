@@ -2011,14 +2011,22 @@ function CreateSubAgentForm({
           spellCheck={false}
         />
       </div>
-      <textarea
-        className="prompt-editor"
-        value={prompt}
-        spellCheck={false}
-        placeholder="System prompt — leave empty to use the General sub agent prompt…"
-        onChange={(e) => setPrompt(e.target.value)}
-        aria-label="New sub agent system prompt"
-      />
+      <div className="provider-connect-field">
+        <label
+          className="provider-connect-label"
+          htmlFor="create-subagent-prompt"
+        >
+          System prompt
+        </label>
+        <textarea
+          id="create-subagent-prompt"
+          className="prompt-editor"
+          value={prompt}
+          spellCheck={false}
+          placeholder="System prompt — leave empty to use the General sub agent prompt…"
+          onChange={(e) => setPrompt(e.target.value)}
+        />
+      </div>
       <label className="settings-checkbox">
         <input
           type="checkbox"

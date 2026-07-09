@@ -3571,6 +3571,13 @@ textarea:focus {
     var(--vscode-widget-border, var(--vscode-panel-border, transparent));
 }
 
+/* Space out stacked labelled fields inside the create/edit forms so each
+   field's label reads as its own heading rather than hugging the input
+   above it. */
+.prompt-editor-wrap .provider-connect-field + .provider-connect-field {
+  margin-top: 10px;
+}
+
 .prompt-editor {
   display: block;
   width: 100%;
