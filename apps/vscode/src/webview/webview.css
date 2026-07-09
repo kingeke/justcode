@@ -1389,6 +1389,7 @@ textarea:focus {
 }
 
 .session-delete-btn,
+.session-pin-btn,
 .session-rename-btn {
   flex: 0 0 auto;
   margin: 4px 0;
@@ -1401,10 +1402,23 @@ textarea:focus {
 }
 
 .session-row:hover .session-delete-btn,
+.session-row:hover .session-pin-btn,
 .session-row:hover .session-rename-btn,
 .session-delete-btn:focus,
+.session-pin-btn:focus,
 .session-rename-btn:focus {
   opacity: 0.75;
+}
+
+/* A pinned session advertises itself even when the row isn't hovered. */
+.session-pin-btn.icon-btn-active {
+  opacity: 1;
+  color: var(--vscode-textLink-foreground, var(--vscode-foreground));
+}
+
+.session-pin-btn:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--vscode-foreground);
 }
 
 /* Shown in place of the rename/delete actions while a session is opening. */
@@ -2979,8 +2993,7 @@ textarea:focus {
   opacity: 0.55;
 }
 
-/* Rename/delete stay hidden until the row is hovered; the current-session
-   check is always visible. */
+/* Pin/rename/delete stay hidden until the row is hovered. */
 .session-switcher-actions {
   display: inline-flex;
   align-items: center;
@@ -2995,10 +3008,11 @@ textarea:focus {
   visibility: visible;
 }
 
-.session-switcher-current {
-  display: inline-flex;
-  align-items: center;
-  opacity: 0.8;
+/* The open session is marked by its row reading in the accent blue rather than
+   by a trailing check mark. */
+.session-switcher-row-current .session-switcher-item-title,
+.session-switcher-row-current .session-switcher-item-meta {
+  color: var(--vscode-textLink-foreground, #3794ff);
 }
 
 /* Banner floated above the composer, pinned to the bottom of the transcript

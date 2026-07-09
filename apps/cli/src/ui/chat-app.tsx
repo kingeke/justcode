@@ -3714,6 +3714,28 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           setStatus('Loading session...');
           setCurrentSessionId(sessionId);
         }}
+        onTogglePin={(sessionId, pinned) => {
+          // Optimistic: the list regroups immediately, and the persisted flag
+          // catches up. A failure only costs the pin, so surface it and refresh
+          // from disk by reverting the optimistic entry.
+          setSessionSummaries((prev) =>
+            prev.map((summary) =>
+              summary.sessionId === sessionId ? { ...summary, pinned } : summary
+            )
+          );
+          void props.chatSessionService
+            .setSessionPinned(sessionId, pinned)
+            .catch((caughtError: unknown) => {
+              setSessionSummaries((prev) =>
+                prev.map((summary) =>
+                  summary.sessionId === sessionId
+                    ? { ...summary, pinned: !pinned }
+                    : summary
+                )
+              );
+              setError(getErrorMessage(caughtError));
+            });
+        }}
         onCancel={() => {
           setShowSessionPicker(false);
         }}

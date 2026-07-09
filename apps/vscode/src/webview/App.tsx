@@ -34,6 +34,8 @@ import { WelcomeSplash } from '@ext/webview/components/WelcomeSplash';
 import {
   ChatIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   ChevronUpIcon,
   CollapseIcon,
   JsonIcon,
@@ -47,6 +49,7 @@ import {
   SubAgentTranscriptModal,
 } from '@ext/webview/components/SubAgentPanel';
 import { deriveChangedFiles, type ChangedFile } from '@ext/webview/changes';
+import { adjacentSessions } from '@ext/webview/session-groups';
 import { selectThinkingItems } from '@ext/webview/thinking-items';
 import { windowMessages } from '@ext/webview/transcript-window';
 import { BUILD_MODE_ID } from '@core/domain/chat-mode';
@@ -816,6 +819,25 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.RenameSession, sessionId, title });
   };
 
+  const pinSession = (sessionId: string, pinned: boolean): void => {
+    // The host persists the flag and echoes a refreshed sessions list back.
+    postToHost({ type: WebviewMessageType.PinSession, sessionId, pinned });
+  };
+
+  // The chat header's previous/next buttons step through the sessions in the
+  // order the lists show them, so the list may not have been fetched yet when
+  // the webview opens straight into a restored chat.
+  const { view: currentView, sessions: knownSessions } = state;
+  React.useEffect(() => {
+    if (currentView !== 'chat' || knownSessions.length > 0) return;
+    postToHost({ type: WebviewMessageType.ListSessions, focus: false });
+  }, [currentView, knownSessions.length]);
+
+  const { previousSessionId, nextSessionId } = adjacentSessions(
+    state.sessions,
+    state.sessionId
+  );
+
   const clearAllSessions = (): void => {
     // The host confirms before deleting every saved session.
     postToHost({ type: WebviewMessageType.ClearSessions });
@@ -1110,6 +1132,7 @@ export function App(): React.JSX.Element {
         activeSessionIds={state.activeSessionIds}
         onOpen={openSession}
         onRename={renameSession}
+        onPin={pinSession}
         onDelete={deleteSession}
         onClearAll={clearAllSessions}
         onNewSession={newSession}
@@ -1263,11 +1286,36 @@ export function App(): React.JSX.Element {
           disabled={state.compacting}
           onOpen={openSession}
           onRename={renameSession}
+          onPin={pinSession}
           onDelete={deleteSession}
           onRefreshSessions={() =>
             postToHost({ type: WebviewMessageType.ListSessions, focus: false })
           }
         />
+        <button
+          type="button"
+          className="icon-btn"
+          title="Previous session"
+          aria-label="Previous session"
+          disabled={state.compacting || !previousSessionId}
+          onClick={() => {
+            if (previousSessionId) openSession(previousSessionId);
+          }}
+        >
+          <ChevronLeftIcon size={16} />
+        </button>
+        <button
+          type="button"
+          className="icon-btn"
+          title="Next session"
+          aria-label="Next session"
+          disabled={state.compacting || !nextSessionId}
+          onClick={() => {
+            if (nextSessionId) openSession(nextSessionId);
+          }}
+        >
+          <ChevronRightIcon size={16} />
+        </button>
         <button
           type="button"
           className={`icon-btn ${state.collapseResponses ? 'icon-btn-active' : ''}`}

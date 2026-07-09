@@ -2,24 +2,23 @@ import * as React from 'react';
 
 import type { WebviewSessionSummary } from '@ext/shared/protocol';
 import {
-  CheckIcon,
   ChevronDownIcon,
   PencilIcon,
+  PinIcon,
   TrashIcon,
 } from '@ext/webview/components/Icons';
 
 import {
-  SESSION_GROUPS,
+  groupSessions,
   relativeTime,
-  sessionGroupFor,
-  type SessionGroup,
+  type SessionListGroup,
 } from '@ext/webview/session-groups';
 
 interface SessionSwitcherProps {
   /** The current session's display title (the header label). */
   title: string;
   sessions: WebviewSessionSummary[];
-  /** The session currently open in the chat view; gets the check mark. */
+  /** The session currently open in the chat view; its row reads in accent blue. */
   currentSessionId?: string | undefined;
   /** Sessions with a turn still running in the host; shown as "Working…". */
   activeSessionIds?: string[] | undefined;
@@ -27,6 +26,8 @@ interface SessionSwitcherProps {
   disabled: boolean;
   onOpen: (sessionId: string) => void;
   onRename: (sessionId: string, title: string) => void;
+  /** Pin or unpin a session; pinned sessions list in their own group. */
+  onPin: (sessionId: string, pinned: boolean) => void;
   onDelete: (sessionId: string) => void;
   /** Refresh the session data in place (no view switch) when the popup opens. */
   onRefreshSessions: () => void;
@@ -49,11 +50,11 @@ export function SessionSwitcher(
   // Recency groups the user folded shut. Ignored while searching, so a query
   // always surfaces every match.
   const [collapsedGroups, setCollapsedGroups] = React.useState<
-    Set<SessionGroup>
+    Set<SessionListGroup>
   >(() => new Set());
   const anchorRef = React.useRef<HTMLDivElement>(null);
 
-  const toggleGroup = (group: SessionGroup): void => {
+  const toggleGroup = (group: SessionListGroup): void => {
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
       if (next.has(group)) next.delete(group);
@@ -110,12 +111,7 @@ export function SessionSwitcher(
           .includes(trimmedQuery)
       )
     : props.sessions;
-  const grouped = SESSION_GROUPS.map((group) => ({
-    group,
-    sessions: filtered.filter(
-      (session) => sessionGroupFor(session.updatedAt) === group
-    ),
-  })).filter((bucket) => bucket.sessions.length > 0);
+  const grouped = groupSessions(filtered);
 
   return (
     <div className="session-switcher" ref={anchorRef}>
@@ -230,6 +226,32 @@ export function SessionSwitcher(
                                 <span className="session-switcher-actions">
                                   <button
                                     type="button"
+                                    className={`icon-btn ${session.pinned ? 'icon-btn-active' : ''}`}
+                                    title={
+                                      session.pinned
+                                        ? 'Unpin session'
+                                        : 'Pin session'
+                                    }
+                                    aria-label={
+                                      session.pinned
+                                        ? 'Unpin session'
+                                        : 'Pin session'
+                                    }
+                                    aria-pressed={session.pinned ?? false}
+                                    onClick={() =>
+                                      props.onPin(
+                                        session.sessionId,
+                                        !session.pinned
+                                      )
+                                    }
+                                  >
+                                    <PinIcon
+                                      size={13}
+                                      filled={session.pinned ?? false}
+                                    />
+                                  </button>
+                                  <button
+                                    type="button"
                                     className="icon-btn"
                                     title="Rename session"
                                     aria-label="Rename session"
@@ -251,14 +273,6 @@ export function SessionSwitcher(
                                   >
                                     <TrashIcon size={14} />
                                   </button>
-                                  {isCurrent ? (
-                                    <span
-                                      className="session-switcher-current"
-                                      title="Current session"
-                                    >
-                                      <CheckIcon size={14} />
-                                    </span>
-                                  ) : null}
                                 </span>
                               )}
                             </div>

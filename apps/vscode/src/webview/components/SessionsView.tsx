@@ -1,13 +1,17 @@
 import * as React from 'react';
 
 import type { WebviewSessionSummary } from '@ext/shared/protocol';
-import { PencilIcon, PlusIcon, TrashIcon } from '@ext/webview/components/Icons';
+import {
+  PencilIcon,
+  PinIcon,
+  PlusIcon,
+  TrashIcon,
+} from '@ext/webview/components/Icons';
 import { logoUri } from '@ext/webview/vscode-api';
 import {
-  SESSION_GROUPS,
+  groupSessions,
   relativeTime,
-  sessionGroupFor,
-  type SessionGroup,
+  type SessionListGroup,
 } from '@ext/webview/session-groups';
 
 interface SessionsViewProps {
@@ -17,6 +21,8 @@ interface SessionsViewProps {
   activeSessionIds?: string[] | undefined;
   onOpen: (sessionId: string) => void;
   onRename: (sessionId: string, title: string) => void;
+  /** Pin or unpin a session; pinned sessions list in their own group. */
+  onPin: (sessionId: string, pinned: boolean) => void;
   onDelete: (sessionId: string) => void;
   onClearAll: () => void;
   onNewSession: () => void;
@@ -28,6 +34,7 @@ export function SessionsView({
   activeSessionIds,
   onOpen,
   onRename,
+  onPin,
   onDelete,
   onClearAll,
   onNewSession,
@@ -39,10 +46,10 @@ export function SessionsView({
   // Recency groups the user folded shut. Ignored while searching, so a query
   // always surfaces every match.
   const [collapsedGroups, setCollapsedGroups] = React.useState<
-    Set<SessionGroup>
+    Set<SessionListGroup>
   >(() => new Set());
 
-  const toggleGroup = (group: SessionGroup): void => {
+  const toggleGroup = (group: SessionListGroup): void => {
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
       if (next.has(group)) next.delete(group);
@@ -85,12 +92,7 @@ export function SessionsView({
           .includes(trimmedQuery)
       )
     : sessions;
-  const groupedSessions = SESSION_GROUPS.map((group) => ({
-    group,
-    sessions: filteredSessions.filter(
-      (session) => sessionGroupFor(session.updatedAt) === group
-    ),
-  })).filter((bucket) => bucket.sessions.length > 0);
+  const groupedSessions = groupSessions(filteredSessions);
 
   return (
     <div className="sessions-view">
@@ -227,6 +229,29 @@ export function SessionsView({
                             </span>
                           ) : (
                             <>
+                              <button
+                                type="button"
+                                className={`icon-btn session-pin-btn ${session.pinned ? 'icon-btn-active' : ''}`}
+                                title={
+                                  session.pinned
+                                    ? 'Unpin session'
+                                    : 'Pin session'
+                                }
+                                aria-label={
+                                  session.pinned
+                                    ? 'Unpin session'
+                                    : 'Pin session'
+                                }
+                                aria-pressed={session.pinned ?? false}
+                                onClick={() =>
+                                  onPin(session.sessionId, !session.pinned)
+                                }
+                              >
+                                <PinIcon
+                                  size={14}
+                                  filled={session.pinned ?? false}
+                                />
+                              </button>
                               <button
                                 type="button"
                                 className="icon-btn session-rename-btn"

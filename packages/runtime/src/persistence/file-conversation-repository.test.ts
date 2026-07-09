@@ -119,6 +119,28 @@ describe('FileConversationRepository', () => {
     ]);
   });
 
+  it('carries the pinned flag into the summary and the listing', async () => {
+    const repository = new FileConversationRepository(directory);
+    const pinned = createConversation('pinned-session');
+    pinned.pinned = true;
+    const plain = createConversation('plain-session');
+
+    await repository.save(pinned);
+    await repository.save(plain);
+
+    const listed = await repository.list();
+    expect(listed.find((s) => s.sessionId === 'pinned-session')?.pinned).toBe(
+      true
+    );
+    // Unpinned sessions omit the flag entirely rather than storing `false`.
+    expect(
+      listed.find((s) => s.sessionId === 'plain-session')
+    ).not.toHaveProperty('pinned');
+    await expect(repository.load('pinned-session')).resolves.toMatchObject({
+      pinned: true,
+    });
+  });
+
   it('keeps the summary file lean and the messages file complete', async () => {
     const repository = new FileConversationRepository(directory);
     const conversation = createConversation('split-session');

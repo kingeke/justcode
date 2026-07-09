@@ -30,6 +30,7 @@ function render(activeSessionIds?: string[]): string {
       disabled={false}
       onOpen={() => {}}
       onRename={() => {}}
+      onPin={() => {}}
       onDelete={() => {}}
       onRefreshSessions={() => {}}
       defaultOpen

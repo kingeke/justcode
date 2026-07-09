@@ -62,6 +62,25 @@ export function PencilIcon({ size = 16 }: IconProps): React.JSX.Element {
   );
 }
 
+/**
+ * A push pin. `filled` marks an already-pinned session, so the row reads as
+ * pinned at a glance instead of only from its group.
+ */
+export function PinIcon({
+  size = 16,
+  filled = false,
+}: IconProps & { filled?: boolean }): React.JSX.Element {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path
+        d="M9 4h6l-1 6 3 3H7l3-3-1-6z"
+        fill={filled ? 'currentColor' : 'none'}
+      />
+      <path d="M12 13v7" />
+    </svg>
+  );
+}
+
 export function CodeIcon({ size = 16 }: IconProps): React.JSX.Element {
   return (
     <svg {...svgProps(size)} aria-hidden="true">

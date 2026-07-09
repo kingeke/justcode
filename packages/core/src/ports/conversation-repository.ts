@@ -6,6 +6,8 @@ export interface ConversationSummary {
   createdAt: string;
   updatedAt: string;
   messageCount: number;
+  /** Whether the user pinned this session; pinned sessions list first. */
+  pinned?: boolean;
 }
 
 export interface ConversationRepository {

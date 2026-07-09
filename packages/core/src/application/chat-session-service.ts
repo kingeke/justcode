@@ -406,6 +406,27 @@ export class ChatSessionService {
   }
 
   /**
+   * Pins or unpins a session. Mirrors {@link renameSession}: loads the latest
+   * and rewrites only the flag, so a concurrent save can't lose messages.
+   * Unpinning drops the field entirely rather than storing `false`. Returns the
+   * updated conversation so callers can reflect the change without a reload.
+   */
+  public async setSessionPinned(
+    sessionId: string,
+    pinned: boolean
+  ): Promise<Conversation> {
+    const latest = await this.repository.load(sessionId);
+    const updated: Conversation = { ...latest };
+    if (pinned) {
+      updated.pinned = true;
+    } else {
+      delete updated.pinned;
+    }
+    await this.repository.save(updated);
+    return updated;
+  }
+
+  /**
    * Persists the host-computed footer metrics (ctx/cost/tok-s) for a session so
    * resuming it restores them. Re-loads the latest conversation and writes only
    * the stats over it, so a save racing this (e.g. background title generation)

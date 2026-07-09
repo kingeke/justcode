@@ -11,6 +11,10 @@ import { useKeyboard } from '@opentui/react';
 
 import type { ConversationSummary } from '@core/ports/conversation-repository';
 import { fuzzyFilter } from '@cli/ui/fuzzy-filter.js';
+import {
+  groupPickerSessions,
+  type PickerGroup,
+} from '@cli/ui/session-picker-groups.js';
 
 const VISIBLE_ROWS = 18;
 const BOLD = createTextAttributes({ bold: true });
@@ -18,29 +22,11 @@ const MUTED = '#8a8a8a';
 const MUTED_RGBA = RGBA.fromHex(MUTED);
 const INVERSE = createTextAttributes({ inverse: true });
 
-/** Recency buckets, in display order (mirrors the extension's session lists). */
-const SESSION_GROUPS = ['Today', 'Yesterday', 'Last 7 days', 'Older'] as const;
-type SessionGroup = (typeof SESSION_GROUPS)[number];
-
-function sessionGroupFor(iso: string): SessionGroup {
-  const then = new Date(iso);
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  if (then >= startOfToday) return 'Today';
-  const startOfYesterday = new Date(startOfToday);
-  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
-  if (then >= startOfYesterday) return 'Yesterday';
-  const startOfWeek = new Date(startOfToday);
-  startOfWeek.setDate(startOfWeek.getDate() - 7);
-  if (then >= startOfWeek) return 'Last 7 days';
-  return 'Older';
-}
-
 /** A focusable list entry: a collapsible group header, or a session. */
 type PickerRow =
   | {
       kind: 'header';
-      group: SessionGroup;
+      group: PickerGroup;
       count: number;
       collapsed: boolean;
     }
@@ -51,6 +37,8 @@ interface SessionPickerProps {
   currentSessionId: string;
   loading?: boolean;
   onSelect: (sessionId: string) => void;
+  /** Pin/unpin a session (ctrl+p on a focused session row). */
+  onTogglePin: (sessionId: string, pinned: boolean) => void;
   onCancel: () => void;
 }
 
@@ -70,7 +58,7 @@ function queryLineContent(query: string): StyledText {
 }
 
 function groupHeaderContent(
-  group: SessionGroup,
+  group: PickerGroup,
   count: number,
   collapsed: boolean,
   isSelected: boolean
@@ -90,6 +78,7 @@ function sessionLineContent(
 ): StyledText {
   return new StyledText([
     tc(isSelected ? '› ' : '  ', isSelected ? { fg: 'cyan' } : {}),
+    ...(session.pinned ? [tc('★ ', { fg: 'yellow' })] : []),
     tc(
       truncate(session.title ?? session.sessionId, 48),
       isSelected ? { fg: 'cyan', bold: true } : {}
@@ -131,13 +120,14 @@ export function SessionPicker({
   currentSessionId,
   loading = false,
   onSelect,
+  onTogglePin,
   onCancel,
 }: SessionPickerProps): React.ReactNode {
   const [query, setQuery] = useState('');
   const [focusedIndex, setFocusedIndex] = useState(0);
   // Recency groups the user folded shut (Enter on a header row). Ignored while
   // a query is active, so searching always surfaces every match.
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<SessionGroup>>(
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<PickerGroup>>(
     () => new Set()
   );
   const scrollOffsetRef = useRef(0);
@@ -158,11 +148,9 @@ export function SessionPicker({
   const searching = query.trim().length > 0;
   const rows = useMemo(() => {
     const built: PickerRow[] = [];
-    for (const group of SESSION_GROUPS) {
-      const inGroup = filteredSessions.filter(
-        (session) => sessionGroupFor(session.updatedAt) === group
-      );
-      if (inGroup.length === 0) continue;
+    for (const { group, sessions: inGroup } of groupPickerSessions(
+      filteredSessions
+    )) {
       const collapsed = !searching && collapsedGroups.has(group);
       built.push({ kind: 'header', group, count: inGroup.length, collapsed });
       if (!collapsed) {
@@ -192,6 +180,14 @@ export function SessionPicker({
   useKeyboard((key) => {
     if (key.name === KeyName.Escape || (key.ctrl && key.name === KeyName.C)) {
       onCancel();
+      return;
+    }
+
+    if (key.ctrl && key.name === KeyName.P) {
+      const row = rows[focusedIndex];
+      if (row?.kind === 'session') {
+        onTogglePin(row.session.sessionId, !row.session.pinned);
+      }
       return;
     }
 
@@ -269,7 +265,8 @@ export function SessionPicker({
           Resume session
         </text>
         <text fg={MUTED}>
-          enter to load · enter on a group folds it · esc to cancel
+          enter to load · ctrl+p to pin · enter on a group folds it · esc to
+          cancel
         </text>
       </box>
 

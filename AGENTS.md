@@ -14,6 +14,7 @@ Always:
 - Always use ENUMS instead of strings, if you see raw strings being used as checks, switch to ENUMS
 - When changing one app confirm if it affects other apps as well
 - Do not assume limits, always ask the user for limit clarifications and do not assume a limit.
+- Use the exported APP_NAME or APP_NAME_LOWERED for string that mention the name of the app where applicable.
 
 Treat full repository reads as a last resort.
 

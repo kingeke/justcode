@@ -18,3 +18,4 @@ debug.log
 
 # bun is the package manager; keep stray pnpm runs from re-adding a lockfile
 pnpm-lock.yaml
+.firecrawl

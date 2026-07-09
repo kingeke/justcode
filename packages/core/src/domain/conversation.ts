@@ -48,6 +48,12 @@ export interface Conversation {
   /** Footer metrics carried across reloads; absent for pre-stats sessions. */
   stats?: SessionStats;
   /**
+   * Whether the user pinned this session. Pinned sessions are listed in their
+   * own group above the recency buckets in every session list (CLI picker,
+   * extension sessions screen and header switcher). Absent means not pinned.
+   */
+  pinned?: boolean;
+  /**
    * Names of the tools the model has switched on via the `lazy_load_tools`
    * gateway, persisted so resuming the session restores the same working set
    * instead of forcing the model to rediscover it. Absent for sessions that

@@ -879,6 +879,31 @@ describe('ChatSessionService', () => {
     expect(repository.conversation.title).toBeUndefined();
   });
 
+  it('pins a session without touching its messages', async () => {
+    const repository = new InMemoryConversationRepository();
+    repository.conversation.messages.push(
+      createMessage(MessageRole.User, 'hi')
+    );
+    const service = new ChatSessionService(repository, createProviderStub());
+
+    const updated = await service.setSessionPinned('session-1', true);
+
+    expect(updated.pinned).toBe(true);
+    expect(repository.conversation.pinned).toBe(true);
+    expect(repository.conversation.messages).toHaveLength(1);
+  });
+
+  it('drops the pinned flag when unpinned', async () => {
+    const repository = new InMemoryConversationRepository();
+    repository.conversation.pinned = true;
+    const service = new ChatSessionService(repository, createProviderStub());
+
+    const updated = await service.setSessionPinned('session-1', false);
+
+    expect(updated.pinned).toBeUndefined();
+    expect(repository.conversation.pinned).toBeUndefined();
+  });
+
   it('injects root AGENTS.md into the system prompt when available', async () => {
     const repository = new InMemoryConversationRepository();
     const seenMessages: Array<{ role: string; content: string }> = [];

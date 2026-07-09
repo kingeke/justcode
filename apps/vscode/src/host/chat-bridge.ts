@@ -470,6 +470,9 @@ export class ChatBridge {
       case WebviewMessageType.RenameSession:
         await this.renameSession(message.sessionId, message.title);
         return;
+      case WebviewMessageType.PinSession:
+        await this.pinSession(message.sessionId, message.pinned);
+        return;
       case WebviewMessageType.DeleteSession:
         await this.deleteSession(message.sessionId);
         return;
@@ -2234,6 +2237,7 @@ export class ChatBridge {
           ...(s.title !== undefined ? { title: s.title } : {}),
           updatedAt: s.updatedAt,
           messageCount: s.messageCount,
+          ...(s.pinned ? { pinned: true } : {}),
         })),
         hasConnectedProvider: services.allProviders.length > 0,
         focus,
@@ -2433,6 +2437,30 @@ export class ChatBridge {
     }
 
     // Refresh the list in place so the new title shows without leaving the view.
+    await this.sendSessionsList(false);
+  }
+
+  private async pinSession(sessionId: string, pinned: boolean): Promise<void> {
+    const services = await this.ensureServices();
+    try {
+      const updated = await services.chatSessionService.setSessionPinned(
+        sessionId,
+        pinned
+      );
+      // Keep the in-memory copy in step when the pinned session is the open one,
+      // so the next save doesn't write the stale flag back over it.
+      if (sessionId === this.sessionId && this.conversation) {
+        const next = { ...this.conversation };
+        if (updated.pinned) next.pinned = true;
+        else delete next.pinned;
+        this.conversation = next;
+      }
+    } catch (error) {
+      this.post({ type: HostMessageType.Error, message: errorMessage(error) });
+      return;
+    }
+
+    // Refresh the list in place so the row regroups without leaving the view.
     await this.sendSessionsList(false);
   }
 

@@ -80,6 +80,8 @@ export enum WebviewMessageType {
   ListSessions = 'listSessions',
   OpenSession = 'openSession',
   RenameSession = 'renameSession',
+  /** Pin or unpin a session so it lists in its own group above the rest. */
+  PinSession = 'pinSession',
   DeleteSession = 'deleteSession',
   ClearSessions = 'clearSessions',
   ConnectProvider = 'connectProvider',
@@ -161,6 +163,8 @@ export interface WebviewSessionSummary {
   title?: string | undefined;
   updatedAt: string;
   messageCount: number;
+  /** Whether the user pinned this session; pinned sessions list first. */
+  pinned?: boolean | undefined;
 }
 
 /** Reasoning/thinking intensity, mirrors `@core` ReasoningEffort enum values. */
@@ -944,6 +948,13 @@ export interface RenameSessionMessage {
   title: string;
 }
 
+/** The user pinned or unpinned a session from one of the session lists. */
+export interface PinSessionMessage {
+  type: WebviewMessageType.PinSession;
+  sessionId: string;
+  pinned: boolean;
+}
+
 /** The user asked to delete a session; the host confirms before removing it. */
 export interface DeleteSessionMessage {
   type: WebviewMessageType.DeleteSession;
@@ -1182,6 +1193,7 @@ export type WebviewToHost =
   | ListSessionsMessage
   | OpenSessionMessage
   | RenameSessionMessage
+  | PinSessionMessage
   | DeleteSessionMessage
   | ClearSessionsMessage
   | ConnectProviderMessage
