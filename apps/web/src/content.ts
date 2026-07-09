@@ -271,6 +271,11 @@ export const providers: Item[] = [
       'Your Claude Pro/Max subscription via the official Claude Agent SDK — no API key.',
   },
   {
+    name: 'Cursor',
+    description:
+      'Your Cursor subscription via the official Cursor CLI — no API key.',
+  },
+  {
     name: 'OpenRouter',
     description: 'One key, hundreds of models across providers.',
   },
