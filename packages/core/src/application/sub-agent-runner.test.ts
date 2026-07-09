@@ -217,4 +217,43 @@ describe('runSubAgent', () => {
       cachedTokens: 0,
     });
   });
+
+  it('reports the run stats (ctx, ttft, toks/s) and fires onStats', async () => {
+    // A provider that streams a token before returning, so TTFT and the
+    // generation window are measurable.
+    const provider: ProviderClient = {
+      providerId: ProviderId.Ollama,
+      async sendChat(request) {
+        request.onToken?.('hi');
+        return {
+          content: 'done',
+          usage: { inputTokens: 42, outputTokens: 8, cachedTokens: 3 },
+        };
+      },
+      async listModels() {
+        return [];
+      },
+      getDefaultModel() {
+        return undefined;
+      },
+    };
+    const statsEvents: number[] = [];
+    const result = await runSubAgent({
+      provider,
+      model: 'test-model',
+      tools: [],
+      prompt: 'x',
+      systemPrompt: 'sub agent',
+      workspaceRoot: '/workspace',
+      sessionId: 'subagent-test',
+      onStats: (stats) => statsEvents.push(stats.lastInputTokens),
+    });
+
+    expect(result.stats?.lastInputTokens).toBe(42);
+    expect(result.stats?.ttftMs).toBeGreaterThanOrEqual(0);
+    expect(result.stats?.avgTokensPerSecond).toBeGreaterThan(0);
+    // onStats fires live: once on the first streamed token (before usage is
+    // known → 0), then again after the step completes (input tokens → 42).
+    expect(statsEvents).toEqual([0, 42]);
+  });
 });

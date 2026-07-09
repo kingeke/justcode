@@ -62,6 +62,32 @@ describe('sub agent activity state', () => {
     expect(state.subAgents[0]?.endedAt).toBeDefined();
   });
 
+  it("carries the run's usage and stats through the end event", () => {
+    let state: ChatState = reducer(initialState, activity());
+    state = reducer(
+      state,
+      activity({
+        phase: WebviewSubAgentPhase.End,
+        status: WebviewSubAgentStatus.Completed,
+        usage: {
+          inputTokens: 200,
+          outputTokens: 40,
+          cachedTokens: 5,
+          cost: 0.02,
+        },
+        stats: {
+          lastInputTokens: 200,
+          ttftMs: 350,
+          avgTokensPerSecond: 22.5,
+        },
+      })
+    );
+    expect(state.subAgents[0]?.usage?.cost).toBe(0.02);
+    expect(state.subAgents[0]?.usage?.inputTokens).toBe(200);
+    expect(state.subAgents[0]?.stats?.lastInputTokens).toBe(200);
+    expect(state.subAgents[0]?.stats?.avgTokensPerSecond).toBe(22.5);
+  });
+
   it('stores a fetched transcript by run id and replaces it on refresh', () => {
     let state: ChatState = reducer(initialState, activity());
     state = reducer(state, {

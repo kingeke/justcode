@@ -654,6 +654,80 @@ describe('ChatSessionService', () => {
     });
   });
 
+  it("folds a tool's own usage (e.g. sub agents) into the turn's usage", async () => {
+    const repository = new InMemoryConversationRepository();
+    // A tool that itself spends tokens against the provider, like the task
+    // tool's sub agents, reporting that spend on its ToolResult.
+    const billingTool: Tool = {
+      requiresApproval: false,
+      definition: {
+        name: 'task',
+        description: 'delegates work',
+        parameters: { type: 'object' },
+      },
+      describe: () => ({ title: 'task' }),
+      execute: async () => ({
+        content: 'sub agent report',
+        usage: {
+          inputTokens: 500,
+          outputTokens: 100,
+          cachedTokens: 0,
+          cost: 0.05,
+        },
+      }),
+    };
+    const toolRegistry = new ToolRegistry([billingTool]);
+    let turn = 0;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat(): Promise<ChatResult> {
+        turn += 1;
+        if (turn === 1) {
+          return {
+            content: '',
+            toolCalls: [{ id: 'call-1', name: 'task', arguments: '{}' }],
+            usage: { inputTokens: 10, outputTokens: 2, cachedTokens: 0 },
+          };
+        }
+        return {
+          content: 'All done.',
+          usage: { inputTokens: 20, outputTokens: 5, cachedTokens: 0 },
+        };
+      },
+      async listModels() {
+        return [
+          { id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai },
+        ];
+      },
+      getDefaultModel() {
+        return 'gpt';
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry,
+    });
+
+    const started = await service.startSession({ sessionId: 'session-1' });
+    const usageEvents: number[] = [];
+    const result = await service.submitMessage({
+      conversation: { ...started.conversation, title: 'Session Title' },
+      model: started.activeModel,
+      content: 'Delegate the thing',
+      requestApproval: async () => true,
+      onUsage: (usage) => usageEvents.push(usage.inputTokens),
+    });
+
+    // The sub agent's usage (500) is surfaced live between the two model steps.
+    expect(usageEvents).toEqual([10, 500, 20]);
+    // ...and summed into the turn total (with its cost).
+    expect(result.usage).toEqual({
+      inputTokens: 530,
+      outputTokens: 107,
+      cachedTokens: 0,
+      cost: 0.05,
+    });
+  });
+
   it('sends only the most recent messages when a history limit is set', async () => {
     const repository = new InMemoryConversationRepository();
     const receivedCounts: number[] = [];

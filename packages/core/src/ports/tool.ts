@@ -8,6 +8,7 @@ import type {
   SubAgentActivityEvent,
   SubAgentRun,
 } from '@core/domain/sub-agent';
+import type { TokenUsage } from '@core/ports/chat-model';
 
 /** A function definition advertised to the model (OpenAI function-calling shape). */
 export interface ToolDefinition {
@@ -21,6 +22,13 @@ export interface ToolDefinition {
 export interface ToolResult {
   content: string;
   isError?: boolean;
+  /**
+   * Token usage (and cost) the tool itself incurred against the provider —
+   * e.g. the `task` tool's sub agent runs, which bill to the same account.
+   * The agentic loop folds this into the turn's usage so session token/cost
+   * metrics reflect work done inside tools, not just the main model calls.
+   */
+  usage?: TokenUsage;
 }
 
 /** A question a tool wants to put to the user, surfaced by the UI. */

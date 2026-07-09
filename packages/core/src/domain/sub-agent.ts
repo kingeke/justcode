@@ -1,5 +1,6 @@
 import type { ChatMessage } from '@core/domain/message';
 import { ToolName } from '@core/domain/tool-name';
+import type { TokenUsage } from '@core/ports/chat-model';
 
 /**
  * The kinds of sub agent the `task` tool can spawn. Each type maps to a
@@ -39,6 +40,22 @@ export interface CustomSubAgentConfig {
 }
 
 /**
+ * A sub agent run's own token/throughput metrics, mirroring the main session
+ * footer but scoped to just that run. Populated as the run works and persisted
+ * with it so the transcript viewer can show them after the fact.
+ */
+export interface SubAgentRunStats {
+  /** Input tokens of the run's most recent request (the "ctx" readout). */
+  lastInputTokens: number;
+  /** Time from run start to its first streamed token, in ms. */
+  ttftMs?: number;
+  /** Generation rate of the most recent step, tokens/second. */
+  tokensPerSecond?: number;
+  /** Running average generation rate across the run's steps. */
+  avgTokensPerSecond?: number;
+}
+
+/**
  * One sub agent execution, persisted on the conversation (like
  * `previousMessages`, never sent to the model) so its full transcript stays
  * reviewable after the fact.
@@ -59,6 +76,10 @@ export interface SubAgentRun {
   endedAt?: string;
   /** The sub agent's final report, returned to the parent as the tool result. */
   summary?: string;
+  /** Cumulative token usage (and cost) the run billed to the account. */
+  usage?: TokenUsage;
+  /** The run's own token/throughput metrics (ctx, ttft, toks/s). */
+  stats?: SubAgentRunStats;
 }
 
 /** Lifecycle phase of a {@link SubAgentActivityEvent}. */
@@ -83,6 +104,10 @@ export interface SubAgentActivityEvent {
   status?: SubAgentRunStatus;
   /** The sub agent's final report; set on completed `end` events. */
   summary?: string;
+  /** Cumulative token usage (and cost); set on `end` events. */
+  usage?: TokenUsage;
+  /** The run's own token/throughput metrics; set on `end` events. */
+  stats?: SubAgentRunStats;
   /**
    * The live run object (its `messages` array mutates as the sub agent works).
    * Set on `start` events so in-process hosts can serve the full transcript on

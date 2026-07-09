@@ -5,6 +5,8 @@ import {
   WebviewSubAgentPhase,
   WebviewSubAgentStatus,
   type ApprovalRequestMessage,
+  type WebviewSubAgentStats,
+  type WebviewSubAgentUsage,
   type HostToWebview,
   type UserInputRequestMessage,
   type WebviewFileAttachment,
@@ -245,6 +247,10 @@ export interface SubAgentRunView {
   summary?: string | undefined;
   startedAt: number;
   endedAt?: number | undefined;
+  /** The run's cumulative usage, for the transcript footer. */
+  usage?: WebviewSubAgentUsage | undefined;
+  /** The run's throughput metrics, for the transcript footer. */
+  stats?: WebviewSubAgentStats | undefined;
 }
 
 export const initialState: ChatState = {
@@ -442,6 +448,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
           summary: run.summary,
           startedAt: run.startedAt,
           endedAt: run.endedAt,
+          usage: run.usage,
+          stats: run.stats,
         })),
         subAgentTranscripts: {},
         liveTurnItems: [],
@@ -764,6 +772,10 @@ export function reducer(state: ChatState, action: Action): ChatState {
                 ...run,
                 toolUseCount: action.toolUseCount ?? run.toolUseCount,
                 latestActivity: action.latestActivity ?? run.latestActivity,
+                // Metrics stream on progress events, so the footer tracks the
+                // run live instead of only settling when it ends.
+                usage: action.usage ?? run.usage,
+                stats: action.stats ?? run.stats,
                 ...(action.phase === WebviewSubAgentPhase.End
                   ? {
                       status: action.status ?? WebviewSubAgentStatus.Completed,

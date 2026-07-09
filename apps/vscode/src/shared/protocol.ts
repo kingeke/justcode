@@ -561,6 +561,22 @@ export enum WebviewSubAgentStatus {
  * `SubAgentActivityEvent` so the webview can render what each sub agent is
  * doing while it works (and its report when it finishes).
  */
+/** Token usage a sub agent run billed to the account (mirrors TokenUsage). */
+export interface WebviewSubAgentUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  cost?: number;
+}
+
+/** A sub agent run's own throughput metrics (mirrors SubAgentRunStats). */
+export interface WebviewSubAgentStats {
+  lastInputTokens: number;
+  ttftMs?: number;
+  tokensPerSecond?: number;
+  avgTokensPerSecond?: number;
+}
+
 export interface SubAgentActivityMessage {
   type: HostMessageType.SubAgentActivity;
   phase: WebviewSubAgentPhase;
@@ -572,6 +588,10 @@ export interface SubAgentActivityMessage {
   toolUseCount?: number;
   status?: WebviewSubAgentStatus;
   summary?: string;
+  /** The run's cumulative usage; set on `end` events. */
+  usage?: WebviewSubAgentUsage;
+  /** The run's throughput metrics; set on `end` events. */
+  stats?: WebviewSubAgentStats;
 }
 
 /**
@@ -589,6 +609,10 @@ export interface WebviewSubAgentRunSnapshot {
   /** Epoch ms, matching the live SubAgentRunView timestamps. */
   startedAt: number;
   endedAt?: number;
+  /** The run's cumulative usage, for the transcript footer. */
+  usage?: WebviewSubAgentUsage;
+  /** The run's throughput metrics, for the transcript footer. */
+  stats?: WebviewSubAgentStats;
 }
 
 /**

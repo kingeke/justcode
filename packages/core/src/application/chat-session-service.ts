@@ -945,6 +945,16 @@ export class ChatSessionService {
               activeToolNames,
               subAgentRuns
             ));
+          // A tool may itself spend tokens against the provider (the `task`
+          // tool's sub agents bill to the same account). Fold that usage into
+          // the turn total and surface it live so session cost/token metrics
+          // include work done inside tools, not just the main model calls.
+          if (toolResult.usage) {
+            usage = usage
+              ? sumUsage(usage, toolResult.usage)
+              : toolResult.usage;
+            input.onUsage?.(toolResult.usage);
+          }
           working.push(
             createMessage(
               MessageRole.Tool,

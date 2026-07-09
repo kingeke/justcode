@@ -217,6 +217,8 @@ export class TaskTool implements Tool {
         toolUseCount,
         status,
         ...(summary !== undefined ? { summary } : {}),
+        ...(run.usage ? { usage: run.usage } : {}),
+        ...(run.stats ? { stats: run.stats } : {}),
       });
     };
 
@@ -244,6 +246,22 @@ export class TaskTool implements Tool {
           run.messages.push(message);
           record();
         },
+        onStats: (stats, stepUsage) => {
+          run.stats = stats;
+          if (stepUsage) run.usage = stepUsage;
+          record();
+          // Push a live Progress event so out-of-process hosts (the VSCode
+          // webview) update their footer as the run works, not just at the end.
+          context.onSubAgentActivity?.({
+            phase: SubAgentActivityPhase.Progress,
+            runId: run.id,
+            agentType: run.agentType,
+            description: run.description,
+            toolUseCount,
+            stats,
+            ...(stepUsage ? { usage: stepUsage } : {}),
+          });
+        },
         onToolActivity: (activity) => {
           toolUseCount += 1;
           context.onSubAgentActivity?.({
@@ -253,12 +271,19 @@ export class TaskTool implements Tool {
             description: run.description,
             latestActivity: activity.view.title,
             toolUseCount,
+            ...(run.stats ? { stats: run.stats } : {}),
+            ...(run.usage ? { usage: run.usage } : {}),
           });
         },
       });
+      if (result.usage) run.usage = result.usage;
+      if (result.stats) run.stats = result.stats;
       finish(SubAgentRunStatus.Completed, result.summary);
       return {
         content: result.summary || '(the sub agent returned no report)',
+        // The sub agent's calls bill to the same account, so surface its usage
+        // to the parent loop to fold into the session's token/cost metrics.
+        ...(result.usage ? { usage: result.usage } : {}),
       };
     } catch (error) {
       if (isAbortError(error) || context.signal?.aborted) {

@@ -79,17 +79,43 @@ export function SubAgentSidebar({
   /** How many floating buttons are stacked below this one (0–3). */
   stackedButtons?: number;
 }): React.JSX.Element | null {
+  // Click (not hover) reveals the panel; a click outside or Escape closes it —
+  // matching the "Your messages" sidebar.
+  const [open, setOpen] = React.useState(false);
+  const rootRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent): void => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
   if (runs.length === 0) return null;
 
   return (
     <div
-      className={`conversation-sidebar subagent-sidebar conversation-sidebar-raised-${stackedButtons}`}
+      ref={rootRef}
+      className={`conversation-sidebar subagent-sidebar conversation-sidebar-raised-${stackedButtons}${open ? ' is-open' : ''}`}
     >
       <button
         type="button"
         className="conversation-sidebar-tab"
         aria-label="Sub agents"
+        aria-expanded={open}
         title="Sub agents"
+        onClick={() => setOpen((current) => !current)}
       >
         <RobotIcon size={14} />
       </button>
@@ -107,8 +133,9 @@ export function SubAgentSidebar({
               type="button"
               className="conversation-sidebar-item"
               onClick={(event) => {
-                // Drop focus so the panel doesn't linger once the mouse leaves.
+                // Drop focus and close the panel before opening the run.
                 event.currentTarget.blur();
+                setOpen(false);
                 onOpen(run.runId);
               }}
             >
@@ -207,9 +234,54 @@ export function SubAgentTranscriptModal({
             </div>
           ) : null}
         </div>
+        <SubAgentMetricsFooter run={run} />
       </div>
     </div>
   );
+}
+
+/**
+ * The run's own footer: ctx/in/cached/out/cost plus TTFT and avg toks/s —
+ * scoped to just this sub agent, mirroring the main session footer. Renders
+ * nothing until the run has reported usage or stats.
+ */
+function SubAgentMetricsFooter({
+  run,
+}: {
+  run: SubAgentRunView;
+}): React.JSX.Element {
+  const { usage, stats } = run;
+  const parts: string[] = [
+    `ctx ${(stats?.lastInputTokens ?? 0).toLocaleString()}`,
+    `in ${(usage?.inputTokens ?? 0).toLocaleString()}`,
+    `cached ${(usage?.cachedTokens ?? 0).toLocaleString()}`,
+    `out ${(usage?.outputTokens ?? 0).toLocaleString()}`,
+  ];
+  if (usage?.cost != null && usage.cost > 0) {
+    parts.push(`$${usage.cost.toFixed(4)}`);
+  }
+  if (stats?.ttftMs !== undefined) {
+    parts.push(`TTFT ${formatDurationMs(stats.ttftMs)}`);
+  }
+  if (stats?.tokensPerSecond !== undefined) {
+    parts.push(`${stats.tokensPerSecond.toFixed(1)} tok/s`);
+  }
+  if (stats?.avgTokensPerSecond !== undefined) {
+    parts.push(`AVG ${stats.avgTokensPerSecond.toFixed(1)}`);
+  }
+  return <div className="subagent-modal-metrics">{parts.join('  ·  ')}</div>;
+}
+
+function formatDurationMs(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const totalSeconds = ms / 1000;
+  if (totalSeconds < 60) {
+    const rounded = Math.round(totalSeconds * 10) / 10;
+    return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.round(totalSeconds % 60);
+  return seconds > 0 ? `${minutes}min ${seconds}s` : `${minutes}min`;
 }
 
 function statusGlyph(status: WebviewSubAgentStatus): string {

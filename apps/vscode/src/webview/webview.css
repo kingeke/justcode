@@ -1073,6 +1073,15 @@ body {
   padding: 4px 0;
 }
 
+.subagent-modal-metrics {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-top: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  font-size: 11px;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
 .changes-list {
   list-style: none;
   margin: 0;
@@ -1579,9 +1588,8 @@ textarea:focus {
   );
 }
 
-/* The popup card, opening upward from the button. "Your messages" opens it on
-   click (`.is-open`, set by the component); the sub agents robot still opens
-   on hover. */
+/* The popup card, opening upward from the button. Both "Your messages" and the
+   sub agents robot open it on click (`.is-open`, set by the component). */
 .conversation-sidebar-panel {
   position: absolute;
   bottom: 36px;
@@ -1609,8 +1617,7 @@ textarea:focus {
     visibility 0.14s ease;
 }
 
-.conversation-sidebar.is-open .conversation-sidebar-panel,
-.subagent-sidebar:hover .conversation-sidebar-panel {
+.conversation-sidebar.is-open .conversation-sidebar-panel {
   opacity: 1;
   transform: translateY(0);
   visibility: visible;

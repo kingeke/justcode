@@ -6,6 +6,7 @@ import {
 import type { ProviderClient, TokenUsage } from '@core/ports/chat-model';
 import type { Tool, ToolInvocationView } from '@core/ports/tool';
 import { buildSystemPrompt } from '@core/application/system-prompt';
+import type { SubAgentRunStats } from '@core/domain/sub-agent';
 
 export interface SubAgentToolActivity {
   toolName: string;
@@ -34,6 +35,12 @@ export interface RunSubAgentInput {
   onMessage?: (message: ChatMessage) => void;
   /** Fired before each tool call executes, for live progress display. */
   onToolActivity?: (activity: SubAgentToolActivity) => void;
+  /**
+   * Fired as the run progresses (on its first streamed token and after each
+   * model step) with the run's live metrics so far, so a viewer's footer can
+   * track it in real time rather than only when it finishes.
+   */
+  onStats?: (stats: SubAgentRunStats, usage?: TokenUsage) => void;
 }
 
 export interface RunSubAgentResult {
@@ -43,6 +50,8 @@ export interface RunSubAgentResult {
   messages: ChatMessage[];
   toolUseCount: number;
   usage?: TokenUsage;
+  /** The run's own token/throughput metrics. */
+  stats?: SubAgentRunStats;
 }
 
 /**
@@ -75,27 +84,67 @@ export async function runSubAgent(
   let usage: TokenUsage | undefined;
   let toolUseCount = 0;
 
+  // Per-run metrics, mirroring the main session footer but scoped to this run.
+  const runStartMs = Date.now();
+  let firstTokenMs: number | null = null;
+  let lastInputTokens = 0;
+  let tokensPerSecond: number | undefined;
+  const tokensPerSecondAvg = { avg: 0, count: 0 };
+
+  const currentStats = (): SubAgentRunStats => ({
+    lastInputTokens,
+    ...(firstTokenMs !== null ? { ttftMs: firstTokenMs - runStartMs } : {}),
+    ...(tokensPerSecond !== undefined ? { tokensPerSecond } : {}),
+    ...(tokensPerSecondAvg.count > 0
+      ? { avgTokensPerSecond: tokensPerSecondAvg.avg }
+      : {}),
+  });
+
   for (;;) {
     throwIfAborted(input.signal);
 
+    const stepStartMs = Date.now();
+    let stepFirstTokenMs: number | null = null;
     const response = await input.provider.sendChat({
       model: input.model,
       sessionId: input.sessionId,
       messages: [systemMessage, ...messages],
       ...(toolDefinitions.length > 0 ? { tools: toolDefinitions } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
-      // Streaming (the tokens are discarded — nobody watches a sub agent type)
-      // keeps HTTP providers on their streaming path, which has no fixed
-      // response deadline. The non-streaming path rides `requestJson`'s hard
-      // timeout, which a long reasoning step (a big review) can easily exceed.
-      onToken: () => {},
+      // Streaming keeps HTTP providers on their streaming path, which has no
+      // fixed response deadline (the non-streaming path rides `requestJson`'s
+      // hard timeout, which a long reasoning step can easily exceed). The
+      // tokens aren't shown, but the first one's timestamp gives us TTFT and
+      // the generation window for the throughput readout.
+      onToken: () => {
+        if (stepFirstTokenMs === null) stepFirstTokenMs = Date.now();
+        if (firstTokenMs === null) {
+          firstTokenMs = Date.now();
+          // Surface TTFT the moment the run starts producing, so the footer
+          // stops waiting on the whole (possibly long) first response.
+          input.onStats?.(currentStats(), usage);
+        }
+      },
     });
 
     throwIfAborted(input.signal);
 
     if (response.usage) {
       usage = usage ? sumUsage(usage, response.usage) : response.usage;
+      lastInputTokens = response.usage.inputTokens;
+      // Throughput for this step: output tokens over the generation window
+      // (first token → now). Folded into a running average across steps, the
+      // same formula the main footer uses.
+      const genSeconds =
+        Math.max(Date.now() - (stepFirstTokenMs ?? stepStartMs), 1) / 1000;
+      if (response.usage.outputTokens > 0) {
+        tokensPerSecond = response.usage.outputTokens / genSeconds;
+        tokensPerSecondAvg.count += 1;
+        tokensPerSecondAvg.avg +=
+          (tokensPerSecond - tokensPerSecondAvg.avg) / tokensPerSecondAvg.count;
+      }
     }
+    input.onStats?.(currentStats(), usage);
 
     const toolCalls = response.toolCalls ?? [];
     if (toolCalls.length === 0) {
@@ -105,6 +154,7 @@ export async function runSubAgent(
         messages,
         toolUseCount,
         ...(usage ? { usage } : {}),
+        stats: currentStats(),
       };
     }
 

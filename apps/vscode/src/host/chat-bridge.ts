@@ -1486,6 +1486,8 @@ export class ChatBridge {
               ? { status: event.status as string as WebviewSubAgentStatus }
               : {}),
             ...(event.summary !== undefined ? { summary: event.summary } : {}),
+            ...(event.usage ? { usage: event.usage } : {}),
+            ...(event.stats ? { stats: event.stats } : {}),
           };
           turn.liveTurnEvents.push(message);
           this.postTurn(turn, message);
@@ -3523,6 +3525,8 @@ export function toSubAgentSnapshots(
     ...(run.summary !== undefined ? { summary: run.summary } : {}),
     startedAt: Date.parse(run.startedAt),
     ...(run.endedAt !== undefined ? { endedAt: Date.parse(run.endedAt) } : {}),
+    ...(run.usage ? { usage: run.usage } : {}),
+    ...(run.stats ? { stats: run.stats } : {}),
   }));
 }
 

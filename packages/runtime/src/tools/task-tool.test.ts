@@ -107,6 +107,82 @@ describe('TaskTool', () => {
     expect(requests[0]?.model).toBe('test-model');
   });
 
+  it("returns the sub agent's token usage so it bills to the session", async () => {
+    const tool = new TaskTool(() => ({
+      provider: providerFromResponses([
+        {
+          content: 'done',
+          usage: {
+            inputTokens: 120,
+            outputTokens: 45,
+            cachedTokens: 10,
+            cost: 0.0031,
+          },
+        },
+      ]),
+      tools: [],
+    }));
+    const result = await tool.execute(taskArguments, {
+      workspaceRoot: '/workspace',
+      model: 'test-model',
+    });
+    expect(result.usage).toEqual({
+      inputTokens: 120,
+      outputTokens: 45,
+      cachedTokens: 10,
+      cost: 0.0031,
+    });
+  });
+
+  it('emits live progress events carrying the run stats/usage', async () => {
+    const events: SubAgentActivityEvent[] = [];
+    const tool = new TaskTool(() => ({
+      provider: providerFromResponses([
+        {
+          content: 'done',
+          usage: { inputTokens: 70, outputTokens: 14, cachedTokens: 2 },
+        },
+      ]),
+      tools: [],
+    }));
+    await tool.execute(taskArguments, {
+      workspaceRoot: '/workspace',
+      model: 'test-model',
+      onSubAgentActivity: (event) => events.push(event),
+    });
+    const progress = events.find(
+      (event) => event.phase === SubAgentActivityPhase.Progress
+    );
+    expect(progress?.stats?.lastInputTokens).toBe(70);
+    expect(progress?.usage?.inputTokens).toBe(70);
+  });
+
+  it("records the run's usage and stats for the transcript footer", async () => {
+    const runs: SubAgentRun[] = [];
+    const tool = new TaskTool(() => ({
+      provider: providerFromResponses([
+        {
+          content: 'done',
+          usage: { inputTokens: 60, outputTokens: 12, cachedTokens: 4 },
+        },
+      ]),
+      tools: [],
+    }));
+    await tool.execute(taskArguments, {
+      workspaceRoot: '/workspace',
+      model: 'test-model',
+      toolCallId: 'call-3',
+      recordSubAgentRun: (run) => runs.push(run),
+    });
+    const finalRun = runs.at(-1);
+    expect(finalRun?.usage).toEqual({
+      inputTokens: 60,
+      outputTokens: 12,
+      cachedTokens: 4,
+    });
+    expect(finalRun?.stats?.lastInputTokens).toBe(60);
+  });
+
   it("only advertises the agent type's allowed tools (never task itself)", async () => {
     const requests: ChatRequest[] = [];
     const tool = new TaskTool(() => ({

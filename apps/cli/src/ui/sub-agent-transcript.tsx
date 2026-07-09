@@ -70,6 +70,65 @@ function statusColor(status: SubAgentRunStatus): string {
   }
 }
 
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const totalSeconds = ms / 1000;
+  if (totalSeconds < 60) {
+    const rounded = Math.round(totalSeconds * 10) / 10;
+    return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.round(totalSeconds % 60);
+  return seconds > 0 ? `${minutes}min ${seconds}s` : `${minutes}min`;
+}
+
+/**
+ * The run's own footer: ctx/in/cached/out/cost plus TTFT and avg toks/s —
+ * scoped to this sub agent, mirroring the main session footer. Returns null
+ * until the run has reported any usage.
+ */
+function runMetricsContent(run: SubAgentRun): StyledText {
+  const usage = run.usage;
+  const stats = run.stats;
+
+  const chunks: TextChunk[] = [
+    tc('ctx ', { fg: MUTED }),
+    tc((stats?.lastInputTokens ?? 0).toLocaleString(), { fg: 'white' }),
+    tc(' in ', { fg: MUTED }),
+    tc((usage?.inputTokens ?? 0).toLocaleString(), { fg: 'white' }),
+    tc(' cached ', { fg: MUTED }),
+    tc((usage?.cachedTokens ?? 0).toLocaleString(), { fg: 'white' }),
+    tc(' out ', { fg: MUTED }),
+    tc((usage?.outputTokens ?? 0).toLocaleString(), { fg: 'white' }),
+  ];
+
+  if (usage?.cost != null && usage.cost > 0) {
+    chunks.push(
+      tc(' $', { fg: MUTED }),
+      tc(usage.cost.toFixed(4), { fg: 'white' })
+    );
+  }
+
+  if (stats?.ttftMs !== undefined) {
+    chunks.push(tc(`  TTFT ${formatDuration(stats.ttftMs)}`, { fg: MUTED }));
+  }
+  if (stats?.tokensPerSecond !== undefined) {
+    chunks.push(
+      tc(' · ', { fg: MUTED }),
+      tc(stats.tokensPerSecond.toFixed(1), { fg: 'white' }),
+      tc(' tok/s', { fg: MUTED })
+    );
+  }
+  if (stats?.avgTokensPerSecond !== undefined) {
+    chunks.push(
+      tc(' · AVG ', { fg: MUTED }),
+      tc(stats.avgTokensPerSecond.toFixed(1), { fg: 'white' })
+    );
+  }
+
+  return new StyledText(chunks);
+}
+
 interface SubAgentTranscriptProps {
   run: SubAgentRun;
   /**
@@ -136,6 +195,18 @@ export function SubAgentTranscript({
   const toolUseCount = messages.filter(
     (message) => message.role === MessageRole.Tool
   ).length;
+  const metricsLine = runMetricsContent(run);
+
+  // Follow new activity as it lands: scrollbox stickyScroll only holds the
+  // bottom while already there, so pin to the bottom whenever the transcript
+  // grows (the 500ms tick above surfaces the appended messages).
+  const messageCount = messages.length;
+  useEffect(() => {
+    const scroll = scrollRef.current;
+    if (scroll && !scroll.isDestroyed) {
+      scroll.scrollTo(scroll.scrollHeight);
+    }
+  }, [messageCount]);
 
   return (
     <box
@@ -232,6 +303,9 @@ export function SubAgentTranscript({
           )
         )}
       </scrollbox>
+      <box flexShrink={0} marginTop={1}>
+        <text content={metricsLine} />
+      </box>
     </box>
   );
 }
