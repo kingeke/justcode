@@ -5,13 +5,16 @@ import {
   applySymbolSuggestion,
   extractFileMentions,
   filterMentionSuggestions,
+  filterModeSuggestions,
   filterSymbolSuggestions,
   getActiveMentionQuery,
   getActiveSymbolMention,
+  getModeMention,
   hasActiveMentionTrigger,
   parseMention,
   PromptAttachmentService,
 } from '@core/application/prompt-attachment-service';
+import { BUILT_IN_MODES, type ChatMode } from '@core/domain/chat-mode';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 
 class InMemoryWorkspaceFiles implements WorkspaceFilePort {
@@ -359,5 +362,63 @@ describe('prompt mention helpers', () => {
         'findMultipleBoq'
       )
     ).toBe('look at @reports.repository.ts::findMultipleBoq ');
+  });
+});
+
+describe('mode mentions', () => {
+  const customMode: ChatMode = {
+    id: 'reviewer',
+    name: 'Reviewer',
+    icon: 'custom',
+    custom: true,
+  };
+  const modes: ChatMode[] = [...BUILT_IN_MODES, customMode];
+
+  it('lists every mode for an empty @ query', () => {
+    expect(filterModeSuggestions(modes, '')).toEqual(modes);
+  });
+
+  it('returns nothing when no mention is active', () => {
+    expect(filterModeSuggestions(modes, undefined)).toEqual([]);
+  });
+
+  it('filters modes by id or name, case-insensitively', () => {
+    expect(filterModeSuggestions(modes, 'pl')).toEqual([
+      BUILT_IN_MODES.find((mode) => mode.id === 'plan'),
+    ]);
+    expect(filterModeSuggestions(modes, 'REVIEW')).toEqual([customMode]);
+    expect(filterModeSuggestions(modes, 'no-such-mode')).toEqual([]);
+  });
+
+  it('detects a @mode mention and strips it from the content', () => {
+    expect(getModeMention('@plan add dark mode', modes)).toEqual({
+      modeId: 'plan',
+      content: 'add dark mode',
+    });
+    // Mid-message mentions and trailing punctuation work too.
+    expect(getModeMention('switch to @plan, then refactor', modes)).toEqual({
+      modeId: 'plan',
+      content: 'switch to , then refactor',
+    });
+  });
+
+  it('matches a mode by its display name, case-insensitively', () => {
+    expect(getModeMention('@Reviewer check this diff', modes)).toEqual({
+      modeId: 'reviewer',
+      content: 'check this diff',
+    });
+  });
+
+  it('returns just the mode for a bare @mode message', () => {
+    expect(getModeMention('@ask', modes)).toEqual({
+      modeId: 'ask',
+      content: '',
+    });
+  });
+
+  it('ignores file mentions and @path::symbol mentions', () => {
+    expect(getModeMention('read @src/plan/index.ts', modes)).toBeUndefined();
+    expect(getModeMention('look at @plan.ts::build', modes)).toBeUndefined();
+    expect(getModeMention('no mention here', modes)).toBeUndefined();
   });
 });

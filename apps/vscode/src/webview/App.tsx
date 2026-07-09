@@ -1,5 +1,6 @@
 import * as React from 'react';
 
+import { getModeMention } from '@core/application/prompt-attachment-service';
 import {
   HostMessageType,
   SettingsSection,
@@ -537,7 +538,7 @@ export function App(): React.JSX.Element {
   }, [state.approval, state.input, pinToBottom]);
 
   const sendNow = (
-    content: string,
+    rawContent: string,
     images: WebviewImage[],
     files: WebviewFileAttachment[] = []
   ): void => {
@@ -546,9 +547,24 @@ export function App(): React.JSX.Element {
     // `TurnComplete`. Post them straight through without the optimistic submit —
     // otherwise the webview would flip to `busy` and hang on a turn that never
     // starts (no streaming, nothing to cancel).
-    if (HOST_COMMANDS.has(content.trim())) {
-      postToHost({ type: WebviewMessageType.Submit, content });
+    if (HOST_COMMANDS.has(rawContent.trim())) {
+      postToHost({ type: WebviewMessageType.Submit, content: rawContent });
       return;
+    }
+    // A `@mode` mention switches the active mode for this message: switch
+    // first (the host applies SelectMode before Submit — see
+    // startImplementation), then send the message with the mention stripped.
+    let content = rawContent;
+    const modeMention = getModeMention(rawContent, state.modes);
+    if (modeMention) {
+      content = modeMention.content;
+      if (modeMention.modeId !== state.activeModeId) {
+        selectMode(modeMention.modeId);
+      }
+      // A bare `@mode` just switches modes; there's nothing to send.
+      if (!content && images.length === 0 && files.length === 0) {
+        return;
+      }
     }
     // Sending a new message should always snap to it, even if the user had
     // scrolled up while reading the previous turn.

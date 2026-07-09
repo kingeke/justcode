@@ -65,6 +65,36 @@ describe('chat app method autocomplete', () => {
   });
 });
 
+describe('chat app mode mentions', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'apps/cli/src/ui/chat-app.tsx'),
+    'utf8'
+  );
+
+  it('offers the chat modes ahead of files in the @ suggestions', () => {
+    expect(source).toContain(
+      'filterModeSuggestions(modes, activeMentionQuery ?? undefined)'
+    );
+    expect(source).toContain(
+      '...modeMentionSuggestions.map((mode) => mode.id)'
+    );
+    expect(source).toContain(
+      '...fileMentionSuggestions.filter((path) => !modeIds.has(path))'
+    );
+  });
+
+  it('switches to the mentioned mode on submit and sends the stripped message', () => {
+    expect(source).toContain(
+      'const modeMention = getModeMention(value, modes)'
+    );
+    expect(source).toContain('setActiveMode(modeMention.modeId)');
+    expect(source).toContain('props.onModeChange?.(modeMention.modeId)');
+    expect(source).toContain(
+      "const cleanedValue = messageValue.replace(IMAGE_MARKER_PATTERN, ' ').trim()"
+    );
+  });
+});
+
 describe('chat app skill command argument hint', () => {
   const source = readFileSync(
     join(process.cwd(), 'apps/cli/src/ui/chat-app.tsx'),

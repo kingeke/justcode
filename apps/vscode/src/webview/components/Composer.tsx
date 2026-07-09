@@ -4,6 +4,7 @@ import {
   applyMentionSuggestion,
   applySymbolSuggestion,
   filterMentionSuggestions,
+  filterModeSuggestions,
   filterSymbolSuggestions,
   getActiveMentionQuery,
   getActiveSymbolMention,
@@ -575,6 +576,12 @@ export function Composer(props: ComposerProps): React.JSX.Element {
     () => (symbolMention ? undefined : getActiveMentionQuery(value)),
     [value, symbolMention]
   );
+  // Chat modes matching the `@` query, offered ahead of files so `@plan`-style
+  // mentions can switch modes. Applying one inserts the mode's id.
+  const modeMentionSuggestions = React.useMemo(
+    () => (symbolMention ? [] : filterModeSuggestions(props.modes, fileQuery)),
+    [symbolMention, fileQuery, props.modes]
+  );
   const mentionSuggestions = React.useMemo<string[]>(() => {
     if (symbolMention) {
       return filterSymbolSuggestions(
@@ -583,10 +590,22 @@ export function Composer(props: ComposerProps): React.JSX.Element {
       );
     }
     if (fileQuery !== undefined) {
-      return filterMentionSuggestions(props.workspaceFiles, fileQuery);
+      const modeIds = new Set(modeMentionSuggestions.map((mode) => mode.id));
+      return [
+        ...modeMentionSuggestions.map((mode) => mode.id),
+        ...filterMentionSuggestions(props.workspaceFiles, fileQuery).filter(
+          (path) => !modeIds.has(path)
+        ),
+      ];
     }
     return [];
-  }, [symbolMention, fileQuery, props.fileSymbols, props.workspaceFiles]);
+  }, [
+    symbolMention,
+    fileQuery,
+    props.fileSymbols,
+    props.workspaceFiles,
+    modeMentionSuggestions,
+  ]);
 
   const mentionActive = symbolMention !== undefined || fileQuery !== undefined;
   const mentionOpen =
@@ -938,29 +957,45 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                 Methods in <span>{symbolMention.path}</span>
               </li>
             ) : null}
-            {mentionSuggestions.map((suggestion, index) => (
-              <li
-                key={suggestion}
-                role="option"
-                aria-selected={index === activeMentionIndex}
-                className={`composer-mention ${
-                  index === activeMentionIndex ? 'composer-mention-active' : ''
-                }`}
-                // onMouseDown (not onClick) so the textarea keeps focus and the
-                // blur doesn't fire before the selection is applied.
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  applyMention(suggestion);
-                }}
-                onMouseEnter={() => setMentionIndex(index)}
-              >
-                {symbolMention ? (
-                  <span className="composer-mention-symbol">{suggestion}</span>
-                ) : (
-                  suggestion
-                )}
-              </li>
-            ))}
+            {mentionSuggestions.map((suggestion, index) => {
+              // Mode entries carry a "<name> mode" hint so they read apart
+              // from file paths; picking one switches to that mode on submit.
+              const mode = modeMentionSuggestions.find(
+                (candidate) => candidate.id === suggestion
+              );
+              return (
+                <li
+                  key={suggestion}
+                  role="option"
+                  aria-selected={index === activeMentionIndex}
+                  className={`composer-mention ${
+                    index === activeMentionIndex
+                      ? 'composer-mention-active'
+                      : ''
+                  }`}
+                  // onMouseDown (not onClick) so the textarea keeps focus and the
+                  // blur doesn't fire before the selection is applied.
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    applyMention(suggestion);
+                  }}
+                  onMouseEnter={() => setMentionIndex(index)}
+                >
+                  {symbolMention ? (
+                    <span className="composer-mention-symbol">
+                      {suggestion}
+                    </span>
+                  ) : (
+                    suggestion
+                  )}
+                  {mode ? (
+                    <span className="composer-command-desc">
+                      {mode.name} mode
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         ) : null}
         <textarea

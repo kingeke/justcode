@@ -8,6 +8,7 @@ import {
   listFileSymbols,
   type SymbolBlock,
 } from '@core/application/symbol-extraction';
+import type { ChatMode } from '@core/domain/chat-mode';
 import type { MessageAttachment } from '@core/domain/message';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 
@@ -265,6 +266,79 @@ export function applySymbolSuggestion(content: string, symbol: string): string {
     /(@[^\s@]*?::)[^\s@:]*$/,
     `$1${symbol.replaceAll('$', '$$$$')} `
   );
+}
+
+/**
+ * Filters the chat modes against the partial `@query`, matching the mode's id
+ * or name (case-insensitive). An empty query lists every mode so `@` alone
+ * surfaces them alongside files. Returns the matching modes in their original
+ * order — mode lists are short, so no cap is applied.
+ */
+export function filterModeSuggestions(
+  modes: readonly ChatMode[],
+  query: string | undefined
+): ChatMode[] {
+  if (query === undefined) {
+    return [];
+  }
+
+  const normalizedQuery = query.toLowerCase();
+  if (!normalizedQuery) {
+    return [...modes];
+  }
+
+  return modes.filter((mode) => {
+    const id = mode.id.toLowerCase();
+    const name = mode.name.toLowerCase();
+    return (
+      id.startsWith(normalizedQuery) ||
+      name.startsWith(normalizedQuery) ||
+      id.includes(normalizedQuery) ||
+      name.includes(normalizedQuery)
+    );
+  });
+}
+
+/**
+ * Detects a `@mode` mention in a prompt — a mention token that exactly matches
+ * a mode's id or (whitespace-free) name, case-insensitively. Returns the
+ * matched mode's id and the prompt with that mention removed, so the host can
+ * switch to the mode and send the rest of the message. Mode mentions take
+ * priority over same-named files; `@path::symbol` tokens are never treated as
+ * mode mentions. Returns undefined when no mode is mentioned.
+ */
+export function getModeMention(
+  content: string,
+  modes: readonly ChatMode[]
+): { modeId: string; content: string } | undefined {
+  for (const match of content.matchAll(MENTION_PATTERN)) {
+    const token = normalizeMentionPath(match[1]);
+    if (match.index === undefined || !token || token.includes('::')) {
+      continue;
+    }
+
+    const normalizedToken = token.toLowerCase();
+    const mode = modes.find(
+      (candidate) =>
+        candidate.id.toLowerCase() === normalizedToken ||
+        candidate.name.toLowerCase() === normalizedToken
+    );
+    if (!mode) {
+      continue;
+    }
+
+    // Remove just this mention (any trailing punctuation stays put and the
+    // leading separator is kept so surrounding words don't merge), then
+    // collapse the doubled whitespace it leaves.
+    const start = match.index + match[0].indexOf('@');
+    const end = start + 1 + token.length;
+    const stripped = (content.slice(0, start) + content.slice(end))
+      .replace(/[^\S\n]+/g, ' ')
+      .trim();
+    return { modeId: mode.id, content: stripped };
+  }
+
+  return undefined;
 }
 
 export function filterMentionSuggestions(

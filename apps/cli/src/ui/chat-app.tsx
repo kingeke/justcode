@@ -36,9 +36,11 @@ import {
   applyMentionSuggestion,
   applySymbolSuggestion,
   filterMentionSuggestions,
+  filterModeSuggestions,
   filterSymbolSuggestions,
   getActiveMentionQuery,
   getActiveSymbolMention,
+  getModeMention,
   hasActiveMentionTrigger,
   type PromptAttachmentService,
 } from '@core/application/prompt-attachment-service';
@@ -1229,11 +1231,24 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         tokensPerSecondAvgRef.current.avg
       )
     : lastStats;
-  const mentionSuggestions = useMemo(
+  const fileMentionSuggestions = useMemo(
     () =>
       filterMentionSuggestions(workspaceFiles, activeMentionQuery ?? undefined),
     [activeMentionQuery, workspaceFiles]
   );
+  // Chat modes matching the `@` query, offered ahead of files so `@plan`-style
+  // mentions can switch modes. Applying one inserts the mode's id.
+  const modeMentionSuggestions = useMemo(
+    () => filterModeSuggestions(modes, activeMentionQuery ?? undefined),
+    [activeMentionQuery, modes]
+  );
+  const mentionSuggestions = useMemo(() => {
+    const modeIds = new Set(modeMentionSuggestions.map((mode) => mode.id));
+    return [
+      ...modeMentionSuggestions.map((mode) => mode.id),
+      ...fileMentionSuggestions.filter((path) => !modeIds.has(path)),
+    ];
+  }, [modeMentionSuggestions, fileMentionSuggestions]);
   // A trailing `@path::query` mention switches the autocomplete from files to
   // the symbols declared in that file (fetched lazily into symbolsByPath).
   const activeSymbolMention = useMemo(
@@ -1251,7 +1266,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const showSymbolSuggestions =
     activeSymbolMention !== undefined && symbolsForPath.length > 0;
   const showMentionSuggestions =
-    activeMentionTrigger && !isCommandMode && workspaceFiles.length > 0;
+    activeMentionTrigger &&
+    !isCommandMode &&
+    (workspaceFiles.length > 0 || modes.length > 0);
   const noMentionMatches =
     activeMentionTrigger &&
     activeMentionQuery !== undefined &&
@@ -2836,12 +2853,37 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
     if (!conversation || !session) return;
 
+    // A `@mode` mention switches the active mode for this request: strip the
+    // mention, swap the mode (onModeChange applies the system prompt
+    // synchronously), then send the rest of the message in that mode.
+    let messageValue = value;
+    const modeMention = getModeMention(value, modes);
+    if (modeMention) {
+      messageValue = modeMention.content;
+      if (modeMention.modeId !== activeMode) {
+        setActiveMode(modeMention.modeId);
+        props.onModeChange?.(modeMention.modeId);
+        const mentionedMode = modes.find(
+          (mode) => mode.id === modeMention.modeId
+        );
+        setStatus(`Mode: ${mentionedMode?.name ?? modeMention.modeId}`);
+      }
+      // A bare `@mode` just switches modes; there's nothing to send.
+      if (
+        !messageValue.replace(IMAGE_MARKER_PATTERN, ' ').trim() &&
+        pendingImagesRef.current.length === 0
+      ) {
+        setInputWithCursorAtEnd('');
+        return;
+      }
+    }
+
     // Pull the staged images for this turn and strip their `[Image #n]` markers
     // from the prose — the images travel as proper image blocks, not as text.
     const turnImages: MessageImage[] = pendingImagesRef.current.map(
       ({ mediaType, data }) => ({ mediaType, data })
     );
-    const cleanedValue = value.replace(IMAGE_MARKER_PATTERN, ' ').trim();
+    const cleanedValue = messageValue.replace(IMAGE_MARKER_PATTERN, ' ').trim();
     setPendingImages([]);
 
     const requestController = new AbortController();
@@ -4525,16 +4567,24 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           </box>
         ) : !isCommandMode && showMentionSuggestions ? (
           <box marginTop={1} flexDirection="column">
-            <text fg={MUTED}>file suggestions:</text>
-            {mentionSuggestions.map((suggestion, index) => (
-              <text
-                key={suggestion}
-                {...(index === selectedSuggestionIndex ? { fg: 'cyan' } : {})}
-              >
-                {index === selectedSuggestionIndex ? '>' : ' '} @{suggestion}
-              </text>
-            ))}
-            {noMentionMatches ? <text fg={MUTED}>no file found</text> : null}
+            <text fg={MUTED}>suggestions:</text>
+            {mentionSuggestions.map((suggestion, index) => {
+              // Mode entries carry their glyph and name so they read apart
+              // from file paths; picking one switches to that mode on submit.
+              const mode = modeMentionSuggestions.find(
+                (candidate) => candidate.id === suggestion
+              );
+              return (
+                <text
+                  key={suggestion}
+                  {...(index === selectedSuggestionIndex ? { fg: 'cyan' } : {})}
+                >
+                  {index === selectedSuggestionIndex ? '>' : ' '} @{suggestion}
+                  {mode ? ` ${modeGlyph(mode.icon)} ${mode.name} mode` : ''}
+                </text>
+              );
+            })}
+            {noMentionMatches ? <text fg={MUTED}>no match found</text> : null}
           </box>
         ) : null}
 

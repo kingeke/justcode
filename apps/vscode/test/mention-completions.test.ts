@@ -4,10 +4,13 @@ import {
   applyMentionSuggestion,
   applySymbolSuggestion,
   filterMentionSuggestions,
+  filterModeSuggestions,
   filterSymbolSuggestions,
   getActiveMentionQuery,
   getActiveSymbolMention,
+  getModeMention,
 } from '@core/application/prompt-attachment-service';
+import { BUILT_IN_MODES } from '@core/domain/chat-mode';
 import { HostMessageType } from '@ext/shared/protocol';
 import { initialState, reducer } from '@ext/webview/state';
 
@@ -63,5 +66,33 @@ describe('mention completion parsing + apply', () => {
     expect(applySymbolSuggestion('check @src/a.ts::fo', 'foo')).toBe(
       'check @src/a.ts::foo '
     );
+  });
+});
+
+describe('mode mention completions', () => {
+  // Modes (built-in + custom) are offered by the `@` picker alongside files;
+  // applying one inserts the mode's id like any other mention.
+  it('completes a trailing @ query against the mode list', () => {
+    const query = getActiveMentionQuery('do it in @pl');
+    const matches = filterModeSuggestions(BUILT_IN_MODES, query);
+    expect(matches.map((mode) => mode.id)).toEqual(['plan']);
+    expect(applyMentionSuggestion('do it in @pl', 'plan')).toBe(
+      'do it in @plan '
+    );
+  });
+
+  it('detects the @mode mention on submit and strips it from the message', () => {
+    expect(getModeMention('@plan add dark mode', BUILT_IN_MODES)).toEqual({
+      modeId: 'plan',
+      content: 'add dark mode',
+    });
+    // A bare `@mode` submit just switches modes — nothing left to send.
+    expect(getModeMention('@ask', BUILT_IN_MODES)).toEqual({
+      modeId: 'ask',
+      content: '',
+    });
+    expect(
+      getModeMention('read @src/plan/index.ts', BUILT_IN_MODES)
+    ).toBeUndefined();
   });
 });
