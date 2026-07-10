@@ -436,6 +436,36 @@ describe('ChatSessionService', () => {
     ]);
   });
 
+  it('honors a requested model the provider offers', async () => {
+    const service = new ChatSessionService(
+      new InMemoryConversationRepository(),
+      createProviderStub()
+    );
+
+    const session = await service.startSession({
+      sessionId: 'session-1',
+      requestedModel: 'llama3.1',
+    });
+
+    expect(session.activeModel).toBe('llama3.1');
+  });
+
+  it('ignores a requested model the provider does not offer', async () => {
+    // `lastModel` is persisted across providers: a model bound while on Claude
+    // Code must not be sent to whichever provider starts up next.
+    const service = new ChatSessionService(
+      new InMemoryConversationRepository(),
+      createProviderStub()
+    );
+
+    const session = await service.startSession({
+      sessionId: 'session-1',
+      requestedModel: 'opus[1m]',
+    });
+
+    expect(session.activeModel).toBe('llama3.1');
+  });
+
   it('persists user and assistant messages to conversation history', async () => {
     const repository = new InMemoryConversationRepository();
     const service = new ChatSessionService(repository, createProviderStub());

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { createTextAttributes } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
 import { KeyName } from '@cli/ui/key-name.js';
+import type { ModelDefaults, ModelReference } from '@core/domain/model-default';
 
 const BOLD = createTextAttributes({ bold: true });
 const MUTED = '#8a8a8a';
@@ -39,6 +40,14 @@ interface SubAgentsPickerProps {
   onDelete: (id: string) => void;
   /** Persist an agent's system prompt (built-in override or custom prompt). */
   onSavePrompt: (id: string, prompt: string) => void;
+  /** Per-sub-agent default models, so each row can show its bound model. */
+  modelDefaults?: ModelDefaults;
+  /** Resolves a bound reference to a human label (provider's model name). */
+  modelLabelFor?: (reference: ModelReference | undefined) => string | undefined;
+  /** Open the model picker to bind the focused agent's default model. */
+  onSetDefaultModel?: (id: string) => void;
+  /** Clear the focused agent's default model. */
+  onClearDefaultModel?: (id: string) => void;
   onCancel: () => void;
 }
 
@@ -157,6 +166,20 @@ export function SubAgentsPicker(props: SubAgentsPickerProps): React.ReactNode {
         props.onDelete(row.agent.id);
         // Keep the cursor on a valid row after the list shrinks.
         move(-1);
+      }
+      return;
+    }
+    // `d` binds a default model to the focused agent; `c` clears it. Works on
+    // built-in and custom agents alike.
+    if (key.name === KeyName.D) {
+      const row = rows[focusedIndex];
+      if (row?.kind === RowKind.Agent) props.onSetDefaultModel?.(row.agent.id);
+      return;
+    }
+    if (key.name === KeyName.C && !key.ctrl) {
+      const row = rows[focusedIndex];
+      if (row?.kind === RowKind.Agent) {
+        props.onClearDefaultModel?.(row.agent.id);
       }
       return;
     }
@@ -341,7 +364,7 @@ export function SubAgentsPicker(props: SubAgentsPickerProps): React.ReactNode {
           Sub agents
         </text>
         <text fg={MUTED}>
-          ↑↓ move · enter edit prompt
+          ↑↓ move · enter edit prompt · d default model · c clear
           {props.agents.some((agent) => agent.custom)
             ? ' · x delete custom'
             : ''}
@@ -374,6 +397,10 @@ export function SubAgentsPicker(props: SubAgentsPickerProps): React.ReactNode {
               </box>
             );
           }
+          const defaultRef = props.modelDefaults?.bySubAgent[row.agent.id];
+          const defaultLabel = defaultRef
+            ? (props.modelLabelFor?.(defaultRef) ?? defaultRef.modelId)
+            : undefined;
           return (
             <box key={`agent:${row.agent.id}`} flexDirection="row">
               <text
@@ -388,6 +415,9 @@ export function SubAgentsPicker(props: SubAgentsPickerProps): React.ReactNode {
                     : ''
                 }`}
               </text>
+              {defaultLabel ? (
+                <text fg={isFocused ? 'black' : MUTED}>{defaultLabel}</text>
+              ) : null}
             </box>
           );
         })}

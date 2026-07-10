@@ -28,6 +28,8 @@ export enum HostMessageType {
   McpStatus = 'mcpStatus',
   /** The mode list or active mode changed (select/create), without a full reload. */
   ModeUpdate = 'modeUpdate',
+  /** The per-mode/per-sub-agent default models changed (bind/clear). */
+  ModelDefaultsUpdate = 'modelDefaultsUpdate',
   /** The installed skills changed (via Settings); refresh the `/` completions. */
   SkillCommandsUpdate = 'skillCommandsUpdate',
   /** A transient status line shown above the transcript (no full reload). */
@@ -72,6 +74,9 @@ export enum WebviewMessageType {
   ToggleLazyToolLoading = 'toggleLazyToolLoading',
   SetDisabledTools = 'setDisabledTools',
   SelectMode = 'selectMode',
+  /** Bind (or clear) the default model for a mode or a sub agent. */
+  SetDefaultModel = 'setDefaultModel',
+  ClearDefaultModel = 'clearDefaultModel',
   CreateMode = 'createMode',
   /** Delete a custom mode (built-ins can never be deleted). */
   DeleteMode = 'deleteMode',
@@ -453,6 +458,8 @@ export interface ReadyMessage {
   modes: WebviewMode[];
   /** Id of the active chat mode. */
   activeModeId: string;
+  /** Per-mode/per-sub-agent default models, for the pickers. */
+  modelDefaults: WebviewModelDefaults;
   /**
    * Slash commands from installed skills, for the composer's `/` completions.
    * Absent/empty when no skills are installed.
@@ -588,6 +595,10 @@ export interface SubAgentActivityMessage {
   toolUseCount?: number;
   status?: WebviewSubAgentStatus;
   summary?: string;
+  /** The model id the run executes on (its default, or the fallback). */
+  model?: string;
+  /** The provider id backing {@link model}, for showing "provider · model". */
+  providerId?: string;
   /** The run's cumulative usage; set on `end` events. */
   usage?: WebviewSubAgentUsage;
   /** The run's throughput metrics; set on `end` events. */
@@ -606,6 +617,10 @@ export interface WebviewSubAgentRunSnapshot {
   status: WebviewSubAgentStatus;
   toolUseCount: number;
   summary?: string;
+  /** The model id the run executed on (its default, or the fallback). */
+  model?: string;
+  /** The provider id backing {@link model}. */
+  providerId?: string;
   /** Epoch ms, matching the live SubAgentRunView timestamps. */
   startedAt: number;
   endedAt?: number;
@@ -692,6 +707,10 @@ export interface ModelsUpdateMessage {
   models: WebviewModel[];
   /** Providers whose model list couldn't be fetched, shown in the picker. */
   providerErrors: WebviewProviderError[];
+  /** The now-active model id, when this update also switched it (e.g. a mode default). */
+  activeModel?: string;
+  /** The provider backing {@link activeModel}, when it changed too. */
+  activeProviderId?: string;
 }
 
 /**
@@ -718,6 +737,33 @@ export interface ModeUpdateMessage {
   type: HostMessageType.ModeUpdate;
   modes: WebviewMode[];
   activeModeId: string;
+}
+
+/** What a default-model binding attaches to (mirrors `@core`'s ModelDefaultTarget). */
+export enum WebviewModelDefaultTarget {
+  Mode = 'mode',
+  SubAgent = 'subAgent',
+}
+
+/** A concrete provider+model pointer (mirrors `@core`'s ModelReference). */
+export interface WebviewModelReference {
+  providerId: string;
+  modelId: string;
+}
+
+/** Per-mode/per-sub-agent default models (mirrors `@core`'s ModelDefaults). */
+export interface WebviewModelDefaults {
+  byMode: Record<string, WebviewModelReference>;
+  bySubAgent: Record<string, WebviewModelReference>;
+}
+
+/**
+ * Sent when the per-mode/per-sub-agent default models change (bind/clear), so
+ * the pickers reflect the bound model without a full reload.
+ */
+export interface ModelDefaultsUpdateMessage {
+  type: HostMessageType.ModelDefaultsUpdate;
+  modelDefaults: WebviewModelDefaults;
 }
 
 /**
@@ -835,6 +881,7 @@ export type HostToWebview =
   | ModelsUpdateMessage
   | McpStatusMessage
   | ModeUpdateMessage
+  | ModelDefaultsUpdateMessage
   | SkillCommandsUpdateMessage
   | NoticeMessage
   | CompactStatusMessage
@@ -916,6 +963,26 @@ export interface SelectModelMessage {
   modelId: string;
   /** Provider the model belongs to; disambiguates ids shared across providers. */
   providerId: string;
+}
+
+/**
+ * The user bound a default model to a mode or a sub agent. Switching to that
+ * mode auto-selects the model; a sub agent runs on it (falling back on error).
+ */
+export interface SetDefaultModelMessage {
+  type: WebviewMessageType.SetDefaultModel;
+  target: WebviewModelDefaultTarget;
+  /** The mode id or sub agent id the default is bound to. */
+  id: string;
+  modelId: string;
+  providerId: string;
+}
+
+/** The user cleared a mode's or sub agent's default model. */
+export interface ClearDefaultModelMessage {
+  type: WebviewMessageType.ClearDefaultModel;
+  target: WebviewModelDefaultTarget;
+  id: string;
 }
 
 /** The user chose a reasoning effort for a model (or "off" to disable it). */
@@ -1209,6 +1276,8 @@ export type WebviewToHost =
   | ApprovalResponseMessage
   | UserInputResponseMessage
   | SelectModelMessage
+  | SetDefaultModelMessage
+  | ClearDefaultModelMessage
   | SetReasoningEffortMessage
   | RefreshModelsMessage
   | ViewChatLogMessage

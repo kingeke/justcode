@@ -127,6 +127,14 @@ import {
   resolveModeSystemPrompt,
   type CustomModeConfig,
 } from '@core/domain/chat-mode';
+import {
+  defaultModelForMode,
+  resolveDefaultModel,
+  setModeDefaultModel,
+  setSubAgentDefaultModel,
+  type ModelDefaults,
+} from '@core/domain/model-default';
+import { WebviewModelDefaultTarget } from '@ext/shared/protocol';
 
 /** Longest tool-result snippet we forward to the webview as a preview. */
 const RESULT_PREVIEW_LIMIT = 2000;
@@ -297,6 +305,10 @@ export class ChatBridge {
   private askPrompt: string | undefined;
   private planPrompt: string | undefined;
   private customModesConfig: Record<string, CustomModeConfig> = {};
+  // Per-mode/per-sub-agent default models. Switching to a mode with a default
+  // auto-selects its model; binding/clearing persists to config and pushes the
+  // new map into the runtime so the task tool (sub agents) picks it up.
+  private modelDefaults: ModelDefaults = { byMode: {}, bySubAgent: {} };
   // Workspace-relative path of the file open in the editor, which `@currentfile`
   // resolves to. Kept in sync by the view provider as the active editor changes;
   // re-applied to the runtime whenever services are (re)created.
@@ -371,7 +383,12 @@ export class ChatBridge {
      */
     private readonly isWindowFocused: () => boolean = () => true,
     /** Absolute path to the app logo for OS notifications, when available. */
-    private readonly notificationIconPath?: string
+    private readonly notificationIconPath?: string,
+    /**
+     * Notifies the host that a default model binding changed here, so an open
+     * Settings tab re-reads it instead of showing a stale value.
+     */
+    private readonly onModelDefaultsChanged?: () => void
   ) {
     // The extension host's cwd isn't the workspace, and anchoring to the
     // workspace root would scatter a debug.log into every project (and force the
@@ -514,6 +531,15 @@ export class ChatBridge {
         return;
       case WebviewMessageType.SelectMode:
         await this.selectMode(message.modeId);
+        return;
+      case WebviewMessageType.SetDefaultModel:
+        await this.setDefaultModel(message.target, message.id, {
+          providerId: message.providerId,
+          modelId: message.modelId,
+        });
+        return;
+      case WebviewMessageType.ClearDefaultModel:
+        await this.setDefaultModel(message.target, message.id, undefined);
         return;
       case WebviewMessageType.CreateMode:
         await this.createMode(message.name, message.systemPrompt);
@@ -808,6 +834,10 @@ export class ChatBridge {
     this.planPrompt = globalConfig.planSystemPrompt;
     this.customModesConfig = customModes;
     this.modes = listModes(customModes);
+    this.modelDefaults = {
+      byMode: globalConfig.modelDefaults?.byMode ?? {},
+      bySubAgent: globalConfig.modelDefaults?.bySubAgent ?? {},
+    };
     this.activeModeId = isKnownMode(globalConfig.mode ?? '', customModes)
       ? (globalConfig.mode as string)
       : BUILD_MODE_ID;
@@ -857,6 +887,7 @@ export class ChatBridge {
         mcpLoading: this.mcpLoading,
         modes: this.modes,
         activeModeId: this.activeModeId,
+        modelDefaults: this.modelDefaults,
         skillCommands: this.webviewSkillCommands,
         reasoningEffortByModel: this.reasoningEffortByModel,
         workspaceRoot: this.workspaceRoot,
@@ -921,6 +952,7 @@ export class ChatBridge {
         mcpLoading: this.mcpLoading,
         modes: this.modes,
         activeModeId: this.activeModeId,
+        modelDefaults: this.modelDefaults,
         skillCommands: this.webviewSkillCommands,
         reasoningEffortByModel: this.reasoningEffortByModel,
         workspaceRoot: this.workspaceRoot,
@@ -987,6 +1019,7 @@ export class ChatBridge {
         mcpLoading: this.mcpLoading,
         modes: this.modes,
         activeModeId: this.activeModeId,
+        modelDefaults: this.modelDefaults,
         skillCommands: this.webviewSkillCommands,
         reasoningEffortByModel: this.reasoningEffortByModel,
         workspaceRoot: this.workspaceRoot,
@@ -1055,6 +1088,7 @@ export class ChatBridge {
         mcpLoading: this.mcpLoading,
         modes: this.modes,
         activeModeId: this.activeModeId,
+        modelDefaults: this.modelDefaults,
         skillCommands: this.webviewSkillCommands,
         reasoningEffortByModel: this.reasoningEffortByModel,
         workspaceRoot: this.workspaceRoot,
@@ -1486,6 +1520,8 @@ export class ChatBridge {
               ? { status: event.status as string as WebviewSubAgentStatus }
               : {}),
             ...(event.summary !== undefined ? { summary: event.summary } : {}),
+            ...(event.model ? { model: event.model } : {}),
+            ...(event.providerId ? { providerId: event.providerId } : {}),
             ...(event.usage ? { usage: event.usage } : {}),
             ...(event.stats ? { stats: event.stats } : {}),
           };
@@ -2333,6 +2369,7 @@ export class ChatBridge {
           mcpLoading: this.mcpLoading,
           modes: this.modes,
           activeModeId: this.activeModeId,
+          modelDefaults: this.modelDefaults,
           skillCommands: this.webviewSkillCommands,
           reasoningEffortByModel: this.reasoningEffortByModel,
           workspaceRoot: this.workspaceRoot,
@@ -3062,6 +3099,17 @@ export class ChatBridge {
     // Created/edited/deleted custom sub agents reach the task tool on its next
     // call (schema and runs alike).
     this.services?.setCustomSubAgents(config.customSubAgents ?? {});
+    // Default models bound in Settings reach the task tool (sub agents) on the
+    // next run, and the mode default is applied by `applyMode` below.
+    this.modelDefaults = {
+      byMode: config.modelDefaults?.byMode ?? {},
+      bySubAgent: config.modelDefaults?.bySubAgent ?? {},
+    };
+    this.services?.setModelDefaults(this.modelDefaults);
+    this.post({
+      type: HostMessageType.ModelDefaultsUpdate,
+      modelDefaults: this.modelDefaults,
+    });
     this.customModesConfig = config.customModes ?? {};
     this.modes = listModes(this.customModesConfig);
     if (!isKnownMode(this.activeModeId, this.customModesConfig)) {
@@ -3149,6 +3197,75 @@ export class ChatBridge {
       modes: this.modes,
       activeModeId: this.activeModeId,
     });
+    // Apply the mode's bound default model, if any (kept if none/unavailable).
+    void this.applyModeDefaultModel(modeId);
+  }
+
+  /**
+   * Switches the session to the mode's bound default model when it has one and
+   * the model is available on its provider. A mode without a default (or whose
+   * default is unavailable) leaves the current model untouched. Notifies the
+   * webview of the new active model via a ModelsUpdate.
+   */
+  private async applyModeDefaultModel(modeId: string): Promise<void> {
+    const target = resolveDefaultModel(
+      defaultModelForMode(modeId, this.modelDefaults),
+      this.models
+    );
+    if (!target) return;
+    if (
+      target.id === this.activeModel &&
+      target.providerId === this.services?.providerId
+    ) {
+      return;
+    }
+    this.activeModel = target.id;
+    await this.switchToProvider(target.providerId);
+    await this.persistModelSelection(target.id, target.providerId);
+    this.post({
+      type: HostMessageType.ModelsUpdate,
+      models: this.models.map(toWebviewModel),
+      providerErrors: this.providerErrors,
+      activeModel: target.id,
+      activeProviderId: target.providerId,
+    });
+  }
+
+  /**
+   * Binds (or clears, when `reference` is undefined) the default model for a
+   * mode or a sub agent: updates the in-memory map, pushes it into the runtime
+   * (so the task tool picks it up), persists it to config, and echoes the new
+   * defaults to the webview.
+   */
+  private async setDefaultModel(
+    target: WebviewModelDefaultTarget,
+    id: string,
+    reference: { providerId: string; modelId: string } | undefined
+  ): Promise<void> {
+    const ref = reference
+      ? {
+          providerId: reference.providerId as ProviderId,
+          modelId: reference.modelId,
+        }
+      : undefined;
+    this.modelDefaults =
+      target === WebviewModelDefaultTarget.Mode
+        ? setModeDefaultModel(id, ref, this.modelDefaults)
+        : setSubAgentDefaultModel(id, ref, this.modelDefaults);
+    this.services?.setModelDefaults(this.modelDefaults);
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      modelDefaults: this.modelDefaults,
+    });
+    this.post({
+      type: HostMessageType.ModelDefaultsUpdate,
+      modelDefaults: this.modelDefaults,
+    });
+    // An open Settings tab shows the same bindings; refresh it so its cards
+    // don't keep showing the previous default.
+    this.onModelDefaultsChanged?.();
   }
 
   /**
@@ -3294,6 +3411,7 @@ export class ChatBridge {
         mcpLoading: this.mcpLoading,
         modes: this.modes,
         activeModeId: this.activeModeId,
+        modelDefaults: this.modelDefaults,
         skillCommands: this.webviewSkillCommands,
         reasoningEffortByModel: this.reasoningEffortByModel,
         workspaceRoot: this.workspaceRoot,
@@ -3523,6 +3641,8 @@ export function toSubAgentSnapshots(
       (message) => message.role === MessageRole.Tool
     ).length,
     ...(run.summary !== undefined ? { summary: run.summary } : {}),
+    ...(run.model ? { model: run.model } : {}),
+    ...(run.providerId ? { providerId: run.providerId } : {}),
     startedAt: Date.parse(run.startedAt),
     ...(run.endedAt !== undefined ? { endedAt: Date.parse(run.endedAt) } : {}),
     ...(run.usage ? { usage: run.usage } : {}),

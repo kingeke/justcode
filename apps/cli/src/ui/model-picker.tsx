@@ -59,6 +59,8 @@ interface ModelPickerProps {
    * alone is ambiguous. Optional: when absent, the marker falls back to id-only.
    */
   currentProviderId?: ProviderId | undefined;
+  /** Heading shown above the list; defaults to "Select a model". */
+  title?: string;
   onSelect: (model: ModelInfo) => void;
   onCancel: () => void;
 }
@@ -264,7 +266,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
     >
       <box marginBottom={1}>
         <text fg="cyan" attributes={BOLD}>
-          Select model
+          {props.title ?? 'Select model'}
         </text>
       </box>
 

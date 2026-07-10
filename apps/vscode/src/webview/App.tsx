@@ -5,6 +5,7 @@ import {
   HostMessageType,
   SettingsSection,
   WebviewMessageType,
+  WebviewModelDefaultTarget,
   WebviewRole,
   type WebviewFileAttachment,
   type WebviewImage,
@@ -78,6 +79,14 @@ export function App(): React.JSX.Element {
   // "show earlier" button (or a sidebar jump to a hidden message) reveals the
   // full history. Reset per session.
   const [showAllMessages, setShowAllMessages] = React.useState(false);
+  // When set, the model picker binds the chosen model as this mode's/sub
+  // agent's default instead of switching the session to it.
+  const [modelDefaultTarget, setModelDefaultTarget] = React.useState<{
+    target: WebviewModelDefaultTarget;
+    id: string;
+    /** Display name of the mode/sub agent, for the picker's header. */
+    name: string;
+  } | null>(null);
   React.useEffect(() => setShowAllMessages(false), [state.sessionId]);
   // A sidebar jump whose target message is still hidden by the window: reveal
   // everything first, then scroll once the target has mounted.
@@ -761,6 +770,19 @@ export function App(): React.JSX.Element {
   };
 
   const selectModel = (model: WebviewModel): void => {
+    // "Set default" context: bind the chosen model as a mode's/sub agent's
+    // default instead of switching the session to it.
+    if (modelDefaultTarget) {
+      postToHost({
+        type: WebviewMessageType.SetDefaultModel,
+        target: modelDefaultTarget.target,
+        id: modelDefaultTarget.id,
+        modelId: model.id,
+        providerId: model.providerId,
+      });
+      setModelDefaultTarget(null);
+      return;
+    }
     dispatch({
       type: LocalActionType.SelectModel,
       modelId: model.id,
@@ -771,6 +793,23 @@ export function App(): React.JSX.Element {
       modelId: model.id,
       providerId: model.providerId,
     });
+  };
+
+  // Opens the model picker to bind a default model to a mode or sub agent.
+  const setDefaultModelFor = (
+    target: WebviewModelDefaultTarget,
+    id: string,
+    name: string
+  ): void => {
+    setModelDefaultTarget({ target, id, name });
+    dispatch({ type: LocalActionType.SetView, view: 'model-picker' });
+  };
+
+  const clearDefaultModelFor = (
+    target: WebviewModelDefaultTarget,
+    id: string
+  ): void => {
+    postToHost({ type: WebviewMessageType.ClearDefaultModel, target, id });
   };
 
   const setReasoningEffort = (
@@ -878,6 +917,7 @@ export function App(): React.JSX.Element {
   };
 
   const closeModelPicker = (): void => {
+    setModelDefaultTarget(null);
     dispatch({ type: LocalActionType.SetView, view: 'chat' });
   };
 
@@ -1141,12 +1181,31 @@ export function App(): React.JSX.Element {
   }
 
   if (state.view === 'model-picker') {
+    // In "set default" context the highlighted row is the target's bound model
+    // (not the session's active one): the user is editing that mode's/agent's
+    // binding, which may differ from the model they're currently on.
+    const boundDefault = modelDefaultTarget
+      ? modelDefaultTarget.target === WebviewModelDefaultTarget.Mode
+        ? state.modelDefaults.byMode[modelDefaultTarget.id]
+        : state.modelDefaults.bySubAgent[modelDefaultTarget.id]
+      : undefined;
     return (
       <ModelPickerView
         models={state.models}
         providerErrors={state.providerErrors}
-        activeModel={state.activeModel}
-        activeProviderId={state.providerId}
+        activeModel={
+          modelDefaultTarget ? boundDefault?.modelId : state.activeModel
+        }
+        activeProviderId={
+          modelDefaultTarget ? boundDefault?.providerId : state.providerId
+        }
+        title={
+          modelDefaultTarget
+            ? modelDefaultTarget.target === WebviewModelDefaultTarget.Mode
+              ? `Set ${modelDefaultTarget.name} Mode Default Model`
+              : `Set ${modelDefaultTarget.name} Subagent Default Model`
+            : undefined
+        }
         onSelect={(model) => {
           selectModel(model);
           closeModelPicker();
@@ -1236,9 +1295,18 @@ export function App(): React.JSX.Element {
     mcpLoading: state.mcpLoading,
     modes: state.modes,
     activeModeId: state.activeModeId,
+    modelDefaults: state.modelDefaults,
     onSelectMode: selectMode,
     onCreateMode: createMode,
     onDeleteMode: deleteMode,
+    onSetModeDefaultModel: (modeId: string) =>
+      setDefaultModelFor(
+        WebviewModelDefaultTarget.Mode,
+        modeId,
+        state.modes.find((m) => m.id === modeId)?.name ?? modeId
+      ),
+    onClearModeDefaultModel: (modeId: string) =>
+      clearDefaultModelFor(WebviewModelDefaultTarget.Mode, modeId),
     onToggleAutoApprove: toggleAutoApprove,
     onToggleExpandTools: toggleExpandTools,
     onToggleThinkingCollapsed: toggleThinkingCollapsed,

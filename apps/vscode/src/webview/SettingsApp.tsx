@@ -12,6 +12,8 @@ import {
   SUB_AGENT_PROMPT_ID_PREFIX,
   type SettingsAppInfo,
   type SettingsMcpServerStatus,
+  type SettingsModelOption,
+  type SettingsModelReference,
   type SettingsPromptInfo,
   type SettingsSkill,
   type SettingsSkillScope,
@@ -134,6 +136,10 @@ export function SettingsApp(): React.JSX.Element {
   const [prompts, setPrompts] = React.useState<
     SettingsPromptInfo[] | undefined
   >();
+  // Models offered by the prompt cards' default-model pickers.
+  const [promptModels, setPromptModels] = React.useState<SettingsModelOption[]>(
+    []
+  );
   const [promptSaving, setPromptSaving] = React.useState(false);
   const [promptSaveState, setPromptSaveState] = React.useState<
     PromptSaveState | undefined
@@ -197,6 +203,7 @@ export function SettingsApp(): React.JSX.Element {
           break;
         case SettingsHostMessageType.Prompts:
           setPrompts(message.prompts);
+          setPromptModels(message.models);
           break;
         case SettingsHostMessageType.PromptSaveResult:
           setPromptSaving(false);
@@ -277,13 +284,18 @@ export function SettingsApp(): React.JSX.Element {
     });
   };
 
-  const createMode = (name: string, prompt: string): void => {
+  const createMode = (
+    name: string,
+    prompt: string,
+    defaultModel: SettingsModelReference | undefined
+  ): void => {
     setPromptSaving(true);
     setPromptSaveState(undefined);
     postSettingsToHost({
       type: SettingsWebviewMessageType.CreateMode,
       name,
       prompt,
+      ...(defaultModel ? { defaultModel } : {}),
     });
   };
 
@@ -291,7 +303,8 @@ export function SettingsApp(): React.JSX.Element {
     name: string,
     summary: string,
     prompt: string,
-    readOnly: boolean
+    readOnly: boolean,
+    defaultModel: SettingsModelReference | undefined
   ): void => {
     setPromptSaving(true);
     setPromptSaveState(undefined);
@@ -301,6 +314,7 @@ export function SettingsApp(): React.JSX.Element {
       summary,
       prompt,
       readOnly,
+      ...(defaultModel ? { defaultModel } : {}),
     });
   };
 
@@ -310,6 +324,26 @@ export function SettingsApp(): React.JSX.Element {
     postSettingsToHost({
       type: SettingsWebviewMessageType.DeleteMode,
       modeId,
+    });
+  };
+
+  const setPromptDefaultModel = (
+    promptId: string,
+    modelId: string,
+    providerId: string
+  ): void => {
+    postSettingsToHost({
+      type: SettingsWebviewMessageType.SetPromptDefaultModel,
+      promptId,
+      modelId,
+      providerId,
+    });
+  };
+
+  const clearPromptDefaultModel = (promptId: string): void => {
+    postSettingsToHost({
+      type: SettingsWebviewMessageType.ClearPromptDefaultModel,
+      promptId,
     });
   };
 
@@ -442,12 +476,15 @@ export function SettingsApp(): React.JSX.Element {
           ) : tab === Tab.Prompts ? (
             <PromptsTab
               prompts={prompts}
+              models={promptModels}
               saving={promptSaving}
               saveState={promptSaveState}
               onSave={savePrompt}
               onCreate={createMode}
               onCreateSubAgent={createSubAgent}
               onDelete={deleteMode}
+              onSetDefaultModel={setPromptDefaultModel}
+              onClearDefaultModel={clearPromptDefaultModel}
             />
           ) : (
             <AboutTab appInfo={appInfo} />
@@ -1803,25 +1840,41 @@ enum PromptSection {
 
 function PromptsTab({
   prompts,
+  models,
   saving,
   saveState,
   onSave,
   onCreate,
   onCreateSubAgent,
   onDelete,
+  onSetDefaultModel,
+  onClearDefaultModel,
 }: {
   prompts: SettingsPromptInfo[] | undefined;
+  /** Models that can be bound as a mode's/sub agent's default. */
+  models: SettingsModelOption[];
   saving: boolean;
   saveState: PromptSaveState | undefined;
   onSave: (modeId: string, prompt: string) => void;
-  onCreate: (name: string, prompt: string) => void;
+  onCreate: (
+    name: string,
+    prompt: string,
+    defaultModel: SettingsModelReference | undefined
+  ) => void;
   onCreateSubAgent: (
     name: string,
     summary: string,
     prompt: string,
-    readOnly: boolean
+    readOnly: boolean,
+    defaultModel: SettingsModelReference | undefined
   ) => void;
   onDelete: (modeId: string) => void;
+  onSetDefaultModel: (
+    promptId: string,
+    modelId: string,
+    providerId: string
+  ) => void;
+  onClearDefaultModel: (promptId: string) => void;
 }): React.JSX.Element {
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [section, setSection] = React.useState<PromptSection>(
@@ -1921,6 +1974,7 @@ function PromptsTab({
           <CreateModeForm
             saving={saving}
             saveState={saveState}
+            models={models}
             onCreate={onCreate}
             onDone={() => setShowCreateForm(false)}
           />
@@ -1931,6 +1985,7 @@ function PromptsTab({
           <CreateSubAgentForm
             saving={saving}
             saveState={saveState}
+            models={models}
             onCreate={onCreateSubAgent}
             onDone={() => setShowCreateSubAgentForm(false)}
           />
@@ -1949,6 +2004,9 @@ function PromptsTab({
             saving={saving}
             saveState={saveState?.modeId === prompt.id ? saveState : undefined}
             onSave={onSave}
+            models={models}
+            onSetDefaultModel={onSetDefaultModel}
+            onClearDefaultModel={onClearDefaultModel}
             {...(prompt.custom ? { onDelete } : {})}
           />
         ))}
@@ -1960,16 +2018,20 @@ function PromptsTab({
 function CreateSubAgentForm({
   saving,
   saveState,
+  models,
   onCreate,
   onDone,
 }: {
   saving: boolean;
   saveState: PromptSaveState | undefined;
+  /** Models that can be bound as the new sub agent's default. */
+  models: SettingsModelOption[];
   onCreate: (
     name: string,
     summary: string,
     prompt: string,
-    readOnly: boolean
+    readOnly: boolean,
+    defaultModel: SettingsModelReference | undefined
   ) => void;
   onDone: () => void;
 }): React.JSX.Element {
@@ -1977,6 +2039,7 @@ function CreateSubAgentForm({
   const [summary, setSummary] = React.useState('');
   const [prompt, setPrompt] = React.useState('');
   const [readOnly, setReadOnly] = React.useState(false);
+  const [defaultModel, setDefaultModel] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   // Only react to save results for a create this form submitted, not to a
   // PromptCard save that happens to land while the form is open.
@@ -1998,7 +2061,13 @@ function CreateSubAgentForm({
     }
     setError(null);
     submittedRef.current = true;
-    onCreate(trimmedName, summary, prompt, readOnly);
+    onCreate(
+      trimmedName,
+      summary,
+      prompt,
+      readOnly,
+      parseModelOptionValue(defaultModel)
+    );
   };
 
   return (
@@ -2060,6 +2129,24 @@ function CreateSubAgentForm({
           onChange={(e) => setPrompt(e.target.value)}
         />
       </div>
+      <div className="prompt-default-model">
+        <label
+          className="prompt-default-model-label"
+          htmlFor="create-subagent-default-model"
+        >
+          Default model
+        </label>
+        <ModelSelect
+          id="create-subagent-default-model"
+          models={models}
+          value={defaultModel}
+          onChange={setDefaultModel}
+        />
+        <span className="prompt-default-model-hint">
+          Runs this sub agent on the model; falls back to the current model on
+          error.
+        </span>
+      </div>
       <label className="settings-checkbox">
         <input
           type="checkbox"
@@ -2085,16 +2172,24 @@ function CreateSubAgentForm({
 function CreateModeForm({
   saving,
   saveState,
+  models,
   onCreate,
   onDone,
 }: {
   saving: boolean;
   saveState: PromptSaveState | undefined;
-  onCreate: (name: string, prompt: string) => void;
+  /** Models that can be bound as the new mode's default. */
+  models: SettingsModelOption[];
+  onCreate: (
+    name: string,
+    prompt: string,
+    defaultModel: SettingsModelReference | undefined
+  ) => void;
   onDone: () => void;
 }): React.JSX.Element {
   const [name, setName] = React.useState('');
   const [prompt, setPrompt] = React.useState('');
+  const [defaultModel, setDefaultModel] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   // Only react to save results for a create this form submitted, not to a
   // PromptCard save that happens to land while the form is open.
@@ -2116,7 +2211,7 @@ function CreateModeForm({
     }
     setError(null);
     submittedRef.current = true;
-    onCreate(trimmedName, prompt);
+    onCreate(trimmedName, prompt, parseModelOptionValue(defaultModel));
   };
 
   return (
@@ -2141,14 +2236,36 @@ function CreateModeForm({
           spellCheck={false}
         />
       </div>
-      <textarea
-        className="prompt-editor"
-        value={prompt}
-        spellCheck={false}
-        placeholder="System prompt — leave empty to use the Build prompt…"
-        onChange={(e) => setPrompt(e.target.value)}
-        aria-label="New mode system prompt"
-      />
+      <div className="provider-connect-field">
+        <label className="provider-connect-label" htmlFor="create-mode-prompt">
+          System prompt
+        </label>
+        <textarea
+          id="create-mode-prompt"
+          className="prompt-editor"
+          value={prompt}
+          spellCheck={false}
+          placeholder="System prompt — leave empty to use the Build prompt…"
+          onChange={(e) => setPrompt(e.target.value)}
+        />
+      </div>
+      <div className="prompt-default-model">
+        <label
+          className="prompt-default-model-label"
+          htmlFor="create-mode-default-model"
+        >
+          Default model
+        </label>
+        <ModelSelect
+          id="create-mode-default-model"
+          models={models}
+          value={defaultModel}
+          onChange={setDefaultModel}
+        />
+        <span className="prompt-default-model-hint">
+          Switching to this mode selects the model.
+        </span>
+      </div>
       {error ? <p className="provider-connect-error">{error}</p> : null}
       <div className="mcp-actions">
         <button
@@ -2163,6 +2280,141 @@ function CreateModeForm({
   );
 }
 
+/** Encodes a model option as a `<select>` value (ids alone aren't unique). */
+function modelOptionValue(providerId: string, modelId: string): string {
+  return `${providerId}::${modelId}`;
+}
+
+/** Decodes a `<select>` value back to a reference; '' (no selection) → undefined. */
+function parseModelOptionValue(
+  value: string
+): SettingsModelReference | undefined {
+  if (!value) return undefined;
+  const separator = value.indexOf('::');
+  return {
+    providerId: value.slice(0, separator),
+    modelId: value.slice(separator + 2),
+  };
+}
+
+/**
+ * A `<select>` of every configured provider's models, grouped by provider so the
+ * same model id under two providers stays distinct. The blank option means "no
+ * default — use the current model".
+ */
+function ModelSelect({
+  id,
+  models,
+  value,
+  onChange,
+}: {
+  id: string;
+  models: SettingsModelOption[];
+  /** `providerId::modelId`, or '' for no selection. */
+  value: string;
+  onChange: (value: string) => void;
+}): React.JSX.Element {
+  const byProvider = new Map<string, SettingsModelOption[]>();
+  for (const model of models) {
+    const group = byProvider.get(model.providerName);
+    if (group) group.push(model);
+    else byProvider.set(model.providerName, [model]);
+  }
+
+  return (
+    <select
+      id={id}
+      className="prompt-default-model-select"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">
+        {models.length === 0
+          ? 'No models available'
+          : 'None (use the current model)'}
+      </option>
+      {[...byProvider.entries()].map(([providerName, group]) => (
+        <optgroup key={providerName} label={providerName}>
+          {group.map((model) => (
+            <option
+              key={modelOptionValue(model.providerId, model.id)}
+              value={modelOptionValue(model.providerId, model.id)}
+            >
+              {model.displayName}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
+  );
+}
+
+/**
+ * The default-model row of a mode/sub agent card: a select bound to the entry's
+ * default model, plus a Clear button when one is set. Switching to a mode with
+ * a default auto-selects that model; a sub agent runs on its default (falling
+ * back to the current model when it's unavailable).
+ */
+function DefaultModelRow({
+  prompt,
+  models,
+  onSetDefaultModel,
+  onClearDefaultModel,
+}: {
+  prompt: SettingsPromptInfo;
+  models: SettingsModelOption[];
+  onSetDefaultModel: (
+    promptId: string,
+    modelId: string,
+    providerId: string
+  ) => void;
+  onClearDefaultModel: (promptId: string) => void;
+}): React.JSX.Element {
+  const isSubAgent = prompt.id.startsWith(SUB_AGENT_PROMPT_ID_PREFIX);
+  const current = prompt.defaultModel
+    ? modelOptionValue(
+        prompt.defaultModel.providerId,
+        prompt.defaultModel.modelId
+      )
+    : '';
+
+  return (
+    <div className="prompt-default-model">
+      <label className="prompt-default-model-label" htmlFor={`dm-${prompt.id}`}>
+        Default model{' '}
+        <span className="prompt-default-model-owner">for {prompt.name}</span>
+      </label>
+      <ModelSelect
+        id={`dm-${prompt.id}`}
+        models={models}
+        value={current}
+        onChange={(value) => {
+          const reference = parseModelOptionValue(value);
+          if (!reference) {
+            onClearDefaultModel(prompt.id);
+            return;
+          }
+          onSetDefaultModel(prompt.id, reference.modelId, reference.providerId);
+        }}
+      />
+      {prompt.defaultModel ? (
+        <button
+          type="button"
+          className="provider-action"
+          onClick={() => onClearDefaultModel(prompt.id)}
+        >
+          Clear
+        </button>
+      ) : null}
+      <span className="prompt-default-model-hint">
+        {isSubAgent
+          ? 'Runs this sub agent on the model; falls back to the current model on error.'
+          : 'Switching to this mode selects the model.'}
+      </span>
+    </div>
+  );
+}
+
 function PromptCard({
   prompt,
   expanded,
@@ -2171,6 +2423,9 @@ function PromptCard({
   saveState,
   onSave,
   onDelete,
+  models,
+  onSetDefaultModel,
+  onClearDefaultModel,
 }: {
   prompt: SettingsPromptInfo;
   expanded: boolean;
@@ -2180,6 +2435,14 @@ function PromptCard({
   onSave: (modeId: string, prompt: string) => void;
   /** Delete this custom mode; absent for built-ins (they can't be deleted). */
   onDelete?: (modeId: string) => void;
+  /** Models that can be bound as this entry's default. */
+  models: SettingsModelOption[];
+  onSetDefaultModel: (
+    promptId: string,
+    modelId: string,
+    providerId: string
+  ) => void;
+  onClearDefaultModel: (promptId: string) => void;
 }): React.JSX.Element {
   const [draft, setDraft] = React.useState(prompt.prompt);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
@@ -2193,7 +2456,11 @@ function PromptCard({
   const dirty = draft !== prompt.prompt;
 
   return (
-    <div className="provider-row-wrap">
+    <div
+      className={`provider-row-wrap prompt-card${
+        expanded ? ' prompt-card-expanded' : ''
+      }`}
+    >
       <button
         type="button"
         className="provider-row prompt-row"
@@ -2228,6 +2495,14 @@ function PromptCard({
 
       {expanded ? (
         <div className="prompt-editor-wrap">
+          {prompt.supportsDefaultModel ? (
+            <DefaultModelRow
+              prompt={prompt}
+              models={models}
+              onSetDefaultModel={onSetDefaultModel}
+              onClearDefaultModel={onClearDefaultModel}
+            />
+          ) : null}
           <textarea
             className="prompt-editor"
             value={draft}

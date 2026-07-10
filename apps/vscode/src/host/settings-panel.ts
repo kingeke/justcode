@@ -26,6 +26,15 @@ import {
   writeGlobalConfig,
   type GlobalConfig,
 } from '@runtime/persistence/global-config';
+import {
+  setModeDefaultModel,
+  setSubAgentDefaultModel,
+  type ModelDefaults,
+  type ModelReference,
+} from '@core/domain/model-default';
+import { PROVIDER_BY_ID, type ProviderId } from '@core/ports/provider-catalog';
+import { ProviderRegistry } from '@runtime/bootstrap/provider-registry';
+import { loadAppConfig } from '@runtime/config/app-config';
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -38,6 +47,8 @@ import {
   type SettingsAppInfo,
   type SettingsHostToWebview,
   type SettingsMcpServerStatus,
+  type SettingsModelOption,
+  type SettingsModelReference,
   type SettingsPromptInfo,
   type SettingsWebviewToHost,
 } from '@ext/shared/settings-protocol';
@@ -144,10 +155,11 @@ export class SettingsPanel {
       void this.handle(message);
     });
 
-    // The terminal connect flow finishes out-of-band; re-send providers each
-    // time the tab regains focus so a freshly connected provider shows up.
+    // The terminal connect flow finishes out-of-band; re-send providers (and the
+    // prompts, whose default-model pickers list their models) each time the tab
+    // regains focus so a freshly connected provider shows up.
     panel.onDidChangeViewState(() => {
-      if (panel.visible) void this.sendProviders();
+      if (panel.visible) void this.sendProvidersAndPrompts();
     });
 
     panel.onDidDispose(() => {
@@ -209,7 +221,7 @@ export class SettingsPanel {
         });
         if (result.success) {
           this.onProvidersChanged();
-          await this.sendProviders();
+          await this.sendProvidersAndPrompts();
         }
         return;
       }
@@ -229,7 +241,7 @@ export class SettingsPanel {
           message.providerId
         );
         if (removed) this.onProvidersChanged();
-        await this.sendProviders();
+        await this.sendProvidersAndPrompts();
         return;
       }
       case SettingsWebviewMessageType.ResetApp: {
@@ -258,7 +270,7 @@ export class SettingsPanel {
         this.post({ type: SettingsHostMessageType.ConnectResult, ...result });
         if (result.success) {
           this.onProvidersChanged();
-          await this.sendProviders();
+          await this.sendProvidersAndPrompts();
         }
         return;
       }
@@ -275,18 +287,32 @@ export class SettingsPanel {
         await this.savePrompt(message.modeId, message.prompt);
         return;
       case SettingsWebviewMessageType.CreateMode:
-        await this.createMode(message.name, message.prompt);
+        await this.createMode(
+          message.name,
+          message.prompt,
+          toModelReference(message.defaultModel)
+        );
         return;
       case SettingsWebviewMessageType.CreateSubAgent:
         await this.createSubAgent(
           message.name,
           message.summary,
           message.prompt,
-          message.readOnly
+          message.readOnly,
+          toModelReference(message.defaultModel)
         );
         return;
       case SettingsWebviewMessageType.DeleteMode:
         await this.deleteMode(message.modeId);
+        return;
+      case SettingsWebviewMessageType.SetPromptDefaultModel:
+        await this.setPromptDefaultModel(message.promptId, {
+          providerId: message.providerId as ProviderId,
+          modelId: message.modelId,
+        });
+        return;
+      case SettingsWebviewMessageType.ClearPromptDefaultModel:
+        await this.setPromptDefaultModel(message.promptId, undefined);
         return;
       case SettingsWebviewMessageType.OpenConfigFile:
         await this.openConfigFile();
@@ -404,13 +430,47 @@ export class SettingsPanel {
     await this.sendSkills();
   }
 
+  /**
+   * Re-sends the prompt list (and the default-model bindings it carries) when
+   * something outside the panel changed them — e.g. the chat view bound a mode's
+   * default model. A no-op while the Settings tab isn't open.
+   */
+  public async refreshPrompts(): Promise<void> {
+    if (!this.panel) return;
+    await this.sendPrompts();
+  }
+
   /** Reads config and sends every mode's (effective) system prompt. */
   private async sendPrompts(): Promise<void> {
     const config = await readGlobalConfig(cacheDirectory());
     this.post({
       type: SettingsHostMessageType.Prompts,
       prompts: listPromptInfos(config),
+      models: await listDefaultModelOptions(),
     });
+  }
+
+  /**
+   * Binds (or clears, when `reference` is undefined) the default model of the
+   * mode or sub agent named by `promptId`, then re-sends the prompt list so the
+   * card shows the new binding. Sub agents are addressed as `subagent-<id>`.
+   */
+  private async setPromptDefaultModel(
+    promptId: string,
+    reference: ModelReference | undefined
+  ): Promise<void> {
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    const modelDefaults = applyPromptDefaultModel(
+      config.modelDefaults,
+      promptId,
+      reference
+    );
+    await writeGlobalConfig(configDir, { ...config, modelDefaults });
+    // The live chat session re-reads the defaults so the next mode switch (or
+    // sub agent spawn) uses the new binding without reloading the window.
+    this.onPromptsChanged();
+    await this.sendPrompts();
   }
 
   /**
@@ -493,7 +553,11 @@ export class SettingsPanel {
    * chat picker immediately via onPromptsChanged, but is not made active — the
    * user is editing settings, not switching modes.
    */
-  private async createMode(name: string, prompt: string): Promise<void> {
+  private async createMode(
+    name: string,
+    prompt: string,
+    defaultModel?: ModelReference
+  ): Promise<void> {
     const configDir = cacheDirectory();
     const config = await readGlobalConfig(configDir);
     const created = addCustomMode(name, prompt, config.customModes ?? {});
@@ -509,6 +573,15 @@ export class SettingsPanel {
     await writeGlobalConfig(configDir, {
       ...config,
       customModes: created.customModes,
+      ...(defaultModel
+        ? {
+            modelDefaults: applyPromptDefaultModel(
+              config.modelDefaults,
+              created.id,
+              defaultModel
+            ),
+          }
+        : {}),
     });
     this.onPromptsChanged();
     this.post({
@@ -529,7 +602,8 @@ export class SettingsPanel {
     name: string,
     summary: string,
     prompt: string,
-    readOnly: boolean
+    readOnly: boolean,
+    defaultModel?: ModelReference
   ): Promise<void> {
     const configDir = cacheDirectory();
     const config = await readGlobalConfig(configDir);
@@ -550,6 +624,15 @@ export class SettingsPanel {
     await writeGlobalConfig(configDir, {
       ...config,
       customSubAgents: created.customSubAgents,
+      ...(defaultModel
+        ? {
+            modelDefaults: applyPromptDefaultModel(
+              config.modelDefaults,
+              `${SUB_AGENT_PROMPT_ID_PREFIX}${created.id}`,
+              defaultModel
+            ),
+          }
+        : {}),
     });
     this.onPromptsChanged();
     this.post({
@@ -743,7 +826,7 @@ export class SettingsPanel {
     this.post({ type: SettingsHostMessageType.OAuthResult, ...result });
     if (result.success) {
       this.onProvidersChanged();
-      await this.sendProviders();
+      await this.sendProvidersAndPrompts();
     }
   }
 
@@ -752,6 +835,18 @@ export class SettingsPanel {
       type: SettingsHostMessageType.ProvidersUpdate,
       providers: await listProviders(cacheDirectory()),
     });
+  }
+
+  /**
+   * Sends the provider list and re-sends the prompts, whose default-model
+   * pickers are built from the connected providers' models. Without the second
+   * send those pickers keep the model list they were rendered with — a provider
+   * connected from the Providers tab would show "No models available" until the
+   * Settings tab was reopened.
+   */
+  private async sendProvidersAndPrompts(): Promise<void> {
+    await this.sendProviders();
+    await this.sendPrompts();
   }
 
   private post(message: SettingsHostToWebview): void {
@@ -795,6 +890,82 @@ export class SettingsPanel {
     <script nonce="${nonce}" src="${scriptUri}"></script>
   </body>
 </html>`;
+  }
+}
+
+/**
+ * The Compaction prompt's id. It rides the prompt list but isn't a chat mode,
+ * so it can't carry a default model.
+ */
+const COMPACT_PROMPT_ID = 'compact';
+
+/**
+ * Routes a System Prompts card's default-model change to the right map: a
+ * `subagent-<id>` prompt id binds under `bySubAgent`, anything else (a mode id)
+ * under `byMode`. An undefined `reference` clears the binding.
+ */
+export function applyPromptDefaultModel(
+  defaults: ModelDefaults | undefined,
+  promptId: string,
+  reference: ModelReference | undefined
+): ModelDefaults {
+  return promptId.startsWith(SUB_AGENT_PROMPT_ID_PREFIX)
+    ? setSubAgentDefaultModel(
+        promptId.slice(SUB_AGENT_PROMPT_ID_PREFIX.length),
+        reference,
+        defaults
+      )
+    : setModeDefaultModel(promptId, reference, defaults);
+}
+
+/**
+ * Narrows a webview model reference (plain data, provider id as a string) to the
+ * domain reference. Returns undefined when the webview sent no selection.
+ */
+export function toModelReference(
+  reference: SettingsModelReference | undefined
+): ModelReference | undefined {
+  return reference
+    ? {
+        providerId: reference.providerId as ProviderId,
+        modelId: reference.modelId,
+      }
+    : undefined;
+}
+
+/**
+ * Every model across the connected providers, for the default-model pickers on
+ * the System Prompts tab. Reads each provider's cached model list; a provider
+ * that can't be built or listed is skipped rather than failing the whole tab.
+ */
+async function listDefaultModelOptions(): Promise<SettingsModelOption[]> {
+  try {
+    const appConfig = await loadAppConfig();
+    const registry = new ProviderRegistry(
+      appConfig,
+      () => appConfig.localModelAutoRefresh,
+      () => appConfig.modelAutoRefresh
+    );
+    const options: SettingsModelOption[] = [];
+    for (const providerId of appConfig.configuredProviders) {
+      try {
+        const models = await registry.create(providerId).listModels();
+        const providerName = PROVIDER_BY_ID[providerId]?.name ?? providerId;
+        for (const model of models) {
+          options.push({
+            id: model.id,
+            displayName: model.displayName,
+            providerId: model.providerId,
+            providerName,
+          });
+        }
+      } catch {
+        // An unreachable provider just contributes no models.
+      }
+    }
+    return options;
+  } catch {
+    return [];
   }
 }
 
@@ -858,12 +1029,12 @@ function listPromptInfos(config: GlobalConfig): SettingsPromptInfo[] {
   });
   // The compaction prompt isn't a chat mode, but it's edited (and reset) the
   // same way, so it rides along after the built-in modes.
-  const compactEntry = BUILT_IN_PROMPTS['compact'];
+  const compactEntry = BUILT_IN_PROMPTS[COMPACT_PROMPT_ID];
   const compactOverride = config.compactPrompt;
   const compact = compactEntry
     ? [
         {
-          id: 'compact',
+          id: COMPACT_PROMPT_ID,
           name: 'Compaction',
           description:
             'Summarizes the conversation when it is compacted to free context.',
@@ -921,7 +1092,28 @@ function listPromptInfos(config: GlobalConfig): SettingsPromptInfo[] {
       overridden: false,
     })
   );
-  return [...builtIns, ...compact, ...subAgents, ...customSubAgents, ...custom];
+  const all = [
+    ...builtIns,
+    ...compact,
+    ...subAgents,
+    ...customSubAgents,
+    ...custom,
+  ];
+  // Every entry but Compaction (which isn't a mode) can carry a default model:
+  // sub agents read theirs from `bySubAgent`, modes from `byMode`.
+  return all.map((info) => {
+    if (info.id === COMPACT_PROMPT_ID) return info;
+    const reference = info.id.startsWith(SUB_AGENT_PROMPT_ID_PREFIX)
+      ? config.modelDefaults?.bySubAgent[
+          info.id.slice(SUB_AGENT_PROMPT_ID_PREFIX.length)
+        ]
+      : config.modelDefaults?.byMode[info.id];
+    return {
+      ...info,
+      supportsDefaultModel: true,
+      ...(reference ? { defaultModel: reference } : {}),
+    };
+  });
 }
 
 /**

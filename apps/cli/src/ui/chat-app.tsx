@@ -78,6 +78,13 @@ import {
   type ChatMode,
 } from '@core/domain/chat-mode';
 import {
+  defaultModelForMode,
+  resolveDefaultModel,
+  ModelDefaultTarget,
+  type ModelDefaults,
+  type ModelReference,
+} from '@core/domain/model-default';
+import {
   createMessage,
   MessageRole,
   type MessageImage,
@@ -252,12 +259,13 @@ interface ChatAppProps {
   subAgents?: SubAgentEntry[];
   /**
    * Create a custom sub agent. The host persists it and pushes it to the task
-   * tool, returning the updated list so the picker reflects it immediately.
+   * tool, returning the updated list and the new agent's id so the picker
+   * reflects it immediately (and can bind its default model).
    */
   onCreateSubAgent?: (
     name: string,
     draft: SubAgentDraft
-  ) => SubAgentEntry[] | null;
+  ) => { agents: SubAgentEntry[]; id: string } | null;
   /** Delete a custom sub agent, returning the updated list (null = refused). */
   onDeleteSubAgent?: (id: string) => SubAgentEntry[] | null;
   /**
@@ -283,6 +291,24 @@ interface ChatAppProps {
     modelId: string,
     effort: ReasoningEffort | 'off'
   ) => void;
+  /** Per-mode/per-sub-agent default models at startup. */
+  initialModelDefaults?: ModelDefaults;
+  /**
+   * Bind (or clear, with `reference: undefined`) the default model for a mode.
+   * The host persists it and pushes the new defaults into the runtime.
+   */
+  onSetModeDefaultModel?: (
+    modeId: string,
+    reference: ModelReference | undefined
+  ) => void;
+  /**
+   * Bind (or clear) the default model for a sub agent. The host persists it and
+   * pushes the new defaults into the runtime so the next run picks it up.
+   */
+  onSetSubAgentDefaultModel?: (
+    subAgentId: string,
+    reference: ModelReference | undefined
+  ) => void;
 }
 
 /** One sub agent run's live progress, shown in the sub agent panel. */
@@ -293,6 +319,10 @@ interface SubAgentPanelEntry {
   description: string;
   toolUseCount: number;
   latestActivity?: string;
+  /** The model id the run executes on (its default, or the fallback). */
+  model?: string;
+  /** The provider id backing {@link model}, for showing "provider · model". */
+  providerId?: string;
   status: SubAgentRunStatus;
   startedAt: number;
   endedAt?: number;
@@ -960,6 +990,41 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const [activeMode, setActiveMode] = useState(
     props.initialMode ?? BUILD_MODE_ID
   );
+  // Per-mode/per-sub-agent default models. Switching to a mode with a default
+  // auto-selects that model; the picker lets the user bind/clear defaults.
+  const [modelDefaults, setModelDefaults] = useState<ModelDefaults>(
+    props.initialModelDefaults ?? { byMode: {}, bySubAgent: {} }
+  );
+  // When set, the model picker binds the chosen model as this mode's/sub
+  // agent's default instead of switching the session to it.
+  const [modelDefaultTarget, setModelDefaultTarget] = useState<{
+    kind: ModelDefaultTarget;
+    id: string;
+  } | null>(null);
+
+  const setModeDefaultModelInState = (
+    modeId: string,
+    reference: ModelReference | undefined
+  ): void => {
+    setModelDefaults((current) => {
+      const byMode = { ...current.byMode };
+      if (reference) byMode[modeId] = reference;
+      else delete byMode[modeId];
+      return { byMode, bySubAgent: current.bySubAgent };
+    });
+  };
+
+  const setSubAgentDefaultModelInState = (
+    subAgentId: string,
+    reference: ModelReference | undefined
+  ): void => {
+    setModelDefaults((current) => {
+      const bySubAgent = { ...current.bySubAgent };
+      if (reference) bySubAgent[subAgentId] = reference;
+      else delete bySubAgent[subAgentId];
+      return { byMode: current.byMode, bySubAgent };
+    });
+  };
   const activeModeInfo = modes.find((mode) => mode.id === activeMode);
   const activeModeName = activeModeInfo?.name ?? 'Build';
   const activeModeIcon = activeModeInfo ? modeGlyph(activeModeInfo.icon) : '';
@@ -1574,9 +1639,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       const index = modes.findIndex((mode) => mode.id === activeMode);
       const next = modes[(index + 1) % modes.length];
       if (next) {
-        setActiveMode(next.id);
-        props.onModeChange?.(next.id);
-        setStatus(`Mode: ${next.name}`);
+        applyModeChange(next.id);
       }
       return;
     }
@@ -2005,9 +2068,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     };
   }, [props.chatSessionService, showSessionPicker]);
 
-  const handleModelSelect = (model: ModelInfo): void => {
-    setShowModelPicker(false);
-    setConnectModels(null);
+  // Switches the active model (and provider, when it differs), persisting the
+  // choice. Returns false when the provider couldn't be resolved. Shared by the
+  // model picker and by applying a mode's default model on a mode switch.
+  const switchToModel = (model: ModelInfo): boolean => {
     if (model.providerId !== activeProviderId) {
       try {
         const newProvider = resolveProviderClient(model.providerId);
@@ -2015,12 +2079,76 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         setActiveProviderId(model.providerId);
       } catch (e) {
         setError(getErrorMessage(e));
-        return;
+        return false;
       }
     }
     setActiveModel(model.id);
     setActiveModelInfo(model);
     props.onModelChange?.(model.id, model.providerId);
+    return true;
+  };
+
+  // Applies a mode's bound default model when it has one and the model is
+  // available. A mode without a default (or whose default is unavailable)
+  // leaves the current model untouched. Returns the switched-to model, if any.
+  const applyModeDefaultModel = (modeId: string): ModelInfo | undefined => {
+    const reference = defaultModelForMode(modeId, modelDefaults);
+    const target = resolveDefaultModel(reference, allModels);
+    if (!target) return undefined;
+    if (target.id === activeModel && target.providerId === activeProviderId) {
+      return undefined;
+    }
+    return switchToModel(target) ? target : undefined;
+  };
+
+  // Switches the chat mode: swaps the runtime system prompt (via the host),
+  // then applies the mode's default model when it has one. Used by every mode
+  // switch entry point (shift+tab, `/mode` picker, `@mode` mention). Returns the
+  // model it switched to, if any — `setActiveModel` won't have committed yet, so
+  // a caller that sends a request in the same tick (the `@mode` mention) must
+  // use this instead of the stale `activeModel` state.
+  const applyModeChange = (modeId: string): ModelInfo | undefined => {
+    setActiveMode(modeId);
+    props.onModeChange?.(modeId);
+    const switched = applyModeDefaultModel(modeId);
+    const mode = modes.find((m) => m.id === modeId);
+    const label = mode?.name ?? modeId;
+    setStatus(
+      switched ? `Mode: ${label} · ${switched.displayName}` : `Mode: ${label}`
+    );
+    return switched;
+  };
+
+  const handleModelSelect = (model: ModelInfo): void => {
+    setShowModelPicker(false);
+    setConnectModels(null);
+    // "Set default" context: bind the chosen model as a mode's/sub agent's
+    // default instead of switching the session to it.
+    if (modelDefaultTarget) {
+      const target = modelDefaultTarget;
+      setModelDefaultTarget(null);
+      const reference: ModelReference = {
+        providerId: model.providerId,
+        modelId: model.id,
+      };
+      if (target.kind === ModelDefaultTarget.Mode) {
+        setModeDefaultModelInState(target.id, reference);
+        props.onSetModeDefaultModel?.(target.id, reference);
+        const mode = modes.find((m) => m.id === target.id);
+        setStatus(
+          `Default model for ${mode?.name ?? target.id}: ${model.displayName}`
+        );
+      } else {
+        setSubAgentDefaultModelInState(target.id, reference);
+        props.onSetSubAgentDefaultModel?.(target.id, reference);
+        const agent = subAgents.find((a) => a.id === target.id);
+        setStatus(
+          `Default model for ${agent?.name ?? target.id}: ${model.displayName}`
+        );
+      }
+      return;
+    }
+    if (!switchToModel(model)) return;
     // First model chosen right after connecting: no session exists yet, so
     // start one now with the chosen model.
     if (!session) {
@@ -2857,16 +2985,16 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     // mention, swap the mode (onModeChange applies the system prompt
     // synchronously), then send the rest of the message in that mode.
     let messageValue = value;
+    // The model the mention's mode switched us to. `applyModeChange` switches
+    // the provider client synchronously but `activeModel` only updates on the
+    // next render, so this turn must carry the new model explicitly — otherwise
+    // it sends the old provider's model id to the new provider (a 400).
+    let modeSwitchModel: ModelInfo | undefined;
     const modeMention = getModeMention(value, modes);
     if (modeMention) {
       messageValue = modeMention.content;
       if (modeMention.modeId !== activeMode) {
-        setActiveMode(modeMention.modeId);
-        props.onModeChange?.(modeMention.modeId);
-        const mentionedMode = modes.find(
-          (mode) => mode.id === modeMention.modeId
-        );
-        setStatus(`Mode: ${mentionedMode?.name ?? modeMention.modeId}`);
+        modeSwitchModel = applyModeChange(modeMention.modeId);
       }
       // A bare `@mode` just switches modes; there's nothing to send.
       if (
@@ -3127,6 +3255,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
               ...(event.latestActivity
                 ? { latestActivity: event.latestActivity }
                 : {}),
+              ...(event.model ? { model: event.model } : {}),
+              ...(event.providerId ? { providerId: event.providerId } : {}),
               status: event.status ?? SubAgentRunStatus.Running,
               startedAt: Date.now(),
             },
@@ -3140,6 +3270,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                 ...(event.latestActivity
                   ? { latestActivity: event.latestActivity }
                   : {}),
+                ...(event.model ? { model: event.model } : {}),
+                ...(event.providerId ? { providerId: event.providerId } : {}),
                 ...(event.phase === SubAgentActivityPhase.End
                   ? {
                       status: event.status ?? SubAgentRunStatus.Completed,
@@ -3185,10 +3317,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           cleanedValue,
           requestController.signal
         );
-      const turnModel = activeModel || session.activeModel;
-      const turnProvider = activeModelInfo?.providerId ?? activeProviderId;
+      const turnModelInfo = modeSwitchModel ?? activeModelInfo;
+      const turnModel =
+        modeSwitchModel?.id ?? (activeModel || session.activeModel);
+      const turnProvider = turnModelInfo?.providerId ?? activeProviderId;
       const turnEffort = effectiveEffort(
-        activeModelInfo?.reasoning,
+        turnModelInfo?.reasoning,
         turnProvider
           ? reasoningEffortByModelRef.current[turnProvider]?.[turnModel]
           : undefined
@@ -3199,7 +3333,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         ...(skillTurn ? { systemPromptOverride: skillTurn.systemPrompt } : {}),
         ...(skillTurn?.tools ? { eagerToolNames: skillTurn.tools } : {}),
         ...(turnEffort ? { reasoningEffort: turnEffort } : {}),
-        ...(activeModelInfo?.reasoning?.mandatory
+        ...(turnModelInfo?.reasoning?.mandatory
           ? { reasoningMandatory: true }
           : {}),
         content: cleanedValue,
@@ -3556,15 +3690,41 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   };
 
   if (showModelPicker) {
+    // The model currently bound to the "set default" target, if any.
+    const boundDefaultModel = modelDefaultTarget
+      ? modelDefaultTarget.kind === ModelDefaultTarget.Mode
+        ? modelDefaults.byMode[modelDefaultTarget.id]
+        : modelDefaults.bySubAgent[modelDefaultTarget.id]
+      : undefined;
     return (
       <ModelPicker
         models={connectModels ?? allModels}
-        currentModel={activeModel}
-        currentProviderId={activeModelInfo?.providerId ?? activeProviderId}
+        // In "set default" context the picker highlights the target's bound
+        // model (not the session's active one) — the user is editing that
+        // mode's/agent's binding, which may not be the model they're on.
+        currentModel={boundDefaultModel?.modelId ?? activeModel}
+        currentProviderId={
+          boundDefaultModel?.providerId ??
+          activeModelInfo?.providerId ??
+          activeProviderId
+        }
+        {...(modelDefaultTarget
+          ? {
+              title:
+                modelDefaultTarget.kind === ModelDefaultTarget.Mode
+                  ? `Set ${modes.find((m) => m.id === modelDefaultTarget.id)?.name ?? modelDefaultTarget.id} Mode Default Model`
+                  : `Set ${subAgents.find((a) => a.id === modelDefaultTarget.id)?.name ?? modelDefaultTarget.id} Subagent Default Model`,
+            }
+          : {})}
         onSelect={handleModelSelect}
         onCancel={() => {
           setShowModelPicker(false);
           setConnectModels(null);
+          // Cancelling a "set default" picker just aborts the binding.
+          if (modelDefaultTarget) {
+            setModelDefaultTarget(null);
+            return;
+          }
           // Cancelling the post-connect picker keeps the highlighted default and
           // starts the session, so the connect flow still lands somewhere usable.
           if (!session && activeModel) {
@@ -3628,12 +3788,28 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       <ModePicker
         modes={modes}
         activeModeId={activeMode}
+        modelDefaults={modelDefaults}
+        modelLabelFor={(reference) =>
+          resolveDefaultModel(reference, allModels)?.displayName ??
+          reference?.modelId
+        }
         onSelect={(modeId) => {
           setShowModePicker(false);
+          applyModeChange(modeId);
+        }}
+        onSetDefaultModel={(modeId) => {
+          // Hand off to the model picker in "set mode default" context; the
+          // chosen model is bound as this mode's default (see the model picker
+          // render below), not switched to.
+          setShowModePicker(false);
+          setModelDefaultTarget({ kind: ModelDefaultTarget.Mode, id: modeId });
+          setShowModelPicker(true);
+        }}
+        onClearDefaultModel={(modeId) => {
+          setModeDefaultModelInState(modeId, undefined);
+          props.onSetModeDefaultModel?.(modeId, undefined);
           const mode = modes.find((m) => m.id === modeId);
-          setActiveMode(modeId);
-          props.onModeChange?.(modeId);
-          setStatus(`Mode: ${mode?.name ?? modeId}`);
+          setStatus(`Cleared default model for ${mode?.name ?? modeId}`);
         }}
         onCreate={(name, systemPrompt) => {
           const result = props.onCreateMode?.(name, systemPrompt);
@@ -3646,6 +3822,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           setActiveMode(result.modeId);
           const created = result.modes.find((m) => m.id === result.modeId);
           setStatus(`Mode: ${created?.name ?? name}`);
+          // Last create step: pick the new mode's default model (esc = none).
+          setModelDefaultTarget({
+            kind: ModelDefaultTarget.Mode,
+            id: result.modeId,
+          });
+          setShowModelPicker(true);
         }}
         onDelete={(modeId) => {
           const deleted = modes.find((m) => m.id === modeId);
@@ -3667,6 +3849,22 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     return (
       <SubAgentsPicker
         agents={subAgents}
+        modelDefaults={modelDefaults}
+        modelLabelFor={(reference) =>
+          resolveDefaultModel(reference, allModels)?.displayName ??
+          reference?.modelId
+        }
+        onSetDefaultModel={(id) => {
+          setShowSubAgentsPicker(false);
+          setModelDefaultTarget({ kind: ModelDefaultTarget.SubAgent, id });
+          setShowModelPicker(true);
+        }}
+        onClearDefaultModel={(id) => {
+          setSubAgentDefaultModelInState(id, undefined);
+          props.onSetSubAgentDefaultModel?.(id, undefined);
+          const agent = subAgents.find((a) => a.id === id);
+          setStatus(`Cleared default model for ${agent?.name ?? id}`);
+        }}
         onCreate={(name, draft) => {
           const result = props.onCreateSubAgent?.(name, draft);
           setShowSubAgentsPicker(false);
@@ -3674,8 +3872,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             setStatus('Could not create sub agent');
             return;
           }
-          setSubAgents(result);
+          setSubAgents(result.agents);
           setStatus(`Created sub agent: ${name}`);
+          // Last create step: pick the new agent's default model (esc = none).
+          setModelDefaultTarget({
+            kind: ModelDefaultTarget.SubAgent,
+            id: result.id,
+          });
+          setShowModelPicker(true);
         }}
         onDelete={(id) => {
           const deleted = subAgents.find((agent) => agent.id === id);
@@ -4343,6 +4547,19 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     tc(entry.description, {
                       fg: index === subAgentBrowseIndex ? 'cyan' : 'white',
                     }),
+                    tc(
+                      entry.model
+                        ? `  ${entry.providerId ? `${entry.providerId} · ` : ''}${
+                            allModels.find(
+                              (m) =>
+                                m.id === entry.model &&
+                                (!entry.providerId ||
+                                  m.providerId === entry.providerId)
+                            )?.displayName ?? entry.model
+                          }`
+                        : '',
+                      { fg: MUTED }
+                    ),
                     tc(
                       entry.toolUseCount > 0
                         ? `  ${entry.toolUseCount} tool use${

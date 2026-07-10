@@ -53,6 +53,31 @@ describe('settings Agents & Prompts tab', () => {
     expect(panel).toContain('description: SUB_AGENT_CONFIGS[type].summary');
   });
 
+  it('marks the open card so it can carry the accent border', () => {
+    const css = readFileSync(
+      join(process.cwd(), 'apps/vscode/src/webview/webview.css'),
+      'utf8'
+    );
+    expect(app).toContain("expanded ? ' prompt-card-expanded' : ''");
+    expect(css).toContain('.prompt-card-expanded {');
+    expect(css).toContain('border-left: 2px solid var(--vscode-focusBorder');
+  });
+
+  it('names the mode/sub agent the default-model row belongs to', () => {
+    expect(app).toContain(
+      '<span className="prompt-default-model-owner">for {prompt.name}</span>'
+    );
+  });
+
+  it('re-sends the prompts (and their model options) when providers change', () => {
+    // A freshly connected provider must reach the default-model pickers, which
+    // are rendered from the model list that rides along with the prompts.
+    expect(panel).toContain('sendProvidersAndPrompts');
+    expect(panel).not.toMatch(
+      /result\.success\)\s*{\s*this\.onProvidersChanged\(\);\s*await this\.sendProviders\(\);/
+    );
+  });
+
   it('routes custom sub agent ids through the shared prefix constant', () => {
     expect(SUB_AGENT_PROMPT_ID_PREFIX).toBe('subagent-');
     expect(panel).toContain('SUB_AGENT_PROMPT_ID_PREFIX');

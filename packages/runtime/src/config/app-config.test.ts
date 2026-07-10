@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 
 import { loadAppConfig, parseProviderId } from '@runtime/config/app-config';
 import { join } from 'node:path';
@@ -15,16 +22,21 @@ vi.mock('node:fs/promises', () => ({
   readFile: vi.fn(),
   writeFile: vi.fn(),
   chmod: vi.fn(),
+  rename: vi.fn(),
+  rm: vi.fn(),
 }));
 
 describe('loadAppConfig', () => {
   const mockConfigDir = '/mock/config';
+  const configPath = join(mockConfigDir, 'config.json');
 
   beforeEach(() => {
     vi.mocked(mkdir).mockReset();
     vi.mocked(readFile).mockReset();
     vi.mocked(writeFile).mockReset();
     vi.mocked(chmod).mockReset();
+    vi.mocked(rename).mockReset();
+    vi.mocked(rm).mockReset();
   });
 
   it('has no default provider when nothing is configured', async () => {
@@ -36,12 +48,14 @@ describe('loadAppConfig', () => {
     expect(config.configuredProviders).toEqual([]);
     expect(config.ollama.baseUrl).toBe('http://127.0.0.1:11434');
     expect(config.systemPrompt).toBe(DEFAULT_SYSTEM_PROMPT);
-    // config.json is written owner-only via writeSecureFile.
+    // config.json is staged in a temp sibling, written owner-only, then renamed
+    // over the target (see writeSecureFile).
     expect(writeFile).toHaveBeenCalledWith(
-      join(mockConfigDir, 'config.json'),
+      expect.stringContaining(`${configPath}.`),
       expect.stringContaining('systemPrompt'),
       expect.objectContaining({ encoding: 'utf8' })
     );
+    expect(rename).toHaveBeenCalledWith(expect.any(String), configPath);
   });
 
   it('defaults to OpenAI when an API key is present', async () => {
@@ -179,15 +193,16 @@ describe('loadAppConfig', () => {
     expect(config.compactPrompt).toBe(DEFAULT_COMPACT_PROMPT);
     // Missing prompts are written back so they show up in config.json.
     expect(writeFile).toHaveBeenCalledWith(
-      join(mockConfigDir, 'config.json'),
+      expect.stringContaining(`${configPath}.`),
       expect.stringContaining('askSystemPrompt'),
       expect.objectContaining({ encoding: 'utf8' })
     );
     expect(writeFile).toHaveBeenCalledWith(
-      join(mockConfigDir, 'config.json'),
+      expect.stringContaining(`${configPath}.`),
       expect.stringContaining('compactPrompt'),
       expect.objectContaining({ encoding: 'utf8' })
     );
+    expect(rename).toHaveBeenCalledWith(expect.any(String), configPath);
   });
 });
 

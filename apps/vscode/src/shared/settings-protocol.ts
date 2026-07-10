@@ -67,6 +67,10 @@ export enum SettingsWebviewMessageType {
   CreateSubAgent = 'createSubAgent',
   /** Delete a custom mode (built-ins can never be deleted). */
   DeleteMode = 'deleteMode',
+  /** Bind a default model to a mode or sub agent (by its prompt id). */
+  SetPromptDefaultModel = 'setPromptDefaultModel',
+  /** Clear a mode's or sub agent's default model. */
+  ClearPromptDefaultModel = 'clearPromptDefaultModel',
   /** Open the raw `config.json` in a VS Code editor tab. */
   OpenConfigFile = 'openConfigFile',
   /** Ask the host for the installed skills (both scopes). */
@@ -113,6 +117,27 @@ export interface SettingsPromptInfo {
   prompt: string;
   /** True when a built-in's prompt is overridden in config (reset available). */
   overridden: boolean;
+  /**
+   * Whether this entry can carry a default model. True for chat modes and sub
+   * agents; false for the Compaction prompt, which is not a mode.
+   */
+  supportsDefaultModel?: boolean;
+  /** The bound default model, when one is set for this mode/sub agent. */
+  defaultModel?: SettingsModelReference | undefined;
+}
+
+/** A provider+model pointer, mirroring `@core`'s ModelReference. */
+export interface SettingsModelReference {
+  providerId: string;
+  modelId: string;
+}
+
+/** One model the user can bind as a default, for the Settings picker. */
+export interface SettingsModelOption {
+  id: string;
+  displayName: string;
+  providerId: string;
+  providerName: string;
 }
 
 /** Where a skill is installed; mirrors `@core` SkillScope. */
@@ -213,6 +238,12 @@ export interface SettingsFocusSectionMessage {
 export interface SettingsPromptsMessage {
   type: SettingsHostMessageType.Prompts;
   prompts: SettingsPromptInfo[];
+  /**
+   * Every model across the connected providers, so a mode/sub agent card can
+   * offer a default-model picker. Empty when no provider is connected (or none
+   * could be listed) — the picker then shows nothing to choose.
+   */
+  models: SettingsModelOption[];
 }
 
 /** Outcome of a SavePrompt attempt. */
@@ -368,6 +399,8 @@ export interface SettingsCreateModeMessage {
   type: SettingsWebviewMessageType.CreateMode;
   name: string;
   prompt: string;
+  /** Bind this model as the new mode's default; omitted = no default. */
+  defaultModel?: SettingsModelReference | undefined;
 }
 
 /**
@@ -384,6 +417,8 @@ export interface SettingsCreateSubAgentMessage {
   summary: string;
   prompt: string;
   readOnly: boolean;
+  /** Bind this model as the new sub agent's default; omitted = no default. */
+  defaultModel?: SettingsModelReference | undefined;
 }
 
 /**
@@ -395,6 +430,25 @@ export interface SettingsCreateSubAgentMessage {
 export interface SettingsDeleteModeMessage {
   type: SettingsWebviewMessageType.DeleteMode;
   modeId: string;
+}
+
+/**
+ * Bind a default model to the mode (or sub agent, by its `subagent-<id>` prompt
+ * id) so switching to that mode — or spawning that sub agent — uses the model.
+ * The host persists it and replies with a fresh Prompts list.
+ */
+export interface SettingsSetPromptDefaultModelMessage {
+  type: SettingsWebviewMessageType.SetPromptDefaultModel;
+  /** A mode id, or a `subagent-<id>` prompt id. */
+  promptId: string;
+  modelId: string;
+  providerId: string;
+}
+
+/** Clear the default model bound to a mode or sub agent. */
+export interface SettingsClearPromptDefaultModelMessage {
+  type: SettingsWebviewMessageType.ClearPromptDefaultModel;
+  promptId: string;
 }
 
 /** Ask the host to open `config.json` in a VS Code editor tab. */
@@ -450,6 +504,8 @@ export type SettingsWebviewToHost =
   | SettingsCreateModeMessage
   | SettingsCreateSubAgentMessage
   | SettingsDeleteModeMessage
+  | SettingsSetPromptDefaultModelMessage
+  | SettingsClearPromptDefaultModelMessage
   | SettingsOpenConfigFileMessage
   | SettingsGetSkillsMessage
   | SettingsAddSkillMessage

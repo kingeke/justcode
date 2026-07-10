@@ -9,6 +9,7 @@ import {
   type ChatMode,
   type ModeIcon,
 } from '@core/domain/chat-mode';
+import type { ModelDefaults, ModelReference } from '@core/domain/model-default';
 
 const BOLD = createTextAttributes({ bold: true });
 const MUTED = '#8a8a8a';
@@ -42,6 +43,14 @@ interface ModePickerProps {
   onCreate: (name: string, systemPrompt?: string) => void;
   /** Delete the focused custom mode (built-ins can never be deleted). */
   onDelete?: (modeId: string) => void;
+  /** Per-mode default models, so each row can show its bound model. */
+  modelDefaults?: ModelDefaults;
+  /** Resolves a bound reference to a human label (provider's model name). */
+  modelLabelFor?: (reference: ModelReference | undefined) => string | undefined;
+  /** Open the model picker to bind the focused mode's default model. */
+  onSetDefaultModel?: (modeId: string) => void;
+  /** Clear the focused mode's default model. */
+  onClearDefaultModel?: (modeId: string) => void;
   onCancel: () => void;
 }
 
@@ -147,6 +156,18 @@ export function ModePicker(props: ModePickerProps): React.ReactNode {
       }
       return;
     }
+    // `d` binds a default model to the focused mode; `c` clears it. Works on
+    // built-in and custom modes alike.
+    if (key.name === KeyName.D) {
+      const row = rows[focusedIndex];
+      if (row?.kind === RowKind.Mode) props.onSetDefaultModel?.(row.mode.id);
+      return;
+    }
+    if (key.name === KeyName.C && !key.ctrl) {
+      const row = rows[focusedIndex];
+      if (row?.kind === RowKind.Mode) props.onClearDefaultModel?.(row.mode.id);
+      return;
+    }
     if (key.name === KeyName.Return) {
       const row = rows[focusedIndex];
       if (!row) return;
@@ -241,7 +262,7 @@ export function ModePicker(props: ModePickerProps): React.ReactNode {
           Select a mode
         </text>
         <text fg={MUTED}>
-          ↑↓ move · enter select
+          ↑↓ move · enter select · d default model · c clear
           {props.modes.some((mode) => mode.custom) ? ' · x delete custom' : ''}
           {' · esc cancel'}
         </text>
@@ -274,6 +295,10 @@ export function ModePicker(props: ModePickerProps): React.ReactNode {
           }
           const isActive = row.mode.id === props.activeModeId;
           const mark = isActive ? '[x]' : '[ ]';
+          const defaultRef = props.modelDefaults?.byMode[row.mode.id];
+          const defaultLabel = defaultRef
+            ? (props.modelLabelFor?.(defaultRef) ?? defaultRef.modelId)
+            : undefined;
           return (
             <box key={`mode:${row.mode.id}`} flexDirection="row">
               <text
@@ -284,6 +309,9 @@ export function ModePicker(props: ModePickerProps): React.ReactNode {
                 {'    '}
                 {mark} {modeGlyph(row.mode.icon)} {row.mode.name}
               </text>
+              {defaultLabel ? (
+                <text fg={isFocused ? 'black' : MUTED}>{defaultLabel}</text>
+              ) : null}
             </box>
           );
         })}

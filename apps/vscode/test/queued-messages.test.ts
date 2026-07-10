@@ -89,6 +89,7 @@ describe('queued messages', () => {
       mcpLoading: false,
       modes: [],
       activeModeId: 'build',
+      modelDefaults: { byMode: {}, bySubAgent: {} },
       workspaceRoot: '/tmp/workspace',
     });
 

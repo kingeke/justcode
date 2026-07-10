@@ -28,6 +28,7 @@ import type {
   WebviewImage,
   WebviewMode,
   WebviewModel,
+  WebviewModelDefaults,
   WebviewReasoningChoice,
   WebviewSkillCommand,
   WebviewStats,
@@ -149,12 +150,18 @@ export interface ComposerProps {
   modes: WebviewMode[];
   /** The currently active mode id. */
   activeModeId: string;
+  /** Per-mode default models, so each row can show its bound model. */
+  modelDefaults: WebviewModelDefaults;
   /** Switch the active mode. */
   onSelectMode: (modeId: string) => void;
   /** Delete a custom mode (built-ins can never be deleted). */
   onDeleteMode: (modeId: string) => void;
   /** Create a custom mode with a name and optional system prompt. */
   onCreateMode: (name: string, systemPrompt?: string) => void;
+  /** Open the model picker to bind a mode's default model. */
+  onSetModeDefaultModel: (modeId: string) => void;
+  /** Clear a mode's default model. */
+  onClearModeDefaultModel: (modeId: string) => void;
   /** Auto-compact when ctx usage reaches this percent of the window; 0 = off. */
   autoCompactThresholdPercent: number;
   /** Persist a new auto-compact threshold percent (0 = off). */
@@ -397,6 +404,18 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   );
   const activeMode = props.modes.find((m) => m.id === props.activeModeId);
   const activeModeName = activeMode?.name ?? 'Build';
+
+  // The display label for a mode's bound default model, or null when none is
+  // set. Resolves the stored provider+model reference against the model list so
+  // it shows the friendly name; falls back to the raw id if the model is gone.
+  const modeDefaultLabel = (modeId: string): string | null => {
+    const ref = props.modelDefaults.byMode[modeId];
+    if (!ref) return null;
+    const model = props.models.find(
+      (m) => m.id === ref.modelId && m.providerId === ref.providerId
+    );
+    return model?.displayName ?? ref.modelId;
+  };
 
   const submitCreateMode = (): void => {
     const name = modeNameDraft.trim();
@@ -1088,28 +1107,39 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         </div>
                         {builtInModes.map((mode) => {
                           const isCurrent = mode.id === props.activeModeId;
+                          const defaultLabel = modeDefaultLabel(mode.id);
                           return (
-                            <button
-                              key={mode.id}
-                              type="button"
-                              className="modes-item"
-                              onClick={() => {
-                                props.onSelectMode(mode.id);
-                                setShowModes(false);
-                              }}
-                            >
-                              <span
-                                className={`tools-check ${isCurrent ? 'tools-check-on' : ''}`}
+                            <div key={mode.id} className="modes-item-row">
+                              <button
+                                type="button"
+                                className="modes-item"
+                                onClick={() => {
+                                  props.onSelectMode(mode.id);
+                                  setShowModes(false);
+                                }}
                               >
-                                {isCurrent ? '✓' : ''}
-                              </span>
-                              <span className="modes-item-icon">
-                                <ModeIcon icon={mode.icon} />
-                              </span>
-                              <span className="modes-item-label">
-                                {mode.name}
-                              </span>
-                            </button>
+                                <span
+                                  className={`tools-check ${isCurrent ? 'tools-check-on' : ''}`}
+                                >
+                                  {isCurrent ? '✓' : ''}
+                                </span>
+                                <span className="modes-item-icon">
+                                  <ModeIcon icon={mode.icon} />
+                                </span>
+                                <span className="modes-item-label">
+                                  {mode.name}
+                                </span>
+                              </button>
+                              <ModeDefaultModelControl
+                                label={defaultLabel}
+                                onSet={() =>
+                                  props.onSetModeDefaultModel(mode.id)
+                                }
+                                onClear={() =>
+                                  props.onClearModeDefaultModel(mode.id)
+                                }
+                              />
+                            </div>
                           );
                         })}
                       </div>
@@ -1142,6 +1172,15 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                                     {mode.name}
                                   </span>
                                 </button>
+                                <ModeDefaultModelControl
+                                  label={modeDefaultLabel(mode.id)}
+                                  onSet={() =>
+                                    props.onSetModeDefaultModel(mode.id)
+                                  }
+                                  onClear={() =>
+                                    props.onClearModeDefaultModel(mode.id)
+                                  }
+                                />
                                 <button
                                   type="button"
                                   className="modes-item-delete"
@@ -1864,6 +1903,51 @@ export function Composer(props: ComposerProps): React.JSX.Element {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The per-mode default-model control shown in the mode popup: a "default: X"
+ * pill that opens the model picker to bind a model, plus a clear (✕) button
+ * when one is bound. Switching to the mode auto-selects its default model.
+ */
+function ModeDefaultModelControl({
+  label,
+  onSet,
+  onClear,
+}: {
+  label: string | null;
+  onSet: () => void;
+  onClear: () => void;
+}): React.JSX.Element {
+  return (
+    <span className="modes-item-default">
+      <button
+        type="button"
+        className="modes-default-pill"
+        title="Set this mode's default model"
+        onClick={(e) => {
+          e.stopPropagation();
+          onSet();
+        }}
+      >
+        {label ? `model: ${label}` : 'set model'}
+      </button>
+      {label ? (
+        <button
+          type="button"
+          className="modes-item-delete"
+          title="Clear this mode's default model"
+          aria-label="Clear default model"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClear();
+          }}
+        >
+          ✕
+        </button>
+      ) : null}
+    </span>
   );
 }
 

@@ -87,11 +87,28 @@ describe('chat app mode mentions', () => {
     expect(source).toContain(
       'const modeMention = getModeMention(value, modes)'
     );
-    expect(source).toContain('setActiveMode(modeMention.modeId)');
-    expect(source).toContain('props.onModeChange?.(modeMention.modeId)');
+    // The mode-mention submit path applies the switch (and the mode's default
+    // model) through the shared applyModeChange helper.
+    expect(source).toContain('applyModeChange(modeMention.modeId)');
+    expect(source).toContain('setActiveMode(modeId)');
+    expect(source).toContain('props.onModeChange?.(modeId)');
     expect(source).toContain(
       "const cleanedValue = messageValue.replace(IMAGE_MARKER_PATTERN, ' ').trim()"
     );
+  });
+
+  it('sends the turn on the model the mentioned mode switched to', () => {
+    // applyModeChange switches the provider client synchronously, but
+    // `activeModel` only updates on the next render — the turn must read the
+    // returned model or it posts the old provider's model id to the new one.
+    expect(source).toContain('modeSwitchModel = applyModeChange(');
+    expect(source).toContain(
+      'const turnModelInfo = modeSwitchModel ?? activeModelInfo'
+    );
+    expect(source).toContain(
+      'modeSwitchModel?.id ?? (activeModel || session.activeModel)'
+    );
+    expect(source).toContain('turnProvider = turnModelInfo?.providerId');
   });
 });
 

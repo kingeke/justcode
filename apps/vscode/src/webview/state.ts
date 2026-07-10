@@ -21,6 +21,7 @@ import {
   type WebviewUsage,
   type WebviewStats,
   type WebviewMode,
+  type WebviewModelDefaults,
   type WebviewSkillCommand,
 } from '@ext/shared/protocol';
 import type { ResolvedFile } from '@ext/webview/changes';
@@ -203,6 +204,8 @@ export interface ChatState {
   modes: WebviewMode[];
   /** Id of the active chat mode. */
   activeModeId: string;
+  /** Per-mode/per-sub-agent default models, for the pickers. */
+  modelDefaults: WebviewModelDefaults;
   /** Slash commands from installed skills, for the composer's `/` completions. */
   skillCommands: WebviewSkillCommand[];
   /**
@@ -245,6 +248,9 @@ export interface SubAgentRunView {
   latestActivity?: string | undefined;
   status: WebviewSubAgentStatus;
   summary?: string | undefined;
+  /** The model id the run executes on, and its provider, for "provider · model". */
+  model?: string | undefined;
+  providerId?: string | undefined;
   startedAt: number;
   endedAt?: number | undefined;
   /** The run's cumulative usage, for the transcript footer. */
@@ -293,6 +299,7 @@ export const initialState: ChatState = {
   mcpLoading: false,
   modes: [],
   activeModeId: 'build',
+  modelDefaults: { byMode: {}, bySubAgent: {} },
   skillCommands: [],
   reasoningEffortByModel: {},
   resolvedFiles: {},
@@ -446,6 +453,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
           toolUseCount: run.toolUseCount,
           status: run.status,
           summary: run.summary,
+          model: run.model,
+          providerId: run.providerId,
           startedAt: run.startedAt,
           endedAt: run.endedAt,
           usage: run.usage,
@@ -479,6 +488,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         mcpLoading: action.mcpLoading,
         modes: action.modes,
         activeModeId: action.activeModeId,
+        modelDefaults: action.modelDefaults,
         skillCommands: action.skillCommands ?? [],
         reasoningEffortByModel: action.reasoningEffortByModel,
         sessionTitle: action.sessionTitle,
@@ -509,6 +519,9 @@ export function reducer(state: ChatState, action: Action): ChatState {
         activeModeId: action.activeModeId,
       };
 
+    case HostMessageType.ModelDefaultsUpdate:
+      return { ...state, modelDefaults: action.modelDefaults };
+
     case HostMessageType.Notice:
       return {
         ...state,
@@ -538,6 +551,12 @@ export function reducer(state: ChatState, action: Action): ChatState {
         models: action.models,
         providerErrors: action.providerErrors,
         ...(clearedStaleBanner ? { notice: undefined } : {}),
+        // A mode's default model switch rides a ModelsUpdate carrying the new
+        // active model/provider so the composer pill updates without a reload.
+        ...(action.activeModel ? { activeModel: action.activeModel } : {}),
+        ...(action.activeProviderId
+          ? { providerId: action.activeProviderId }
+          : {}),
       };
     }
 
@@ -759,6 +778,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
               latestActivity: action.latestActivity,
               status: action.status ?? WebviewSubAgentStatus.Running,
               summary: action.summary,
+              model: action.model,
+              providerId: action.providerId,
               startedAt: Date.now(),
             },
           ],
@@ -772,6 +793,8 @@ export function reducer(state: ChatState, action: Action): ChatState {
                 ...run,
                 toolUseCount: action.toolUseCount ?? run.toolUseCount,
                 latestActivity: action.latestActivity ?? run.latestActivity,
+                model: action.model ?? run.model,
+                providerId: action.providerId ?? run.providerId,
                 // Metrics stream on progress events, so the footer tracks the
                 // run live instead of only settling when it ends.
                 usage: action.usage ?? run.usage,

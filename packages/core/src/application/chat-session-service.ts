@@ -1429,7 +1429,16 @@ export class ChatSessionService {
     requestedModel: string | undefined,
     availableModels: ModelInfo[]
   ): string {
-    if (requestedModel) {
+    // Only honor a requested model this provider actually offers. `lastModel`
+    // is persisted across providers, so a model bound on one (e.g. Claude
+    // Code's `opus[1m]`) would otherwise be sent to whichever provider starts
+    // up next and rejected with a 400. A provider that lists no models can't
+    // be checked against, so its request is taken at face value.
+    if (
+      requestedModel &&
+      (availableModels.length === 0 ||
+        availableModels.some((model) => model.id === requestedModel))
+    ) {
       return requestedModel;
     }
 

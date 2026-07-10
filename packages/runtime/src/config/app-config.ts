@@ -28,6 +28,7 @@ import {
   SubAgentType,
   type CustomSubAgentConfig,
 } from '@core/domain/sub-agent';
+import type { ModelDefaults } from '@core/domain/model-default';
 
 export interface AppConfig {
   /** Provider to use on launch, or undefined when nothing is configured yet. */
@@ -49,6 +50,8 @@ export interface AppConfig {
   generalSubAgentPrompt: string;
   /** User-created sub agents offered by the `task` tool, keyed by id. */
   customSubAgents: Record<string, CustomSubAgentConfig>;
+  /** Default model bound to chat modes and sub agents, keyed by id. */
+  modelDefaults: ModelDefaults;
   /** Auto-compact threshold percent (default 80); 0 turns auto-compact off. */
   autoCompactThresholdPercent: number;
   /** Whether local providers refetch their model list on every load (default true). */
@@ -182,6 +185,10 @@ export async function loadAppConfig(
     explorerSubAgentPrompt: configWithDefaults.explorerSubAgentPrompt,
     generalSubAgentPrompt: configWithDefaults.generalSubAgentPrompt,
     customSubAgents: configWithDefaults.customSubAgents ?? {},
+    modelDefaults: {
+      byMode: configWithDefaults.modelDefaults?.byMode ?? {},
+      bySubAgent: configWithDefaults.modelDefaults?.bySubAgent ?? {},
+    },
     autoCompactThresholdPercent:
       configWithDefaults.autoCompactThresholdPercent ??
       DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT,

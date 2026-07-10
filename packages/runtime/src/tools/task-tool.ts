@@ -26,6 +26,14 @@ interface TaskArguments {
   prompt: string;
 }
 
+/** The provider client and model a sub agent run should execute on. */
+export interface ResolvedSubAgentModel {
+  provider: ProviderClient;
+  model: string;
+  /** Provider id backing {@link model}, for the run's "provider · model" display. */
+  providerId: string;
+}
+
 /**
  * Dependencies resolved per call (not at construction) so the sub agent always
  * runs against the live provider and tool registry — including MCP tools that
@@ -37,6 +45,17 @@ export interface TaskToolDependencies {
   tools: Tool[];
   /** Fallback model when the execution context doesn't carry the turn's model. */
   defaultModel?: string;
+  /**
+   * Resolves the model (and its provider client) a given sub agent type should
+   * run on: its configured per-agent default when that model is available, or
+   * the fallback `{ provider, model }` otherwise. Any error falls back to the
+   * current turn's provider+model. Optional — when unset, sub agents always run
+   * on the current provider and `fallbackModel`.
+   */
+  resolveSubAgentModel?: (
+    agentType: string,
+    fallbackModel: string
+  ) => Promise<ResolvedSubAgentModel>;
 }
 
 /**
@@ -182,11 +201,24 @@ export class TaskTool implements Tool {
         tool.definition.name !== ToolName.Task
     );
 
+    // Pick the provider + model this run executes on: the agent type's
+    // per-agent default when available, otherwise the turn's current
+    // provider + model. Resolution never throws — a broken default falls back.
+    const target = dependencies.resolveSubAgentModel
+      ? await dependencies.resolveSubAgentModel(parsed.agent_type, model)
+      : {
+          provider: dependencies.provider,
+          model,
+          providerId: dependencies.provider.providerId,
+        };
+
     const run: SubAgentRun = {
       id: context.toolCallId ?? `task-${Date.now()}`,
       agentType: parsed.agent_type,
       description: parsed.description,
       prompt: parsed.prompt,
+      model: target.model,
+      providerId: target.providerId,
       status: SubAgentRunStatus.Running,
       messages: [],
       startedAt: new Date().toISOString(),
@@ -198,6 +230,8 @@ export class TaskTool implements Tool {
       runId: run.id,
       agentType: run.agentType,
       description: run.description,
+      ...(run.model ? { model: run.model } : {}),
+      ...(run.providerId ? { providerId: run.providerId } : {}),
       // The live object: its messages array grows as the sub agent works, so
       // an in-process host can show the full transcript mid-run.
       run,
@@ -214,6 +248,8 @@ export class TaskTool implements Tool {
         runId: run.id,
         agentType: run.agentType,
         description: run.description,
+        ...(run.model ? { model: run.model } : {}),
+        ...(run.providerId ? { providerId: run.providerId } : {}),
         toolUseCount,
         status,
         ...(summary !== undefined ? { summary } : {}),
@@ -229,8 +265,8 @@ export class TaskTool implements Tool {
     const sessionId = `subagent-${run.id}`;
     try {
       const result = await runSubAgent({
-        provider: dependencies.provider,
-        model,
+        provider: target.provider,
+        model: target.model,
         tools,
         prompt: parsed.prompt,
         systemPrompt:
@@ -257,6 +293,8 @@ export class TaskTool implements Tool {
             runId: run.id,
             agentType: run.agentType,
             description: run.description,
+            ...(run.model ? { model: run.model } : {}),
+            ...(run.providerId ? { providerId: run.providerId } : {}),
             toolUseCount,
             stats,
             ...(stepUsage ? { usage: stepUsage } : {}),
@@ -269,6 +307,8 @@ export class TaskTool implements Tool {
             runId: run.id,
             agentType: run.agentType,
             description: run.description,
+            ...(run.model ? { model: run.model } : {}),
+            ...(run.providerId ? { providerId: run.providerId } : {}),
             latestActivity: activity.view.title,
             toolUseCount,
             ...(run.stats ? { stats: run.stats } : {}),
@@ -295,7 +335,7 @@ export class TaskTool implements Tool {
       return { content: `Sub agent failed: ${message}`, isError: true };
     } finally {
       try {
-        dependencies.provider.closeSession?.(sessionId);
+        target.provider.closeSession?.(sessionId);
       } catch {
         // Best-effort teardown; a failed close must not mask the run's result.
       }

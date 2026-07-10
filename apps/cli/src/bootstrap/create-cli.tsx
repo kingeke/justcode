@@ -42,6 +42,12 @@ import {
 } from '@core/domain/chat-mode';
 import { APP_NAME, APP_NAME_LOWERED } from '@core/branding';
 import { getUpdateNotice } from '@core/application/update-check';
+import {
+  setModeDefaultModel,
+  setSubAgentDefaultModel,
+  type ModelDefaults,
+  type ModelReference,
+} from '@core/domain/model-default';
 
 interface SharedOptions {
   provider?: string;
@@ -538,6 +544,14 @@ async function runChat(options: SharedOptions): Promise<void> {
   let customModes = savedConfig.customModes ?? {};
   const modes = listModes(customModes);
 
+  // Per-mode/per-sub-agent default models. Bind/clear from the pickers persists
+  // to config and pushes the new map into the runtime so the task tool (sub
+  // agents) picks it up; the mode default is applied by the app on mode switch.
+  let modelDefaults: ModelDefaults = {
+    byMode: savedConfig.modelDefaults?.byMode ?? {},
+    bySubAgent: savedConfig.modelDefaults?.bySubAgent ?? {},
+  };
+
   // The task tool's sub agents (built-in + custom), as listed by /sub-agents.
   // Kept in a local map mirroring customModes: create/delete/edit persist to
   // config and push the new set into the runtime so the task tool sees it on
@@ -717,7 +731,7 @@ async function runChat(options: SharedOptions): Promise<void> {
         customSubAgents = created.customSubAgents;
         persistConfig({ customSubAgents });
         runtime.setCustomSubAgents(customSubAgents);
-        return listSubAgentEntries();
+        return { agents: listSubAgentEntries(), id: created.id };
       },
       onDeleteSubAgent: (id: string) => {
         const removed = removeCustomSubAgent(id, customSubAgents);
@@ -767,6 +781,27 @@ async function runChat(options: SharedOptions): Promise<void> {
         : {}),
       onModelChange: (modelId: string, modelProviderId: string) => {
         persistConfig({ lastModel: modelId, lastProvider: modelProviderId });
+      },
+      initialModelDefaults: modelDefaults,
+      onSetModeDefaultModel: (
+        modeId: string,
+        reference: ModelReference | undefined
+      ) => {
+        modelDefaults = setModeDefaultModel(modeId, reference, modelDefaults);
+        runtime.setModelDefaults(modelDefaults);
+        persistConfig({ modelDefaults });
+      },
+      onSetSubAgentDefaultModel: (
+        subAgentId: string,
+        reference: ModelReference | undefined
+      ) => {
+        modelDefaults = setSubAgentDefaultModel(
+          subAgentId,
+          reference,
+          modelDefaults
+        );
+        runtime.setModelDefaults(modelDefaults);
+        persistConfig({ modelDefaults });
       },
       onThinkingCollapsedChange: (collapsed: boolean) => {
         persistConfig({ thinkingCollapsed: collapsed });

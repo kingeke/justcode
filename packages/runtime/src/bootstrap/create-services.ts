@@ -29,6 +29,11 @@ import {
   type CustomSubAgentConfig,
 } from '@core/domain/sub-agent';
 import {
+  defaultModelForSubAgent,
+  resolveDefaultModel,
+  type ModelDefaults,
+} from '@core/domain/model-default';
+import {
   ReadFileTool,
   DEFAULT_MAX_READ_LINES,
 } from '@runtime/tools/read-file-tool';
@@ -127,6 +132,14 @@ export interface RuntimeServices {
    * the next tool advertisement and the next spawned sub agent.
    */
   setCustomSubAgents: (agents: Record<string, CustomSubAgentConfig>) => void;
+  /** The per-mode/per-sub-agent default models loaded from config. */
+  modelDefaults: ModelDefaults;
+  /**
+   * Replace the per-mode/per-sub-agent default models, used when the user binds
+   * or clears a default. Read per sub agent run, so it takes effect on the next
+   * spawned sub agent (the host applies the mode default itself when switching).
+   */
+  setModelDefaults: (defaults: ModelDefaults) => void;
   /**
    * Replace the tool names advertised up front even under lazy loading. The host
    * sets this per chat mode (e.g. `['present_plan']` in Plan mode, `[]` in
@@ -260,6 +273,9 @@ export async function createRuntimeServices(
   // Mutable so custom sub agents created/deleted at runtime reach the task
   // tool: it reads the map per call through the getter below.
   const customSubAgentsSetting = { value: config.customSubAgents };
+  // Mutable so per-mode/per-sub-agent default-model edits reach the task tool:
+  // it reads the defaults per run to pick a sub agent's model.
+  const modelDefaultsSetting = { value: config.modelDefaults };
   const builtInTools: Tool[] = [
     new WriteFileTool(workspaceFiles),
     new EditFileTool(workspaceFiles),
@@ -289,6 +305,39 @@ export async function createRuntimeServices(
           ...(currentProvider.getDefaultModel()
             ? { defaultModel: currentProvider.getDefaultModel() as string }
             : {}),
+          // Resolves a sub agent's configured default model, falling back to
+          // the turn's current provider + model on any failure (missing
+          // provider, model not offered, listing error). Read per run so
+          // runtime edits to the defaults or the active provider take effect.
+          resolveSubAgentModel: async (agentType, fallbackModel) => {
+            const fallback = {
+              provider: currentProvider,
+              model: fallbackModel,
+              providerId: currentProvider.providerId,
+            };
+            const reference = defaultModelForSubAgent(
+              agentType,
+              modelDefaultsSetting.value
+            );
+            if (!reference) return fallback;
+            try {
+              const provider =
+                reference.providerId === currentProvider.providerId
+                  ? currentProvider
+                  : safeCreateProvider(registry, reference.providerId);
+              if (!provider) return fallback;
+              const models = await provider.listModels();
+              const resolved = resolveDefaultModel(reference, models);
+              if (!resolved) return fallback;
+              return {
+                provider,
+                model: resolved.id,
+                providerId: provider.providerId,
+              };
+            } catch {
+              return fallback;
+            }
+          },
         };
       },
       (type) => subAgentPromptSettings[type],
@@ -461,6 +510,10 @@ export async function createRuntimeServices(
     setCustomSubAgents: (agents: Record<string, CustomSubAgentConfig>) => {
       customSubAgentsSetting.value = agents;
     },
+    modelDefaults: modelDefaultsSetting.value,
+    setModelDefaults: (defaults: ModelDefaults) => {
+      modelDefaultsSetting.value = defaults;
+    },
     setEagerlyAdvertisedTools: (names: string[]) => {
       eagerToolsSetting.names = names;
     },
@@ -479,6 +532,22 @@ export async function createRuntimeServices(
       }
     },
   };
+}
+
+/**
+ * Creates a provider client by id, returning undefined when it can't be built
+ * (e.g. the provider isn't connected). Lets a sub agent's default model on a
+ * different provider than the session's current one fall back cleanly.
+ */
+function safeCreateProvider(
+  registry: ProviderRegistry,
+  providerId: ProviderId
+): ProviderClient | undefined {
+  try {
+    return registry.create(providerId);
+  } catch {
+    return undefined;
+  }
 }
 
 function createAllProviders(

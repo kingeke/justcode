@@ -94,7 +94,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       // OS notifications fire only while the window is unfocused — the user is
       // elsewhere and should know a turn finished or a question is waiting.
       () => vscode.window.state.focused,
-      vscode.Uri.joinPath(mediaUri, 'icon.png').fsPath
+      vscode.Uri.joinPath(mediaUri, 'icon.png').fsPath,
+      // Binding a default model in the chat must show up on an open Settings tab.
+      () => void this.settings.refreshPrompts()
     );
     this.bridge = bridge;
 

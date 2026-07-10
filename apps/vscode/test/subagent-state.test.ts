@@ -135,6 +135,7 @@ describe('sub agent activity state', () => {
       mcpLoading: false,
       modes: [],
       activeModeId: 'build',
+      modelDefaults: { byMode: {}, bySubAgent: {} },
       workspaceRoot: '/tmp/workspace',
       subAgents: [
         {

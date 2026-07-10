@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { ReasoningEffort } from '@core/ports/chat-model';
 import type { CustomModeConfig } from '@core/domain/chat-mode';
 import type { CustomSubAgentConfig } from '@core/domain/sub-agent';
+import type { ModelDefaults } from '@core/domain/model-default';
 import { ProviderId } from '@core/ports/provider-catalog';
 import { writeSecureFile } from '@runtime/persistence/secure-file';
 import type { ProviderConfig } from '@core/ports/provider-catalog';
@@ -82,6 +83,12 @@ export interface GlobalConfig {
    * `task` tool alongside the built-in Explorer/General agents.
    */
   customSubAgents?: Record<string, CustomSubAgentConfig>;
+  /**
+   * Default model bound to chat modes and sub agents, keyed by id. Switching to
+   * a mode with a default auto-selects that model; a sub agent with a default
+   * runs on that model (falling back to the turn's model when it's unavailable).
+   */
+  modelDefaults?: ModelDefaults;
   /** Tunables for how much context the agent reads and sends. */
   cache?: {
     /** Max lines returned by a single file read before it is paged. */

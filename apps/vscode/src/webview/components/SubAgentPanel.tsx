@@ -44,6 +44,12 @@ export function SubAgentPanel({
               </span>
               <span className="subagents-type">{run.agentType}</span>
               <span className="subagents-desc">{run.description}</span>
+              {run.model ? (
+                <span className="subagents-model">
+                  {run.providerId ? `${run.providerId} · ` : ''}
+                  {run.model}
+                </span>
+              ) : null}
               <span className="subagents-meta">
                 {run.toolUseCount > 0
                   ? `${run.toolUseCount} tool use${run.toolUseCount === 1 ? '' : 's'}`
@@ -204,6 +210,12 @@ export function SubAgentTranscriptModal({
           </span>
           <span className="subagents-type">{run.agentType}</span>
           <span className="subagent-modal-title">{run.description}</span>
+          {run.model ? (
+            <span className="subagents-model">
+              {run.providerId ? `${run.providerId} · ` : ''}
+              {run.model}
+            </span>
+          ) : null}
           <button
             type="button"
             className="subagent-modal-close"

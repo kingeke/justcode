@@ -961,6 +961,10 @@ body {
 
 .subagents-desc {
   font-weight: 600;
+  /* `min-width: 0` lets a long description shrink to its ellipsis instead of
+     forcing the row wider than the panel. */
+  min-width: 0;
+  flex: 0 1 auto;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2068,6 +2072,51 @@ textarea:focus {
 
 .modes-item-row .modes-item {
   flex: 1;
+}
+
+.modes-item-default {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.modes-default-pill {
+  border: none;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, inherit);
+  font-family: inherit;
+  font-size: 10px;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+.modes-item-row:hover .modes-default-pill {
+  opacity: 0.85;
+}
+
+.modes-default-pill:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15));
+}
+
+/* `provider · model` ids are long (`openrouter · qwen/qwen3-coder-next`); keep
+   them on one line and ellipsize, or the sub agent row grows to two lines and
+   pushes the tool-use meta past the panel edge. */
+.subagents-model {
+  font-size: 10px;
+  opacity: 0.7;
+  min-width: 0;
+  flex: 0 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .modes-item-delete {
@@ -3597,11 +3646,62 @@ textarea:focus {
   opacity: 1;
 }
 
+/* An open mode/sub agent card: a blue rail down its left edge plus a faint
+   tint, so the expanded row is obvious against the collapsed ones around it. */
+.prompt-card-expanded {
+  border-left: 2px solid var(--vscode-focusBorder, #3794ff);
+  background: var(--vscode-list-hoverBackground, transparent);
+}
+
+/* The rail eats 2px; trim the shared 12px inset so the content stays aligned
+   with the collapsed rows above and below it. */
+.prompts-section .prompt-card-expanded {
+  padding-left: 10px;
+}
+
 /* System Prompts tab: the expanded editor inside a mode's card. */
 .prompt-editor-wrap {
   padding: 12px;
   border-top: 1px solid
     var(--vscode-widget-border, var(--vscode-panel-border, transparent));
+}
+
+/* The mode/sub agent default-model picker, above the prompt editor. */
+.prompt-default-model {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.prompt-default-model-label {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* The mode/sub agent this row binds, so the picker reads as "for Plan". */
+.prompt-default-model-owner {
+  font-weight: 400;
+  color: var(--vscode-descriptionForeground);
+}
+
+.prompt-default-model-select {
+  min-width: 220px;
+  max-width: 320px;
+  padding: 3px 6px;
+  color: var(--vscode-input-foreground, inherit);
+  background: var(--vscode-input-background, transparent);
+  border: 1px solid var(--vscode-input-border, rgba(127, 127, 127, 0.3));
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.prompt-default-model-hint {
+  flex-basis: 100%;
+  font-size: 11px;
+  opacity: 0.7;
 }
 
 /* Space out stacked labelled fields inside the create/edit forms so each

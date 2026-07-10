@@ -337,6 +337,60 @@ describe('TaskTool', () => {
     expect(requests[0]?.tools?.map((t) => t.name)).toEqual([ToolName.ReadFile]);
   });
 
+  it('runs the sub agent on its resolved default model and records it', async () => {
+    const requests: ChatRequest[] = [];
+    const runs: SubAgentRun[] = [];
+    const defaultProvider = providerFromResponses(
+      [{ content: 'ok' }],
+      requests
+    );
+    const tool = new TaskTool(() => ({
+      provider: providerFromResponses([{ content: 'unused' }]),
+      tools: [],
+      resolveSubAgentModel: async (agentType) => {
+        expect(agentType).toBe(SubAgentType.Explorer);
+        return {
+          provider: defaultProvider,
+          model: 'default-model',
+          providerId: ProviderId.Openai,
+        };
+      },
+    }));
+
+    await tool.execute(taskArguments, {
+      workspaceRoot: '/workspace',
+      model: 'turn-model',
+      toolCallId: 'call-d',
+      recordSubAgentRun: (run) => runs.push(run),
+    });
+
+    // The run executed on the resolved default, not the turn's current model.
+    expect(requests[0]?.model).toBe('default-model');
+    const finalRun = runs.at(-1);
+    expect(finalRun?.model).toBe('default-model');
+    expect(finalRun?.providerId).toBe(ProviderId.Openai);
+  });
+
+  it('falls back to the turn model when no default resolver is wired', async () => {
+    const requests: ChatRequest[] = [];
+    const runs: SubAgentRun[] = [];
+    const tool = new TaskTool(() => ({
+      provider: providerFromResponses([{ content: 'ok' }], requests),
+      tools: [],
+    }));
+
+    await tool.execute(taskArguments, {
+      workspaceRoot: '/workspace',
+      model: 'turn-model',
+      toolCallId: 'call-f',
+      recordSubAgentRun: (run) => runs.push(run),
+    });
+
+    expect(requests[0]?.model).toBe('turn-model');
+    expect(runs.at(-1)?.model).toBe('turn-model');
+    expect(runs.at(-1)?.providerId).toBe(ProviderId.Ollama);
+  });
+
   it('rejects an unknown agent type with the known ids', async () => {
     const tool = new TaskTool(() => ({
       provider: providerFromResponses([]),

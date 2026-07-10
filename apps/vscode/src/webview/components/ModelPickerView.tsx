@@ -100,6 +100,8 @@ interface ModelPickerViewProps {
   providerErrors: WebviewProviderError[];
   activeModel: string | undefined;
   activeProviderId: string | undefined;
+  /** Header title; defaults to "Select Model". Set when binding a default. */
+  title?: string | undefined;
   onSelect: (model: WebviewModel) => void;
   onClose: () => void;
   onConnectProvider: () => void;
@@ -112,6 +114,7 @@ export function ModelPickerView({
   providerErrors,
   activeModel,
   activeProviderId,
+  title,
   onSelect,
   onClose,
   onConnectProvider,
@@ -227,7 +230,7 @@ export function ModelPickerView({
           ← Back
         </button>
         <span className="sessions-title" style={{ flex: 1 }}>
-          Select Model
+          {title ?? 'Select Model'}
         </span>
         <button
           type="button"

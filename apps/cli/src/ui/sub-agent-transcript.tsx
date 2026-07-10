@@ -233,6 +233,12 @@ export function SubAgentTranscript({
               tc(`${run.agentType} · `, { fg: MUTED }),
               tc(run.description, { fg: 'white', bold: true }),
               tc(
+                run.model
+                  ? `  ${run.providerId ? `${run.providerId} · ` : ''}${run.model}`
+                  : '',
+                { fg: MUTED }
+              ),
+              tc(
                 toolUseCount > 0
                   ? `  ${toolUseCount} tool use${toolUseCount === 1 ? '' : 's'}`
                   : '',

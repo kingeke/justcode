@@ -17,6 +17,7 @@ export enum KeyName {
   PageDown = 'pagedown',
   Backspace = 'backspace',
   C = 'c',
+  D = 'd',
   V = 'v',
   Y = 'y',
   A = 'a',

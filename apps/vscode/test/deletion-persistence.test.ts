@@ -42,6 +42,7 @@ describe('deletion persistence through a turn', () => {
       mcpLoading: false,
       modes: [],
       activeModeId: 'build',
+      modelDefaults: { byMode: {}, bySubAgent: {} },
       workspaceRoot: '/tmp/workspace',
     });
 

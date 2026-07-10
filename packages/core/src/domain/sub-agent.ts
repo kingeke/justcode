@@ -69,6 +69,10 @@ export interface SubAgentRun {
   description: string;
   /** The full prompt the parent model delegated. */
   prompt: string;
+  /** The model id the run executed on (its per-agent default, or the fallback). */
+  model?: string;
+  /** The provider id backing {@link model}, for showing "provider · model". */
+  providerId?: string;
   status: SubAgentRunStatus;
   /** The sub agent's own transcript (user prompt, assistant steps, tool results). */
   messages: ChatMessage[];
@@ -96,6 +100,10 @@ export interface SubAgentActivityEvent {
   /** A {@link SubAgentType}, or a custom sub agent's config id. */
   agentType: SubAgentType | string;
   description: string;
+  /** The model id the run executed on (its per-agent default, or the fallback). */
+  model?: string;
+  /** The provider id backing {@link model}, for showing "provider · model". */
+  providerId?: string;
   /** One-line summary of what the sub agent just did (a tool view title). */
   latestActivity?: string;
   /** Number of tool calls the run has made so far. */
