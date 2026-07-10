@@ -34,13 +34,13 @@ small or "just one string".
 
   ```ts
   // Wrong
-  type Status = "idle" | "busy";
-  function set(s: "idle" | "busy") {}
+  type Status = 'idle' | 'busy';
+  function set(s: 'idle' | 'busy') {}
 
   // Right
   export enum Status {
-    Idle = "idle",
-    Busy = "busy",
+    Idle = 'idle',
+    Busy = 'busy',
   }
   function set(s: Status) {}
   ```
