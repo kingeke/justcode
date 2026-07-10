@@ -26,6 +26,28 @@ small or "just one string".
 - Any value from a fixed set — statuses, kinds, roles, phases, message types,
   tool names, provider ids, command names, action types — MUST be an enum
   member. Never a raw string literal, never a string union type.
+- String-literal union types are banned, in every position. This includes type
+  aliases (`type Status = "idle" | "busy"`), inline annotations
+  (`let x: "a" | "b"`), function parameters and return types, interface and
+  class properties, generic arguments, and `as const` arrays used to derive a
+  union. Declare an enum and use it instead:
+
+  ```ts
+  // Wrong
+  type Status = "idle" | "busy";
+  function set(s: "idle" | "busy") {}
+
+  // Right
+  export enum Status {
+    Idle = "idle",
+    Busy = "busy",
+  }
+  function set(s: Status) {}
+  ```
+
+  Discriminated unions keep their shape — the discriminant field itself becomes
+  an enum member type (`kind: LiveTurnItemKind.Tool`), not a literal.
+
 - Before adding an enum, search for an existing one and reuse it. Examples:
   `ToolName`, `MessageRole`, `ProviderId`, `AuthMethod`, `ReasoningEffort`
   (`packages/core/src`), `CommandName`, `KeyName` (`apps/cli/src`),
@@ -42,8 +64,9 @@ small or "just one string".
   matching enum as part of your change. Keep the conversion scoped to the files
   you are already editing — do not open a repo-wide rewrite unless asked.
 - Before finishing, grep your diff for quoted string literals in conditionals
-  (`=== "`, `case "`, `includes("`) and replace any that represent a fixed-set
-  value. Then run `npm run typecheck`.
+  (`=== "`, `case "`, `includes("`) and for `" |` / `' |` union syntax in type
+  positions. Replace any that represent a fixed-set value. Then run
+  `npm run typecheck`.
 
 ## Type-checking
 
