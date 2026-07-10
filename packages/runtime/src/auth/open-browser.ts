@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import { platform } from 'node:os';
 
+import { NodePlatform } from '@core/domain/node-platform';
+
 /**
  * Opens {@link url} in the user's default browser. Best-effort: if the platform
  * launcher fails (e.g. headless/SSH), it resolves false so callers can fall back
@@ -26,9 +28,9 @@ export async function openBrowser(url: string): Promise<boolean> {
 
 function launcher(url: string): [string, string[]] {
   switch (platform()) {
-    case 'darwin':
+    case NodePlatform.Darwin:
       return ['open', [url]];
-    case 'win32':
+    case NodePlatform.Win32:
       return ['cmd', ['/c', 'start', '', url]];
     default:
       return ['xdg-open', [url]];

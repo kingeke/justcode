@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { ReasoningEffort } from '@core/ports/chat-model';
+import { ReasoningDisabled } from '@core/ports/chat-model';
 import type { CustomModeConfig } from '@core/domain/chat-mode';
 import type { CustomSubAgentConfig } from '@core/domain/sub-agent';
 import type { ModelDefaults } from '@core/domain/model-default';
@@ -41,7 +42,8 @@ export interface GlobalConfig {
    */
   reasoningEffortByModel?: Record<
     string,
-    Record<string, ReasoningEffort | 'off' | undefined> | undefined
+    | Record<string, ReasoningEffort | ReasoningDisabled.Off | undefined>
+    | undefined
   >;
   /** When true, all tool actions run without per-call confirmation. */
   autoApprove?: boolean;

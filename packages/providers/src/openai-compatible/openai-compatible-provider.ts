@@ -8,6 +8,7 @@ import {
   type ProviderClient,
   type ReasoningEffort,
 } from '@core/ports/chat-model';
+import { ReasoningDisabled } from '@core/ports/chat-model';
 import { type ProviderId } from '@core/ports/provider-catalog';
 import {
   HttpError,
@@ -417,7 +418,9 @@ function toReasoningParam(request: ChatRequest): {
   if (!request.reasoningEffort) return {};
   return {
     reasoning_effort:
-      request.reasoningEffort === 'off' ? 'none' : request.reasoningEffort,
+      request.reasoningEffort === ReasoningDisabled.Off
+        ? 'none'
+        : request.reasoningEffort,
   };
 }
 

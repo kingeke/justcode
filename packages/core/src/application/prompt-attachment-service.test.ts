@@ -14,7 +14,11 @@ import {
   parseMention,
   PromptAttachmentService,
 } from '@core/application/prompt-attachment-service';
-import { BUILT_IN_MODES, type ChatMode } from '@core/domain/chat-mode';
+import {
+  BUILT_IN_MODES,
+  ModeIcon,
+  type ChatMode,
+} from '@core/domain/chat-mode';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
 
 class InMemoryWorkspaceFiles implements WorkspaceFilePort {
@@ -369,7 +373,7 @@ describe('mode mentions', () => {
   const customMode: ChatMode = {
     id: 'reviewer',
     name: 'Reviewer',
-    icon: 'custom',
+    icon: ModeIcon.Custom,
     custom: true,
   };
   const modes: ChatMode[] = [...BUILT_IN_MODES, customMode];

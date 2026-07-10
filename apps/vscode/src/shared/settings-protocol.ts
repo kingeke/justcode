@@ -141,7 +141,10 @@ export interface SettingsModelOption {
 }
 
 /** Where a skill is installed; mirrors `@core` SkillScope. */
-export type SettingsSkillScope = 'local' | 'global';
+export enum SettingsSkillScope {
+  Local = 'local',
+  Global = 'global',
+}
 
 /** One slash command a skill contributes, as shown on the Skills tab. */
 export interface SettingsSkillCommand {
@@ -267,10 +270,17 @@ export interface SettingsSkillsMessage {
   workspaceOpen: boolean;
 }
 
+/** The kind of skill mutation an action result describes. */
+export enum SkillActionKind {
+  Add = 'add',
+  Update = 'update',
+  Remove = 'remove',
+}
+
 /** Outcome of an AddSkill / UpdateSkill / RemoveSkill action. */
 export interface SettingsSkillActionResultMessage {
   type: SettingsHostMessageType.SkillActionResult;
-  action: 'add' | 'update' | 'remove';
+  action: SkillActionKind;
   success: boolean;
   /** Success summary or failure reason, shown under the form/list. */
   message: string;

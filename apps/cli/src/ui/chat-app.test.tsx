@@ -152,6 +152,18 @@ describe('chat app markdown rendering', () => {
       'const prepared = live ? content : prepareMarkdown(content)'
     );
   });
+
+  it('renders user messages as markdown like assistant messages', () => {
+    expect(source).toContain('message.role === MessageRole.User ? (');
+    expect(source).toContain('<MarkdownView content={message.content} />');
+  });
+
+  it('renders the task tool result as markdown in its own box', () => {
+    expect(source).toContain('if (message.name === ToolName.Task) {');
+    expect(source).toContain('<TaskResultBlock content={message.content} />');
+    expect(source).toContain('const TaskResultBlock = React.memo(');
+    expect(source).toContain('ToolName.Task,');
+  });
 });
 
 describe('chat app tool diff rendering', () => {

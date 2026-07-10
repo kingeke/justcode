@@ -8,7 +8,11 @@ const CONTEXT_LINES = 3;
 /** Cap diff output so a change scattered across a huge file can't flood. */
 const MAX_DIFF_LINES = 40;
 
-type DiffLineKind = 'add' | 'del' | 'context';
+export enum DiffLineKind {
+  Add = 'add',
+  Del = 'del',
+  Context = 'context',
+}
 interface DiffLine {
   kind: DiffLineKind;
   text: string;
@@ -28,7 +32,7 @@ export function renderDiff(diff: ToolDiff): string {
   // Keep every changed line plus CONTEXT_LINES on either side.
   const keep = new Array<boolean>(lines.length).fill(false);
   for (let index = 0; index < lines.length; index += 1) {
-    if (lines[index]?.kind === 'context') continue;
+    if (lines[index]?.kind === DiffLineKind.Context) continue;
     const from = Math.max(0, index - CONTEXT_LINES);
     const to = Math.min(lines.length - 1, index + CONTEXT_LINES);
     for (let j = from; j <= to; j += 1) keep[j] = true;
@@ -74,17 +78,17 @@ function toDiffLines(diff: ToolDiff): DiffLine[] {
       partLines.pop();
     }
     const kind: DiffLineKind = part.added
-      ? 'add'
+      ? DiffLineKind.Add
       : part.removed
-        ? 'del'
-        : 'context';
+        ? DiffLineKind.Del
+        : DiffLineKind.Context;
     for (const text of partLines) lines.push({ kind, text });
   }
   return lines;
 }
 
 function formatLine(line: DiffLine): string {
-  if (line.kind === 'add') return chalk.green(`+ ${line.text}`);
-  if (line.kind === 'del') return chalk.red(`- ${line.text}`);
+  if (line.kind === DiffLineKind.Add) return chalk.green(`+ ${line.text}`);
+  if (line.kind === DiffLineKind.Del) return chalk.red(`- ${line.text}`);
   return chalk.dim(`  ${line.text}`);
 }

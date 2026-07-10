@@ -21,6 +21,21 @@ import {
   addCustomMode,
   removeCustomMode,
 } from '@core/domain/chat-mode';
+import { SkillScope } from '@core/domain/skill';
+
+/** Maps a webview protocol scope onto the core SkillScope (value-preserving). */
+function toSkillScope(scope: SettingsSkillScope): SkillScope {
+  return scope === SettingsSkillScope.Local
+    ? SkillScope.Local
+    : SkillScope.Global;
+}
+
+/** Maps a core SkillScope onto the webview protocol scope (value-preserving). */
+function toSettingsSkillScope(scope: SkillScope): SettingsSkillScope {
+  return scope === SkillScope.Local
+    ? SettingsSkillScope.Local
+    : SettingsSkillScope.Global;
+}
 import {
   readGlobalConfig,
   writeGlobalConfig,
@@ -43,6 +58,8 @@ import { join } from 'node:path';
 import {
   SettingsHostMessageType,
   SettingsWebviewMessageType,
+  SkillActionKind,
+  SettingsSkillScope,
   SUB_AGENT_PROMPT_ID_PREFIX,
   type SettingsAppInfo,
   type SettingsHostToWebview,
@@ -321,22 +338,25 @@ export class SettingsPanel {
         await this.sendSkills();
         return;
       case SettingsWebviewMessageType.AddSkill:
-        await this.runSkillAction('add', () =>
-          this.addSkill(message.source, message.scope)
+        await this.runSkillAction(SkillActionKind.Add, () =>
+          this.addSkill(message.source, toSkillScope(message.scope))
         );
         return;
       case SettingsWebviewMessageType.UpdateSkill:
-        await this.runSkillAction('update', async () => {
+        await this.runSkillAction(SkillActionKind.Update, async () => {
           const updated = await updateSkill(
             message.name,
-            this.skillsDirFor(message.scope)
+            this.skillsDirFor(toSkillScope(message.scope))
           );
           return `Updated ${updated.manifest.name} to v${updated.manifest.version}.`;
         });
         return;
       case SettingsWebviewMessageType.RemoveSkill:
-        await this.runSkillAction('remove', async () => {
-          await removeSkill(message.name, this.skillsDirFor(message.scope));
+        await this.runSkillAction(SkillActionKind.Remove, async () => {
+          await removeSkill(
+            message.name,
+            this.skillsDirFor(toSkillScope(message.scope))
+          );
           return `Removed ${message.name}.`;
         });
         return;
@@ -349,8 +369,8 @@ export class SettingsPanel {
   }
 
   /** The on-disk skills directory for a scope. Throws for local w/o workspace. */
-  private skillsDirFor(scope: 'local' | 'global'): string {
-    if (scope === 'local') {
+  private skillsDirFor(scope: SkillScope): string {
+    if (scope === SkillScope.Local) {
       const root = this.workspaceRoot();
       if (!root) {
         throw new Error('Open a workspace folder to manage local skills.');
@@ -364,11 +384,11 @@ export class SettingsPanel {
   private async sendSkills(): Promise<void> {
     const root = this.workspaceRoot();
     const local = root
-      ? await discoverSkills(localSkillsDirectory(root), 'local')
+      ? await discoverSkills(localSkillsDirectory(root), SkillScope.Local)
       : { skills: [], errors: [] };
     const global = await discoverSkills(
       skillsDirectory(cacheDirectory()),
-      'global'
+      SkillScope.Global
     );
     this.post({
       type: SettingsHostMessageType.Skills,
@@ -378,7 +398,7 @@ export class SettingsPanel {
         description: skill.manifest.description,
         author: skill.manifest.author,
         source: skill.source,
-        scope: skill.scope ?? 'global',
+        scope: toSettingsSkillScope(skill.scope ?? SkillScope.Global),
         commands: skill.commands.map((command) => ({
           name: command.name,
           description: command.description,
@@ -391,10 +411,7 @@ export class SettingsPanel {
     });
   }
 
-  private async addSkill(
-    source: string,
-    scope: 'local' | 'global'
-  ): Promise<string> {
+  private async addSkill(source: string, scope: SkillScope): Promise<string> {
     const installed = await installSkill(source, this.skillsDirFor(scope));
     const commandNames = installed.commands
       .map((command) => `/${command.name}`)
@@ -407,7 +424,7 @@ export class SettingsPanel {
    * tells the live chat session to refresh its `/` completions.
    */
   private async runSkillAction(
-    action: 'add' | 'update' | 'remove',
+    action: SkillActionKind,
     run: () => Promise<string>
   ): Promise<void> {
     try {

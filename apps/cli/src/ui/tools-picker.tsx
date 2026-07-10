@@ -15,10 +15,16 @@ interface ToolsPickerProps {
   onCancel: () => void;
 }
 
+/** The kinds of row the tools picker renders. */
+export enum ToolRowKind {
+  Category = 'category',
+  Tool = 'tool',
+}
+
 /** A navigable row: either a category heading or a tool under it. */
 type Row =
-  | { kind: 'category'; category: string }
-  | { kind: 'tool'; tool: ManageableToolInfo };
+  | { kind: ToolRowKind.Category; category: string }
+  | { kind: ToolRowKind.Tool; tool: ManageableToolInfo };
 
 /**
  * The `/manage-tools` modal. Tools are grouped under collapsible category
@@ -50,10 +56,11 @@ export function ToolsPicker(props: ToolsPickerProps): React.ReactNode {
   const rows = useMemo<Row[]>(() => {
     const result: Row[] = [];
     for (const category of categories) {
-      result.push({ kind: 'category', category });
+      result.push({ kind: ToolRowKind.Category, category });
       if (collapsed[category]) continue;
       for (const tool of props.tools) {
-        if (tool.category === category) result.push({ kind: 'tool', tool });
+        if (tool.category === category)
+          result.push({ kind: ToolRowKind.Tool, tool });
       }
     }
     return result;
@@ -68,7 +75,7 @@ export function ToolsPicker(props: ToolsPickerProps): React.ReactNode {
     props.tools.filter((tool) => tool.category === category);
 
   const toggleRow = (row: Row): void => {
-    if (row.kind === 'tool') {
+    if (row.kind === ToolRowKind.Tool) {
       setEnabled((prev) => ({
         ...prev,
         [row.tool.name]: !prev[row.tool.name],
@@ -90,12 +97,12 @@ export function ToolsPicker(props: ToolsPickerProps): React.ReactNode {
   // category, so the user doesn't have to land exactly on the heading.
   const setFold = (row: Row | undefined, folded: boolean): void => {
     const category =
-      row?.kind === 'category' ? row.category : row?.tool.category;
+      row?.kind === ToolRowKind.Category ? row.category : row?.tool.category;
     if (!category) return;
     setCollapsed((prev) => ({ ...prev, [category]: folded }));
     // Keep focus on the heading so the cursor doesn't strand on a now-hidden row.
     const headingIndex = rows.findIndex(
-      (r) => r.kind === 'category' && r.category === category
+      (r) => r.kind === ToolRowKind.Category && r.category === category
     );
     if (headingIndex >= 0) setFocusedIndex(headingIndex);
   };
@@ -156,7 +163,7 @@ export function ToolsPicker(props: ToolsPickerProps): React.ReactNode {
       <box flexDirection="column">
         {rows.map((row, index) => {
           const isFocused = index === focusedIndex;
-          if (row.kind === 'category') {
+          if (row.kind === ToolRowKind.Category) {
             const group = toolsInCategory(row.category);
             const allOn = group.every((tool) => enabled[tool.name]);
             const someOn = group.some((tool) => enabled[tool.name]);

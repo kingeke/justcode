@@ -19,7 +19,12 @@ import { APP_NAME } from '@core/branding';
  * the VSCode webview, a monochrome glyph in the CLI — so no emoji ships in the
  * shared model.
  */
-export type ModeIcon = 'build' | 'ask' | 'plan' | 'custom';
+export enum ModeIcon {
+  Build = 'build',
+  Ask = 'ask',
+  Plan = 'plan',
+  Custom = 'custom',
+}
 
 export interface ChatMode {
   id: string;
@@ -44,13 +49,13 @@ export const ASK_MODE_ID = 'ask';
 export const PLAN_MODE_ID = 'plan';
 
 /** Icon shown for any user-created mode. */
-export const CUSTOM_MODE_ICON: ModeIcon = 'custom';
+export const CUSTOM_MODE_ICON: ModeIcon = ModeIcon.Custom;
 
 /** The built-in modes, in display order. */
 export const BUILT_IN_MODES: ChatMode[] = [
-  { id: BUILD_MODE_ID, name: 'Build', icon: 'build', custom: false },
-  { id: ASK_MODE_ID, name: 'Ask', icon: 'ask', custom: false },
-  { id: PLAN_MODE_ID, name: 'Plan', icon: 'plan', custom: false },
+  { id: BUILD_MODE_ID, name: 'Build', icon: ModeIcon.Build, custom: false },
+  { id: ASK_MODE_ID, name: 'Ask', icon: ModeIcon.Ask, custom: false },
+  { id: PLAN_MODE_ID, name: 'Plan', icon: ModeIcon.Plan, custom: false },
 ];
 
 /** The category headings the mode picker groups under. */

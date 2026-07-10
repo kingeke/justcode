@@ -14,13 +14,34 @@ import type { ToolDefinition } from '@core/ports/tool';
  * items, and tools are flattened (no `function` wrapper).
  */
 
+export enum ResponsesContentPartType {
+  InputText = 'input_text',
+  OutputText = 'output_text',
+  InputImage = 'input_image',
+}
+
+export enum ResponsesItemType {
+  Message = 'message',
+  FunctionCall = 'function_call',
+  FunctionCallOutput = 'function_call_output',
+}
+
+export enum ResponsesToolType {
+  Function = 'function',
+}
+
 export type ResponsesContentPart =
-  | { type: 'input_text' | 'output_text'; text: string }
-  | { type: 'input_image'; image_url: string };
+  | {
+      type:
+        | ResponsesContentPartType.InputText
+        | ResponsesContentPartType.OutputText;
+      text: string;
+    }
+  | { type: ResponsesContentPartType.InputImage; image_url: string };
 
 export interface ResponsesInputItem {
-  type: 'message' | 'function_call' | 'function_call_output';
-  role?: 'user' | 'assistant';
+  type: ResponsesItemType;
+  role?: MessageRole;
   content?: ResponsesContentPart[];
   call_id?: string;
   name?: string;
@@ -29,7 +50,7 @@ export interface ResponsesInputItem {
 }
 
 export interface ResponsesToolDefinition {
-  type: 'function';
+  type: ResponsesToolType.Function;
   name: string;
   description?: string;
   parameters: Record<string, unknown>;
@@ -59,7 +80,7 @@ export function toResponsesPayload(messages: ChatMessage[]): ResponsesPayload {
 
     if (message.role === MessageRole.Tool) {
       input.push({
-        type: 'function_call_output',
+        type: ResponsesItemType.FunctionCallOutput,
         ...(message.toolCallId ? { call_id: message.toolCallId } : {}),
         output: message.content,
       });
@@ -69,14 +90,19 @@ export function toResponsesPayload(messages: ChatMessage[]): ResponsesPayload {
     if (message.role === MessageRole.Assistant && message.toolCalls?.length) {
       if (message.content.trim()) {
         input.push({
-          type: 'message',
-          role: 'assistant',
-          content: [{ type: 'output_text', text: message.content }],
+          type: ResponsesItemType.Message,
+          role: MessageRole.Assistant,
+          content: [
+            {
+              type: ResponsesContentPartType.OutputText,
+              text: message.content,
+            },
+          ],
         });
       }
       for (const call of message.toolCalls) {
         input.push({
-          type: 'function_call',
+          type: ResponsesItemType.FunctionCall,
           call_id: call.id,
           name: call.name,
           arguments: call.arguments,
@@ -91,18 +117,20 @@ export function toResponsesPayload(messages: ChatMessage[]): ResponsesPayload {
     if (!isAssistant) {
       for (const image of message.images ?? []) {
         content.push({
-          type: 'input_image',
+          type: ResponsesContentPartType.InputImage,
           image_url: `data:${image.mediaType};base64,${image.data}`,
         });
       }
     }
     content.push({
-      type: isAssistant ? 'output_text' : 'input_text',
+      type: isAssistant
+        ? ResponsesContentPartType.OutputText
+        : ResponsesContentPartType.InputText,
       text,
     });
     input.push({
-      type: 'message',
-      role: isAssistant ? 'assistant' : 'user',
+      type: ResponsesItemType.Message,
+      role: isAssistant ? MessageRole.Assistant : MessageRole.User,
       content,
     });
   }
@@ -118,7 +146,7 @@ export function toResponsesToolDefinitions(
 ): ResponsesToolDefinition[] | undefined {
   if (!tools?.length) return undefined;
   return tools.map((tool) => ({
-    type: 'function' as const,
+    type: ResponsesToolType.Function,
     name: tool.name,
     ...(tool.description ? { description: tool.description } : {}),
     parameters: tool.parameters as Record<string, unknown>,

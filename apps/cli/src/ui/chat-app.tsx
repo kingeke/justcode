@@ -96,6 +96,7 @@ import {
   toolResultsByCallId,
 } from '@cli/ui/tool-result-pairing';
 import { DEFAULT_SYSTEM_PROMPT } from '@core/application/system-prompt';
+import { ReasoningDisabled } from '@core/ports/chat-model';
 import type {
   ModelInfo,
   ModelReasoning,
@@ -128,6 +129,12 @@ import {
 import { formatTime } from '@cli/ui/format-message-timing.js';
 import { openFileInEditor } from '@cli/ui/open-file.js';
 import { KeyName } from '@cli/ui/key-name.js';
+import {
+  Toggle,
+  toggleColor,
+  toggleLabel,
+  UiColor,
+} from '@cli/shared/toggle.js';
 import { prepareMarkdown } from '@cli/ui/markdown.js';
 import {
   MARKDOWN_MUTED_SYNTAX_STYLES,
@@ -150,6 +157,12 @@ import { APP_NAME } from '@core/branding';
 import type { UpdateNotice } from '@core/application/update-check';
 
 const MAX_COMMAND_ITEMS = 8;
+
+/** What initiated a conversation compaction. */
+export enum CompactTrigger {
+  Manual = 'manual',
+  Auto = 'auto',
+}
 
 // Cosmetic placeholder inserted into the prompt for each pasted image (e.g.
 // "[Image #1]"), mirroring the actual images held in `pendingImages`. Stripped
@@ -187,6 +200,7 @@ const SELF_RENDERING_TOOLS: ReadonlySet<ToolName> = new Set([
   ToolName.Bash,
   ToolName.TodoWrite,
   ToolName.PresentPlan,
+  ToolName.Task,
 ]);
 
 interface ChatAppProps {
@@ -301,12 +315,13 @@ interface ChatAppProps {
   onAutoCompactThresholdChange?: (percent: number) => void;
   initialReasoningEffortByModel?: Record<
     string,
-    Record<string, ReasoningEffort | 'off' | undefined> | undefined
+    | Record<string, ReasoningEffort | ReasoningDisabled.Off | undefined>
+    | undefined
   >;
   onReasoningEffortChange?: (
     providerId: string,
     modelId: string,
-    effort: ReasoningEffort | 'off'
+    effort: ReasoningEffort | ReasoningDisabled.Off
   ) => void;
   /** Per-mode/per-sub-agent default models at startup. */
   initialModelDefaults?: ModelDefaults;
@@ -483,12 +498,13 @@ function tc(
  */
 function effectiveEffort(
   reasoning: ModelReasoning | undefined,
-  stored: ReasoningEffort | 'off' | undefined
-): ReasoningEffort | 'off' | undefined {
+  stored: ReasoningEffort | ReasoningDisabled.Off | undefined
+): ReasoningEffort | ReasoningDisabled.Off | undefined {
   if (!reasoning) return undefined;
   // A mandatory model always reasons, so a stale "off" (no longer offered by the
   // picker) can't disable it — fall back to the default effort instead.
-  if (stored && !(reasoning.mandatory && stored === 'off')) return stored;
+  if (stored && !(reasoning.mandatory && stored === ReasoningDisabled.Off))
+    return stored;
   return reasoning.defaultEffort ?? reasoning.effortLevels[0];
 }
 
@@ -507,11 +523,11 @@ function commandLineContent(
     autoCompactThresholdPercent: number;
     reasoning: {
       supported: boolean;
-      effort: ReasoningEffort | 'off' | undefined;
+      effort: ReasoningEffort | ReasoningDisabled.Off | undefined;
     };
   }
 ): StyledText {
-  const lead = isSelected ? { fg: 'cyan' } : {};
+  const lead = isSelected ? { fg: UiColor.Cyan } : {};
   const chunks: TextChunk[] = [
     tc(isSelected ? '› ' : '  ', lead),
     tc(`/${cmd.name}`, { ...lead, bold: isSelected }),
@@ -528,59 +544,64 @@ function commandLineContent(
   if (cmd.name === CommandName.AutoApprove) {
     chunks.push(
       tc('  '),
-      tc(`[${state.autoApprove ? 'on' : 'off'}]`, {
-        fg: state.autoApprove ? 'green' : 'yellow',
+      tc(`[${toggleLabel(state.autoApprove)}]`, {
+        fg: toggleColor(state.autoApprove),
       })
     );
   } else if (cmd.name === CommandName.LocalRefresh) {
     chunks.push(
       tc('  '),
-      tc(`[${state.localModelAutoRefresh ? 'on' : 'off'}]`, {
-        fg: state.localModelAutoRefresh ? 'green' : 'yellow',
+      tc(`[${toggleLabel(state.localModelAutoRefresh)}]`, {
+        fg: toggleColor(state.localModelAutoRefresh),
       })
     );
   } else if (cmd.name === CommandName.ModelAutoRefresh) {
     chunks.push(
       tc('  '),
-      tc(`[${state.modelAutoRefresh ? 'on' : 'off'}]`, {
-        fg: state.modelAutoRefresh ? 'green' : 'yellow',
+      tc(`[${toggleLabel(state.modelAutoRefresh)}]`, {
+        fg: toggleColor(state.modelAutoRefresh),
       })
     );
   } else if (cmd.name === CommandName.LazyToolLoading) {
     chunks.push(
       tc('  '),
-      tc(`[${state.lazyToolLoading ? 'on' : 'off'}]`, {
-        fg: state.lazyToolLoading ? 'green' : 'yellow',
+      tc(`[${toggleLabel(state.lazyToolLoading)}]`, {
+        fg: toggleColor(state.lazyToolLoading),
       })
     );
   } else if (cmd.name === CommandName.ExpandTools) {
     chunks.push(
       tc('  '),
-      tc(`[${state.expandTools ? 'on' : 'off'}]`, {
-        fg: state.expandTools ? 'green' : 'yellow',
+      tc(`[${toggleLabel(state.expandTools)}]`, {
+        fg: toggleColor(state.expandTools),
       })
     );
   } else if (cmd.name === CommandName.ReadLimit) {
-    chunks.push(tc('  '), tc(`[${state.maxReadLines} lines]`, { fg: 'green' }));
+    chunks.push(
+      tc('  '),
+      tc(`[${state.maxReadLines} lines]`, { fg: UiColor.Green })
+    );
   } else if (cmd.name === CommandName.ContextWindow) {
     chunks.push(
       tc('  '),
       state.maxHistoryMessages > 0
-        ? tc(`[${state.maxHistoryMessages} items]`, { fg: 'green' })
-        : tc('[off]', { fg: 'yellow' })
+        ? tc(`[${state.maxHistoryMessages} items]`, { fg: UiColor.Green })
+        : tc('[off]', { fg: UiColor.Yellow })
     );
   } else if (cmd.name === CommandName.AutoCompact) {
     chunks.push(
       tc('  '),
       state.autoCompactThresholdPercent > 0
-        ? tc(`[${state.autoCompactThresholdPercent}%]`, { fg: 'green' })
-        : tc('[off]', { fg: 'yellow' })
+        ? tc(`[${state.autoCompactThresholdPercent}%]`, { fg: UiColor.Green })
+        : tc('[off]', { fg: UiColor.Yellow })
     );
   } else if (cmd.name === CommandName.Reasoning) {
     chunks.push(
       tc('  '),
       state.reasoning.supported
-        ? tc(`[${state.reasoning.effort ?? 'off'}]`, { fg: 'green' })
+        ? tc(`[${state.reasoning.effort ?? ReasoningDisabled.Off}]`, {
+            fg: UiColor.Green,
+          })
         : tc('[n/a]', { fg: MUTED })
     );
   }
@@ -603,13 +624,13 @@ function metricsLineContent(
 
   const chunks: TextChunk[] = [
     tc('ctx ', { fg: MUTED }),
-    tc(metrics.lastInputTokens.toLocaleString(), { fg: 'white' }),
+    tc(metrics.lastInputTokens.toLocaleString(), { fg: UiColor.White }),
     tc(' in ', { fg: MUTED }),
-    tc(metrics.inputTokens.toLocaleString(), { fg: 'white' }),
+    tc(metrics.inputTokens.toLocaleString(), { fg: UiColor.White }),
     tc(' cached ', { fg: MUTED }),
-    tc(metrics.cachedTokens.toLocaleString(), { fg: 'white' }),
+    tc(metrics.cachedTokens.toLocaleString(), { fg: UiColor.White }),
     tc(' out ', { fg: MUTED }),
-    tc(metrics.outputTokens.toLocaleString(), { fg: 'white' }),
+    tc(metrics.outputTokens.toLocaleString(), { fg: UiColor.White }),
   ];
 
   if (pct != null) {
@@ -622,7 +643,7 @@ function metricsLineContent(
   if (metrics.cost > 0) {
     chunks.push(
       tc(' $', { fg: MUTED }),
-      tc(metrics.cost.toFixed(4), { fg: 'white' })
+      tc(metrics.cost.toFixed(4), { fg: UiColor.White })
     );
   }
 
@@ -1080,7 +1101,8 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   const [reasoningEffortByModel, setReasoningEffortByModel] = useState<
     Record<
       string,
-      Record<string, ReasoningEffort | 'off' | undefined> | undefined
+      | Record<string, ReasoningEffort | ReasoningDisabled.Off | undefined>
+      | undefined
     >
   >(props.initialReasoningEffortByModel ?? {});
   const reasoningEffortByModelRef = useRef(reasoningEffortByModel);
@@ -1219,6 +1241,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     }
     if (message.name === ToolName.PresentPlan) {
       return <PlanBlock content={message.content} />;
+    }
+    if (message.name === ToolName.Task) {
+      return <TaskResultBlock content={message.content} />;
     }
     return (
       <ToolResultInline
@@ -1675,23 +1700,23 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
     if (pendingApproval) {
       const choice = value.toLowerCase();
-      if (key.ctrl && key.name === 'c') {
+      if (key.ctrl && key.name === KeyName.C) {
         exit();
         return;
       }
-      if (choice === 'y' || key.name === 'return') {
+      if (choice === KeyName.Y || key.name === KeyName.Return) {
         resolveApproval(true, false);
-      } else if (choice === 'a') {
+      } else if (choice === KeyName.A) {
         resolveApproval(true, true);
-      } else if (choice === 'n') {
+      } else if (choice === KeyName.N) {
         resolveApproval(false, false);
-      } else if (key.name === 'escape') {
+      } else if (key.name === KeyName.Escape) {
         cancelActiveRequest();
       }
       return;
     }
 
-    if (key.ctrl && key.name === 'c') {
+    if (key.ctrl && key.name === KeyName.C) {
       // A second Ctrl+C within the window exits.
       if (exitArmedRef.current) {
         exit();
@@ -1708,7 +1733,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     // terminals don't forward pasted image bytes over stdin, so we read the OS
     // clipboard directly. (A plain Cmd/Ctrl+V text paste still works as usual
     // via the textarea's own paste handling.)
-    if (key.ctrl && key.name === 'v') {
+    if (key.ctrl && key.name === KeyName.V) {
       if (attachClipboardImage()) return;
     }
 
@@ -1812,21 +1837,21 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     // Browsing finished bash commands: arrows move the selection, Enter/Space
     // toggle the selected command's output box, Esc returns to the prompt.
     if (browseIndex !== null) {
-      if (key.name === 'escape') {
+      if (key.name === KeyName.Escape) {
         setBrowseIndex(null);
         return;
       }
-      if (key.name === 'up') {
+      if (key.name === KeyName.Up) {
         setBrowseIndex((i) => Math.max(0, (i ?? 0) - 1));
         return;
       }
-      if (key.name === 'down') {
+      if (key.name === KeyName.Down) {
         setBrowseIndex((i) =>
           Math.min(bashToolMessages.length - 1, (i ?? 0) + 1)
         );
         return;
       }
-      if (key.name === 'return' || key.name === 'space') {
+      if (key.name === KeyName.Return || key.name === KeyName.Space) {
         if (selectedBashId !== undefined) {
           toggleBashExpanded(selectedBashId);
         }
@@ -1839,7 +1864,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     // Enter browse mode from an empty prompt when there are bash results.
     // Skipped when /expand-tools is on, since every box is already inline.
     if (
-      key.name === 'up' &&
+      key.name === KeyName.Up &&
       !input &&
       !isSending &&
       !expandTools &&
@@ -1851,7 +1876,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       return;
     }
 
-    if (key.name === 'escape') {
+    if (key.name === KeyName.Escape) {
       if (isSending) {
         cancelActiveRequest();
         return;
@@ -1870,17 +1895,17 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     }
 
     if (isCommandMode && filteredCommands.length) {
-      if (key.name === 'down') {
+      if (key.name === KeyName.Down) {
         setSelectedCommandIndex((i) =>
           Math.min(i + 1, filteredCommands.length - 1)
         );
         return;
       }
-      if (key.name === 'up') {
+      if (key.name === KeyName.Up) {
         setSelectedCommandIndex((i) => Math.max(i - 1, 0));
         return;
       }
-      if (key.name === 'tab') {
+      if (key.name === KeyName.Tab) {
         const cmd = filteredCommands[selectedCommandIndex];
         if (cmd) setInputWithCursorAtEnd(`/${cmd.name} `);
         return;
@@ -1890,17 +1915,17 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
     if (!showMentionSuggestions && !showSymbolSuggestions) return;
 
-    if (key.name === 'down') {
+    if (key.name === KeyName.Down) {
       setSelectedSuggestionIndex((i) =>
         Math.min(i + 1, activeSuggestions.length - 1)
       );
       return;
     }
-    if (key.name === 'up') {
+    if (key.name === KeyName.Up) {
       setSelectedSuggestionIndex((i) => Math.max(i - 1, 0));
       return;
     }
-    if (key.name === 'tab') {
+    if (key.name === KeyName.Tab) {
       if (selectedSuggestion) {
         setInputWithCursorAtEnd(
           applyActiveSuggestion(input, selectedSuggestion)
@@ -2437,7 +2462,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         }
         // "off" disables trimming (send the whole conversation); a positive
         // count caps how many recent context window items are forwarded.
-        const isOff = trimmed.toLowerCase() === 'off';
+        const isOff = trimmed.toLowerCase() === ReasoningDisabled.Off;
         const count = isOff ? 0 : Number.parseInt(trimmed, 10);
         if (!isOff && (!Number.isFinite(count) || count <= 0)) {
           setError(
@@ -2475,7 +2500,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           .then((summary) => {
             const chunks: TextChunk[] = [];
             if (summary.plan) {
-              chunks.push(tc(`${summary.plan} `, { fg: 'white' }));
+              chunks.push(tc(`${summary.plan} `, { fg: UiColor.White }));
             }
             for (const window of summary.windows) {
               if (chunks.length > 0) chunks.push(tc(' · ', { fg: MUTED }));
@@ -2545,7 +2570,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             tc(' · ', { fg: MUTED }),
             tc(
               `${metrics.lastInputTokens.toLocaleString()} / ${windowSize.toLocaleString()} tokens`,
-              { fg: 'white' }
+              { fg: UiColor.White }
             ),
           ])
         );
@@ -2553,7 +2578,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       }
 
       case CommandName.Compact:
-        void runCompaction('manual');
+        void runCompaction(CompactTrigger.Manual);
         return;
 
       case CommandName.AutoCompact: {
@@ -2567,7 +2592,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           );
           return;
         }
-        const isOff = trimmed.toLowerCase() === 'off';
+        const isOff = trimmed.toLowerCase() === ReasoningDisabled.Off;
         const percent = isOff ? 0 : Number.parseInt(trimmed, 10);
         if (
           !isOff &&
@@ -2829,7 +2854,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
    * it takes the sending slot (spinner, queued messages) like a normal turn.
    */
   const runCompaction = async (
-    trigger: 'manual' | 'auto',
+    trigger: CompactTrigger,
     target?: Conversation
   ): Promise<void> => {
     if (compactingRef.current || activeRequestControllerRef.current) return;
@@ -2837,7 +2862,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     if (!conversationToCompact || !session) return;
     const model = activeModel || session.activeModel;
     if (!model) {
-      if (trigger === 'manual') {
+      if (trigger === CompactTrigger.Manual) {
         flashCommandNotice('Pick a model before compacting');
       }
       return;
@@ -2848,7 +2873,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       (conversationToCompact.messages.length === 1 &&
         firstMessage?.isCompactSummary)
     ) {
-      if (trigger === 'manual') {
+      if (trigger === CompactTrigger.Manual) {
         flashCommandNotice('Nothing to compact yet');
       }
       return;
@@ -2859,7 +2884,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     compactingRef.current = true;
     setIsSending(true);
     const compactLabel =
-      trigger === 'auto'
+      trigger === CompactTrigger.Auto
         ? 'Context almost full — compacting conversation...'
         : 'Compacting conversation...';
     setStatus(compactLabel);
@@ -2892,7 +2917,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           flashCommandNotice(
             new StyledText([
               tc('Compacting ', { fg: MUTED }),
-              tc(compactSweepBar(now), { fg: 'cyan' }),
+              tc(compactSweepBar(now), { fg: UiColor.Cyan }),
               tc(` · ${summaryTokens.toLocaleString()} summary tokens`, {
                 fg: MUTED,
               }),
@@ -3742,7 +3767,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     ) {
       const pct = contextPct(metricsRef.current.lastInputTokens, contextWindow);
       if (pct >= threshold) {
-        await runCompaction('auto', completedConversation);
+        await runCompaction(CompactTrigger.Auto, completedConversation);
       } else {
         // Escalating heads-up as the threshold approaches: once at 5 points
         // left, then again at 3, 2, and 1. Each milestone flashes once.
@@ -3830,7 +3855,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           }));
           props.onReasoningEffortChange?.(providerId, activeModel, effort);
           setStatus(
-            effort === 'off'
+            effort === ReasoningDisabled.Off
               ? `Reasoning off for ${activeModelInfo.displayName}`
               : `Reasoning effort for ${activeModelInfo.displayName} set to ${effort}`
           );
@@ -4182,7 +4207,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           flexShrink={0}
           content={
             new StyledText([
-              tc(`${APP_NAME} `, { fg: 'cyan' }),
+              tc(`${APP_NAME} `, { fg: UiColor.Cyan }),
               tc(`v${props.version}`, { fg: MUTED }),
             ])
           }
@@ -4193,7 +4218,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             content={
               new StyledText([
                 tc(`Update available: v${props.updateNotice.latestVersion} `, {
-                  fg: 'yellow',
+                  fg: UiColor.Yellow,
                 }),
                 tc(`— ${props.updateNotice.upgradeCommand}`, { fg: MUTED }),
               ])
@@ -4240,7 +4265,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             if (message.isCompactSummary) {
               return (
                 <box key={message.id} flexDirection="column" marginY={1}>
-                  <text fg="cyan">─── Conversation compacted ───</text>
+                  <text fg={UiColor.Cyan}>─── Conversation compacted ───</text>
                   <MarkdownView content={message.content} muted />
                   <text fg={MUTED}>{formatTime(message.createdAt)}</text>
                 </box>
@@ -4263,7 +4288,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
               >
                 {thinking ? (
                   <box flexDirection="column" marginBottom={0}>
-                    <text fg="yellow">
+                    <text fg={UiColor.Yellow}>
                       {thinkingCollapsed ? '+ ' : ''}Thought:{' '}
                       {formatDuration(thinking.durationMs)}
                     </text>
@@ -4278,16 +4303,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     alignItems="flex-end"
                     border={['right']}
                     borderStyle="rounded"
-                    borderColor="cyan"
+                    borderColor={UiColor.Cyan}
                     paddingRight={1}
                     marginY={1}
                   >
                     {/* An image-only message has no prose — skip the empty
                         line so the bubble doesn't render a blank row. */}
                     {message.content ? (
-                      <text fg="white" attributes={BOLD}>
-                        {message.content}
-                      </text>
+                      <MarkdownView content={message.content} />
                     ) : null}
                     <text fg={MUTED}>{formatTime(message.createdAt)}</text>
                   </box>
@@ -4311,7 +4334,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                       return (
                         <box key={call.id} flexDirection="column">
                           {ownBox ? null : (
-                            <text fg="magenta">
+                            <text fg={UiColor.Magenta}>
                               ⚙ {call.name}({summarizeToolArgs(call.arguments)})
                             </text>
                           )}
@@ -4338,7 +4361,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                   <text
                     content={
                       new StyledText([
-                        tc(message.role, { fg: 'yellow' }),
+                        tc(message.role, { fg: UiColor.Yellow }),
                         tc(`: ${message.content}`),
                       ])
                     }
@@ -4368,13 +4391,13 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             {streamingThinking ? (
               <box flexDirection="column">
                 {thinkingDuration !== null ? (
-                  <text fg="yellow">
+                  <text fg={UiColor.Yellow}>
                     {`${thinkingCollapsed ? '+ ' : ''}Thought: ${formatDuration(thinkingDuration)}`}
                   </text>
                 ) : (
                   <box flexDirection="row">
-                    <text fg="yellow">thinking </text>
-                    <Spinner fg="yellow" />
+                    <text fg={UiColor.Yellow}>thinking </text>
+                    <Spinner fg={UiColor.Yellow} />
                   </box>
                 )}
                 {thinkingCollapsed ? null : (
@@ -4393,10 +4416,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             marginTop={1}
             border
             borderStyle="rounded"
-            borderColor="yellow"
+            borderColor={UiColor.Yellow}
             paddingX={1}
           >
-            <text fg="yellow" attributes={BOLD}>
+            <text fg={UiColor.Yellow} attributes={BOLD}>
               Run {pendingApproval.request.toolName}?
             </text>
             <text>{pendingApproval.request.title}</text>
@@ -4419,11 +4442,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
               <text
                 content={
                   new StyledText([
-                    tc('[y]', { fg: 'green' }),
+                    tc('[y]', { fg: UiColor.Green }),
                     tc('es  '),
-                    tc('[a]', { fg: 'cyan' }),
+                    tc('[a]', { fg: UiColor.Cyan }),
                     tc('lways  '),
-                    tc('[n]', { fg: 'red' }),
+                    tc('[n]', { fg: UiColor.Red }),
                     tc('o'),
                   ])
                 }
@@ -4441,12 +4464,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             flexShrink={0}
             border
             borderStyle="single"
-            borderColor={visibleCommands.length ? 'cyan' : 'yellow'}
+            borderColor={visibleCommands.length ? UiColor.Cyan : UiColor.Yellow}
             paddingX={1}
           >
             <text fg={MUTED}>commands</text>
             {visibleCommands.length === 0 ? (
-              <text fg="yellow">/{commandQuery} doesn&apos;t exist</text>
+              <text fg={UiColor.Yellow}>
+                /{commandQuery} doesn&apos;t exist
+              </text>
             ) : null}
             {visibleCommands.map((cmd, index) => (
               <box key={cmd.name} flexShrink={0}>
@@ -4532,7 +4557,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                 backgroundColor={INPUT_BG}
                 onMouseDown={scrollToTop}
               >
-                <text fg="cyan">↑ Jump to top</text>
+                <text fg={UiColor.Cyan}>↑ Jump to top</text>
               </box>
             ) : null}
             {showJumpToBottom ? (
@@ -4541,7 +4566,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                 backgroundColor={INPUT_BG}
                 onMouseDown={scrollToBottom}
               >
-                <text fg="cyan">↓ Jump to bottom</text>
+                <text fg={UiColor.Cyan}>↓ Jump to bottom</text>
               </box>
             ) : null}
           </box>
@@ -4554,10 +4579,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             flexDirection="column"
             border
             borderStyle="rounded"
-            borderColor="yellow"
+            borderColor={UiColor.Yellow}
             paddingX={1}
           >
-            <text fg="yellow" attributes={BOLD}>
+            <text fg={UiColor.Yellow} attributes={BOLD}>
               {pendingQuestion.request.question}
             </text>
             {pendingQuestion.request.options?.length
@@ -4584,7 +4609,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             flexDirection="column"
             border
             borderStyle="rounded"
-            borderColor={subAgentBrowseIndex !== null ? 'cyan' : MUTED}
+            borderColor={subAgentBrowseIndex !== null ? UiColor.Cyan : MUTED}
             paddingX={1}
           >
             <text fg={MUTED}>
@@ -4600,14 +4625,17 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                 content={
                   new StyledText([
                     tc(index === subAgentBrowseIndex ? '› ' : '  ', {
-                      fg: index === subAgentBrowseIndex ? 'cyan' : MUTED,
+                      fg: index === subAgentBrowseIndex ? UiColor.Cyan : MUTED,
                     }),
                     tc(`${subAgentStatusGlyph(entry.status)} `, {
                       fg: subAgentStatusColor(entry.status),
                     }),
                     tc(`${entry.agentType}  `, { fg: MUTED }),
                     tc(entry.description, {
-                      fg: index === subAgentBrowseIndex ? 'cyan' : 'white',
+                      fg:
+                        index === subAgentBrowseIndex
+                          ? UiColor.Cyan
+                          : UiColor.White,
                     }),
                     tc(
                       entry.model
@@ -4636,12 +4664,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                           ? ` · ${entry.latestActivity}`
                           : ' · starting…'
                         : entry.endedAt
-                          ? ` · ${Math.max(
-                              1,
-                              Math.round(
-                                (entry.endedAt - entry.startedAt) / 1000
-                              )
-                            )}s`
+                          ? ` · ${formatDuration(
+                              entry.endedAt - entry.startedAt
+                            )}`
                           : '',
                       { fg: MUTED }
                     ),
@@ -4659,7 +4684,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             flexDirection="column"
             border
             borderStyle="rounded"
-            borderColor={queueEditIndex !== null ? 'cyan' : MUTED}
+            borderColor={queueEditIndex !== null ? UiColor.Cyan : MUTED}
             paddingX={1}
           >
             <text fg={MUTED}>
@@ -4675,10 +4700,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                 content={
                   new StyledText([
                     tc(index === queueEditIndex ? '› ' : '  ', {
-                      fg: index === queueEditIndex ? 'cyan' : MUTED,
+                      fg: index === queueEditIndex ? UiColor.Cyan : MUTED,
                     }),
                     tc(firstLine(message), {
-                      fg: index === queueEditIndex ? 'cyan' : 'white',
+                      fg:
+                        index === queueEditIndex ? UiColor.Cyan : UiColor.White,
                     }),
                   ])
                 }
@@ -4717,9 +4743,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             placeholder={modePlaceholder(activeMode)}
             backgroundColor={APP_BG}
             textColor={MARKDOWN_FG}
-            focusedTextColor="white"
+            focusedTextColor={UiColor.White}
             placeholderColor={MUTED}
-            cursorColor="white"
+            cursorColor={UiColor.White}
             // A terminal forwards a paste over stdin, but pasted image data is
             // not part of it — so when a paste carries no text, check the OS
             // clipboard for an image and attach it instead of inserting nothing.
@@ -4783,9 +4809,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
               if (!promptArea || promptArea.isDestroyed) return;
 
               if (
-                event.name === 'return' ||
-                event.name === 'kpenter' ||
-                event.name === 'linefeed'
+                event.name === KeyName.Return ||
+                event.name === KeyName.KpEnter ||
+                event.name === KeyName.Linefeed
               ) {
                 event.preventDefault();
                 // Any *modified* Enter inserts a newline; only a bare,
@@ -4857,7 +4883,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             {symbolSuggestions.map((suggestion, index) => (
               <text
                 key={suggestion}
-                {...(index === selectedSuggestionIndex ? { fg: 'cyan' } : {})}
+                {...(index === selectedSuggestionIndex
+                  ? { fg: UiColor.Cyan }
+                  : {})}
               >
                 {index === selectedSuggestionIndex ? '>' : ' '} ::{suggestion}
               </text>
@@ -4878,7 +4906,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
               return (
                 <text
                   key={suggestion}
-                  {...(index === selectedSuggestionIndex ? { fg: 'cyan' } : {})}
+                  {...(index === selectedSuggestionIndex
+                    ? { fg: UiColor.Cyan }
+                    : {})}
                 >
                   {index === selectedSuggestionIndex ? '>' : ' '} @{suggestion}
                   {mode ? ` ${modeGlyph(mode.icon)} ${mode.name} mode` : ''}
@@ -4893,19 +4923,19 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           {/* flexShrink={0} stops yoga from compressing this row and wrapping the
             model name mid-word during the transition back from the picker. */}
           <box flexDirection="row" flexShrink={0}>
-            {isSending ? <Spinner fg="yellow" /> : null}
+            {isSending ? <Spinner fg={UiColor.Yellow} /> : null}
             {isSending ? <text> </text> : null}
-            <text fg="cyan" attributes={BOLD} wrapMode="none">
+            <text fg={UiColor.Cyan} attributes={BOLD} wrapMode="none">
               {`${activeModelInfo?.providerId ?? props.providerId ?? ''}/${
                 activeModel || session?.activeModel || 'loading'
               }`}
             </text>
             {reasoningAvailable ? (
-              <text fg="yellow" attributes={BOLD} wrapMode="none">
-                {` ${activeReasoningEffort ?? 'off'}`}
+              <text fg={UiColor.Yellow} attributes={BOLD} wrapMode="none">
+                {` ${activeReasoningEffort ?? ReasoningDisabled.Off}`}
               </text>
             ) : null}
-            <text fg="magenta" attributes={BOLD} wrapMode="none">
+            <text fg={UiColor.Magenta} attributes={BOLD} wrapMode="none">
               {activeModeIcon
                 ? ` ${activeModeIcon} ${activeModeName}`
                 : ` ${activeModeName}`}
@@ -4930,7 +4960,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             <text content={statusLineContent('✓ Copied to clipboard')} />
           ) : usageLoading ? (
             <box flexDirection="row">
-              <Spinner fg="cyan" />
+              <Spinner fg={UiColor.Cyan} />
               <text fg={MUTED}> Fetching usage…</text>
             </box>
           ) : commandNotice ? (
@@ -4948,10 +4978,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                   tc(`TTFT ${formatDuration(displayStats.ttftMs)} · `, {
                     fg: MUTED,
                   }),
-                  tc(displayStats.tokensPerSecond.toFixed(1), { fg: 'white' }),
+                  tc(displayStats.tokensPerSecond.toFixed(1), {
+                    fg: UiColor.White,
+                  }),
                   tc(' tok/s · AVG ', { fg: MUTED }),
                   tc(displayStats.avgTokensPerSecond.toFixed(1), {
-                    fg: 'white',
+                    fg: UiColor.White,
                   }),
                 ])
               }
@@ -4962,7 +4994,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         </box>
         {error ? (
           <box marginTop={1}>
-            <text fg="red">Error: {error}</text>
+            <text fg={UiColor.Red}>Error: {error}</text>
           </box>
         ) : null}
       </box>
@@ -4994,12 +5026,12 @@ const BashResult = React.memo(function BashResult({
   const summary = firstLine(command || output);
   const showBox = running || expanded;
   const color = selected
-    ? 'cyan'
+    ? UiColor.Cyan
     : running
-      ? 'yellow'
+      ? UiColor.Yellow
       : error
-        ? 'red'
-        : 'green';
+        ? UiColor.Red
+        : UiColor.Green;
   return (
     <box flexDirection="column">
       <text
@@ -5021,13 +5053,19 @@ const BashResult = React.memo(function BashResult({
           marginLeft={2}
           border
           borderStyle="rounded"
-          borderColor={selected ? 'cyan' : error ? 'red' : 'gray'}
+          borderColor={
+            selected ? UiColor.Cyan : error ? UiColor.Red : UiColor.Gray
+          }
           paddingX={1}
         >
-          <text fg="cyan">$ {command}</text>
+          <text fg={UiColor.Cyan}>$ {command}</text>
           {/* A full-width box with only a top border draws the horizontal rule
               that splits the command from its output. */}
-          <box border={['top']} borderStyle="single" borderColor="gray" />
+          <box
+            border={['top']}
+            borderStyle="single"
+            borderColor={UiColor.Gray}
+          />
           {running ? (
             <text fg={MUTED}>running…</text>
           ) : (
@@ -5071,7 +5109,7 @@ const ToolResultBlock = React.memo(function ToolResultBlock({
       marginLeft={2}
       border
       borderStyle="rounded"
-      borderColor="gray"
+      borderColor={UiColor.Gray}
       paddingX={1}
     >
       <text content={ansiToStyledText(truncatePreview(content))} />
@@ -5212,11 +5250,11 @@ function subAgentStatusGlyph(status: SubAgentRunStatus): string {
 function subAgentStatusColor(status: SubAgentRunStatus): string {
   switch (status) {
     case SubAgentRunStatus.Running:
-      return 'yellow';
+      return UiColor.Yellow;
     case SubAgentRunStatus.Completed:
-      return 'green';
+      return UiColor.Green;
     case SubAgentRunStatus.Failed:
-      return 'red';
+      return UiColor.Red;
     case SubAgentRunStatus.Aborted:
       return MUTED;
   }
@@ -5234,8 +5272,8 @@ function truncate(value: string, max: number): string {
 /** Color a rendered todo line by its status marker ([x] done, [~] active). */
 function todoLineColor(line: string): string {
   const trimmed = line.trimStart();
-  if (trimmed.startsWith('[x]')) return 'green';
-  if (trimmed.startsWith('[~]')) return 'yellow';
+  if (trimmed.startsWith('[x]')) return UiColor.Green;
+  if (trimmed.startsWith('[~]')) return UiColor.Yellow;
   return MUTED;
 }
 
@@ -5300,16 +5338,43 @@ const PlanBlock = React.memo(function PlanBlock({
       marginY={1}
       border={['left']}
       borderStyle="rounded"
-      borderColor="cyan"
+      borderColor={UiColor.Cyan}
       paddingLeft={1}
     >
-      <text fg="cyan" attributes={BOLD}>
+      <text fg={UiColor.Cyan} attributes={BOLD}>
         Plan
       </text>
       <MarkdownView content={content} />
       <text fg={MUTED}>
         /implement to build it · /edit-plan to revise it first
       </text>
+    </box>
+  );
+});
+
+/**
+ * Renders a task (sub agent) tool result — the sub agent's markdown report —
+ * as a titled card, mirroring PlanBlock so the report renders as markdown
+ * rather than raw text.
+ */
+const TaskResultBlock = React.memo(function TaskResultBlock({
+  content,
+}: {
+  content: string;
+}): React.ReactNode {
+  return (
+    <box
+      flexDirection="column"
+      marginY={1}
+      border={['left']}
+      borderStyle="rounded"
+      borderColor={UiColor.Cyan}
+      paddingLeft={1}
+    >
+      <text fg={UiColor.Cyan} attributes={BOLD}>
+        Task
+      </text>
+      <MarkdownView content={content} />
     </box>
   );
 });
@@ -5361,9 +5426,9 @@ function contextBar(pct: number, width = 20): string {
 /** Context-pressure color, matching the extension's ring: amber above 60%,
  * red above 80%. */
 function contextUsageColor(pct: number): string {
-  if (pct > 80) return 'red';
-  if (pct > 60) return 'yellow';
-  return 'white';
+  if (pct > 80) return UiColor.Red;
+  if (pct > 60) return UiColor.Yellow;
+  return UiColor.White;
 }
 
 function mergeProviders(

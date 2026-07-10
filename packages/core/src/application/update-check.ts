@@ -21,7 +21,12 @@ import { APP_VERSION, appUserAgent } from '@core/version';
  */
 
 /** How the running binary was installed, which decides the upgrade command. */
-export type UpdateChannel = 'curl' | 'npm' | 'brew' | 'unknown';
+export enum UpdateChannel {
+  Curl = 'curl',
+  Npm = 'npm',
+  Brew = 'brew',
+  Unknown = 'unknown',
+}
 
 export interface UpdateNotice {
   currentVersion: string;
@@ -95,13 +100,14 @@ export function detectChannel(
 
   for (const path of candidates) {
     if (!path) continue;
-    if (/[\\/](Cellar|homebrew|linuxbrew)[\\/]/.test(path)) return 'brew';
-    if (path.includes('node_modules')) return 'npm';
+    if (/[\\/](Cellar|homebrew|linuxbrew)[\\/]/.test(path))
+      return UpdateChannel.Brew;
+    if (path.includes('node_modules')) return UpdateChannel.Npm;
     // curl installs land in `$HOME/.justcode/bin/justcode`.
     if (new RegExp(`[\\\\/]\\.${APP_NAME_LOWERED}[\\\\/]bin[\\\\/]`).test(path))
-      return 'curl';
+      return UpdateChannel.Curl;
   }
-  return 'unknown';
+  return UpdateChannel.Unknown;
 }
 
 /** The upgrade instruction to print for a given install channel. */
@@ -111,14 +117,14 @@ export function upgradeCommandFor(channel: UpdateChannel): string {
     ? `https://github.com/${slug}/releases/latest`
     : `${APP_NAME} releases`;
   switch (channel) {
-    case 'npm':
+    case UpdateChannel.Npm:
       return `npm update -g ${pkg.name}`;
-    case 'brew':
+    case UpdateChannel.Brew:
       // `brew update` first so the tap's formula bump is fetched; without it a
       // stale local tap makes `brew upgrade` a confusing no-op ("already
       // installed") even when a newer release exists.
       return `brew update && brew upgrade ${APP_NAME_LOWERED}`;
-    case 'curl':
+    case UpdateChannel.Curl:
       return slug
         ? `curl -fsSL https://raw.githubusercontent.com/${slug}/main/scripts/install.sh | sh`
         : `re-run the ${APP_NAME} install script`;

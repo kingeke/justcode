@@ -13,6 +13,12 @@ interface BashArguments {
   timeout?: number;
 }
 
+/** Why a running command was killed, distinct from an ordinary exit. */
+export enum BashKillReason {
+  Timeout = 'timeout',
+  Aborted = 'aborted',
+}
+
 /** Default time a command may run before it is killed. */
 export const DEFAULT_BASH_TIMEOUT_MS = 120_000;
 /** Hard ceiling on the requested timeout, regardless of what the model asks. */
@@ -146,14 +152,14 @@ export class BashTool implements Tool {
       child.stderr?.on('data', collect);
 
       // `killed` distinguishes a timeout/abort from an ordinary non-zero exit.
-      let killReason: 'timeout' | 'aborted' | undefined;
+      let killReason: BashKillReason | undefined;
       const timer = setTimeout(() => {
-        killReason = 'timeout';
+        killReason = BashKillReason.Timeout;
         kill('SIGTERM');
       }, timeoutMs);
 
       const onAbort = (): void => {
-        killReason = 'aborted';
+        killReason = BashKillReason.Aborted;
         kill('SIGTERM');
       };
       context.signal?.addEventListener('abort', onAbort, { once: true });
@@ -186,7 +192,7 @@ export class BashTool implements Tool {
     truncated: boolean,
     code: number | null,
     signal: NodeJS.Signals | null,
-    killReason: 'timeout' | 'aborted' | undefined
+    killReason: BashKillReason | undefined
   ): ToolResult {
     const body = output.length > 0 ? output : '(no output)';
     // On truncation, point the model at the paging-aware read path — the
@@ -196,13 +202,13 @@ export class BashTool implements Tool {
       ? `\n\n(output truncated at ${MAX_BASH_OUTPUT_CHARS} characters — to read a file, use the read_file tool instead, which pages cleanly)`
       : '';
 
-    if (killReason === 'timeout') {
+    if (killReason === BashKillReason.Timeout) {
       return {
         content: `Command timed out and was killed.\n${body}${note}`,
         isError: true,
       };
     }
-    if (killReason === 'aborted') {
+    if (killReason === BashKillReason.Aborted) {
       return {
         content: `Command was cancelled.\n${body}${note}`,
         isError: true,

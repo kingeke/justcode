@@ -17,6 +17,7 @@ import {
   pasteFromClipboard,
 } from '@cli/ui/clipboard.js';
 import { fuzzyFilter } from '@cli/ui/fuzzy-filter.js';
+import { SortDirection } from '@cli/shared/sort.js';
 
 const VISIBLE_ROWS = 18;
 const BOLD = createTextAttributes({ bold: true });
@@ -24,29 +25,27 @@ const MUTED = '#8a8a8a';
 const MUTED_RGBA = RGBA.fromHex(MUTED);
 const INVERSE = createTextAttributes({ inverse: true });
 
-const SORT_MODES = [
-  'provider',
-  'input-cost',
-  'output-cost',
-  'context-window',
-] as const;
-type SortMode = (typeof SORT_MODES)[number];
-type SortDirection = 'asc' | 'desc';
+export enum SortMode {
+  Provider = 'provider',
+  InputCost = 'input-cost',
+  OutputCost = 'output-cost',
+  ContextWindow = 'context-window',
+}
 type SortState = {
   mode: SortMode;
   direction: SortDirection;
 };
 
 const SORT_MODE_LABELS: Record<SortMode, string> = {
-  provider: 'provider',
-  'input-cost': 'input cost',
-  'output-cost': 'output cost',
-  'context-window': 'context length',
+  [SortMode.Provider]: 'provider',
+  [SortMode.InputCost]: 'input cost',
+  [SortMode.OutputCost]: 'output cost',
+  [SortMode.ContextWindow]: 'context length',
 };
 
-const SORT_STATES: SortState[] = SORT_MODES.flatMap((mode) => [
-  { mode, direction: 'asc' },
-  { mode, direction: 'desc' },
+const SORT_STATES: SortState[] = Object.values(SortMode).flatMap((mode) => [
+  { mode, direction: SortDirection.Asc },
+  { mode, direction: SortDirection.Desc },
 ]);
 
 interface ModelPickerProps {
@@ -65,25 +64,31 @@ interface ModelPickerProps {
   onCancel: () => void;
 }
 
+/** The kinds of row the model picker renders. */
+export enum ModelRowKind {
+  Header = 'header',
+  Model = 'model',
+}
+
 /**
  * A row of the picker list: either a provider heading (focusable, toggles its
  * group's collapse) or a selectable model.
  */
 type PickerRow =
   | {
-      kind: 'header';
+      kind: ModelRowKind.Header;
       providerId: ProviderId;
       groupName: string;
       count: number;
       collapsed: boolean;
     }
-  | { kind: 'model'; model: ModelInfo };
+  | { kind: ModelRowKind.Model; model: ModelInfo };
 
 export function ModelPicker(props: ModelPickerProps): React.ReactNode {
   const [query, setQuery] = useState('');
   const [sortState, setSortState] = useState<SortState>({
-    mode: 'provider',
-    direction: 'asc',
+    mode: SortMode.Provider,
+    direction: SortDirection.Asc,
   });
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [collapsedProviders, setCollapsedProviders] = useState<Set<ProviderId>>(
@@ -110,8 +115,11 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
     const sorted = [...filteredModels].sort((a, b) =>
       compareModels(a, b, sortState)
     );
-    if (sortState.mode !== 'provider') {
-      return sorted.map((model) => ({ kind: 'model' as const, model }));
+    if (sortState.mode !== SortMode.Provider) {
+      return sorted.map((model) => ({
+        kind: ModelRowKind.Model as const,
+        model,
+      }));
     }
 
     const counts = new Map<ProviderId, number>();
@@ -125,7 +133,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
       if (model.providerId !== lastProviderId) {
         lastProviderId = model.providerId;
         result.push({
-          kind: 'header',
+          kind: ModelRowKind.Header,
           providerId: model.providerId,
           groupName: PROVIDER_BY_ID[model.providerId]?.name ?? model.providerId,
           count: counts.get(model.providerId) ?? 0,
@@ -133,7 +141,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
         });
       }
       if (!searching && collapsedProviders.has(model.providerId)) continue;
-      result.push({ kind: 'model', model });
+      result.push({ kind: ModelRowKind.Model, model });
     }
 
     return result;
@@ -157,7 +165,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
   useEffect(() => {
     // Land on the first model, not the heading above it, so Enter still picks
     // a model straight away like it did before headers became focusable.
-    setFocusedIndex(sortState.mode === 'provider' ? 1 : 0);
+    setFocusedIndex(sortState.mode === SortMode.Provider ? 1 : 0);
     scrollOffsetRef.current = 0;
   }, [query, sortState]);
 
@@ -180,13 +188,14 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
 
     if (key.name === KeyName.Return) {
       const entry = rows[focusedIndex];
-      if (entry?.kind === 'model') props.onSelect(entry.model);
-      else if (entry?.kind === 'header') toggleProvider(entry.providerId);
+      if (entry?.kind === ModelRowKind.Model) props.onSelect(entry.model);
+      else if (entry?.kind === ModelRowKind.Header)
+        toggleProvider(entry.providerId);
       return;
     }
 
     if (key.name === KeyName.Left || key.name === KeyName.Right) {
-      if (sortState.mode !== 'provider') return;
+      if (sortState.mode !== SortMode.Provider) return;
       const shouldCollapse = key.name === KeyName.Left;
       // Shift folds/unfolds every provider group at once.
       if (key.shift) {
@@ -198,7 +207,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
         return;
       }
       const entry = rows[focusedIndex];
-      if (entry?.kind === 'header') {
+      if (entry?.kind === ModelRowKind.Header) {
         if (shouldCollapse !== entry.collapsed)
           toggleProvider(entry.providerId);
       }
@@ -284,7 +293,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
             const absoluteIndex = scrollOffsetRef.current + i;
             const isFocused = absoluteIndex === focusedIndex;
 
-            if (entry.kind === 'header') {
+            if (entry.kind === ModelRowKind.Header) {
               return (
                 <box key={`header:${entry.providerId}`} flexDirection="column">
                   <text
@@ -324,7 +333,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
                 >
                   {isFocused ? '› ' : '  '}
                   {entry.model.displayName}
-                  {sortState.mode === 'provider' ? null : (
+                  {sortState.mode === SortMode.Provider ? null : (
                     <span fg={isFocused ? 'black' : MUTED}>
                       {' '}
                       ·{' '}
@@ -358,8 +367,10 @@ export function ModelPicker(props: ModelPickerProps): React.ReactNode {
       <box flexDirection="row" justifyContent="flex-end" marginTop={1}>
         <text fg={MUTED}>
           tab sort · {formatSortState(sortState)}
-          {sortState.mode === 'provider' ? ' · ←→ fold (shift: all)' : ''} · esc
-          to cancel
+          {sortState.mode === SortMode.Provider
+            ? ' · ←→ fold (shift: all)'
+            : ''}{' '}
+          · esc to cancel
         </text>
       </box>
     </box>
@@ -383,9 +394,9 @@ function compareModels(
   b: ModelInfo,
   sortState: SortState
 ): number {
-  if (sortState.mode === 'provider') {
+  if (sortState.mode === SortMode.Provider) {
     const orderedProviders =
-      sortState.direction === 'asc'
+      sortState.direction === SortDirection.Asc
         ? PROVIDER_IDS
         : [...PROVIDER_IDS].reverse();
     const ai = orderedProviders.indexOf(a.providerId);
@@ -394,22 +405,24 @@ function compareModels(
     return compareStrings(a.displayName, b.displayName, sortState.direction);
   }
 
-  if (sortState.mode === 'context-window') {
+  if (sortState.mode === SortMode.ContextWindow) {
     const aContext = a.contextWindow ?? Number.NEGATIVE_INFINITY;
     const bContext = b.contextWindow ?? Number.NEGATIVE_INFINITY;
     if (aContext !== bContext)
-      return sortState.direction === 'asc'
+      return sortState.direction === SortDirection.Asc
         ? aContext - bContext
         : bContext - aContext;
     return compareStrings(a.displayName, b.displayName, sortState.direction);
   }
 
   const key =
-    sortState.mode === 'input-cost' ? 'inputPerToken' : 'outputPerToken';
+    sortState.mode === SortMode.InputCost ? 'inputPerToken' : 'outputPerToken';
   const aCost = a.pricing?.[key] ?? Number.POSITIVE_INFINITY;
   const bCost = b.pricing?.[key] ?? Number.POSITIVE_INFINITY;
   if (aCost !== bCost)
-    return sortState.direction === 'asc' ? aCost - bCost : bCost - aCost;
+    return sortState.direction === SortDirection.Asc
+      ? aCost - bCost
+      : bCost - aCost;
   return compareStrings(a.displayName, b.displayName, sortState.direction);
 }
 
@@ -431,7 +444,9 @@ function compareStrings(
   b: string,
   direction: SortDirection
 ): number {
-  return direction === 'asc' ? a.localeCompare(b) : b.localeCompare(a);
+  return direction === SortDirection.Asc
+    ? a.localeCompare(b)
+    : b.localeCompare(a);
 }
 
 function formatModelMeta(model: ModelInfo): string {

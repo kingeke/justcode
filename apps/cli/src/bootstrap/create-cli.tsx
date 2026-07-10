@@ -41,6 +41,7 @@ import {
   resolveModeSystemPrompt,
 } from '@core/domain/chat-mode';
 import { APP_NAME, APP_NAME_LOWERED } from '@core/branding';
+import { SkillScope } from '@core/domain/skill';
 import { getUpdateNotice } from '@core/application/update-check';
 import {
   setModeDefaultModel,
@@ -236,10 +237,10 @@ function registerSkillCommands(program: Command): void {
    */
   const resolveAddScope = async (
     options: SkillScopeOptions
-  ): Promise<'local' | 'global'> => {
-    if (options.local) return 'local';
-    if (options.global) return 'global';
-    if (!process.stdin.isTTY) return 'global';
+  ): Promise<SkillScope> => {
+    if (options.local) return SkillScope.Local;
+    if (options.global) return SkillScope.Global;
+    if (!process.stdin.isTTY) return SkillScope.Global;
     // No output stream on the readline: with one set it would re-echo typed
     // characters. But that also means question() never prints its prompt, so
     // both lines are written to stdout directly and question('') just waits.
@@ -252,7 +253,9 @@ function registerSkillCommands(program: Command): void {
         `Install locally (this project's .justcode/skills) or globally (all projects)?\n[l]ocal / [g]lobal: `
       );
       const answer = await readline.question('');
-      return answer.trim().toLowerCase().startsWith('l') ? 'local' : 'global';
+      return answer.trim().toLowerCase().startsWith('l')
+        ? SkillScope.Local
+        : SkillScope.Global;
     } finally {
       readline.close();
     }

@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { SkillScope } from '@core/domain/skill';
+
 import {
   discoverAllSkills,
   discoverSkills,
@@ -298,8 +300,8 @@ describe('discoverAllSkills', () => {
     });
     expect(errors).toEqual([]);
     expect(skills.map((skill) => [skill.manifest.name, skill.scope])).toEqual([
-      ['test-skill', 'local'],
-      ['other-skill', 'global'],
+      ['test-skill', SkillScope.Local],
+      ['other-skill', SkillScope.Global],
     ]);
   });
 
@@ -309,6 +311,6 @@ describe('discoverAllSkills', () => {
     await installSkill(repo, skillsDirectory(configDir));
 
     const { skills } = await discoverAllSkills({ configDirectory: configDir });
-    expect(skills.map((skill) => skill.scope)).toEqual(['global']);
+    expect(skills.map((skill) => skill.scope)).toEqual([SkillScope.Global]);
   });
 });

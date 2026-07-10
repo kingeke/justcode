@@ -63,7 +63,11 @@ export enum ReasoningEffort {
  * default must be sent an explicit disable (e.g. OpenRouter's
  * `reasoning: { enabled: false }`) rather than simply omitting the parameter.
  */
-export type ReasoningEffortChoice = ReasoningEffort | 'off';
+export enum ReasoningDisabled {
+  Off = 'off',
+}
+
+export type ReasoningEffortChoice = ReasoningEffort | ReasoningDisabled.Off;
 
 export interface TokenUsage {
   inputTokens: number;

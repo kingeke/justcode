@@ -3,13 +3,17 @@ import { createTextAttributes } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
 import { KeyName } from '@cli/ui/key-name.js';
 
-import { ReasoningEffort, type ModelInfo } from '@core/ports/chat-model';
+import {
+  ReasoningDisabled,
+  type ReasoningEffortChoice,
+  type ModelInfo,
+} from '@core/ports/chat-model';
 
 const BOLD = createTextAttributes({ bold: true });
 const MUTED = '#8a8a8a';
 
 /** A pickable reasoning choice: one of the model's effort levels, or "off". */
-type ReasoningChoice = ReasoningEffort | 'off';
+type ReasoningChoice = ReasoningEffortChoice;
 
 interface ReasoningPickerProps {
   model: ModelInfo;
@@ -17,8 +21,8 @@ interface ReasoningPickerProps {
    * The stored choice for this model: a level, the explicit sentinel `'off'`,
    * or undefined when the user hasn't chosen (the model default is in effect).
    */
-  current: ReasoningEffort | 'off' | undefined;
-  onSelect: (effort: ReasoningEffort | 'off') => void;
+  current: ReasoningEffortChoice | undefined;
+  onSelect: (effort: ReasoningEffortChoice) => void;
   onCancel: () => void;
 }
 
@@ -32,12 +36,12 @@ export function ReasoningPicker(props: ReasoningPickerProps): React.ReactNode {
   // with it.
   const choices: ReasoningChoice[] = mandatory
     ? [...levels]
-    : ['off', ...levels];
+    : [ReasoningDisabled.Off, ...levels];
 
   // What's currently in effect: the stored choice, or the model default when the
   // user hasn't chosen. This is what gets the ✓ and initial focus.
   const currentChoice: ReasoningChoice =
-    props.current ?? defaultEffort ?? 'off';
+    props.current ?? defaultEffort ?? ReasoningDisabled.Off;
   const [focusedIndex, setFocusedIndex] = useState(
     Math.max(0, choices.indexOf(currentChoice))
   );
@@ -87,8 +91,9 @@ export function ReasoningPicker(props: ReasoningPickerProps): React.ReactNode {
         {choices.map((choice, index) => {
           const isFocused = index === focusedIndex;
           const isCurrent = choice === currentChoice;
-          const isDefault = choice !== 'off' && choice === defaultEffort;
-          const label = choice === 'off' ? 'Off' : choice;
+          const isDefault =
+            choice !== ReasoningDisabled.Off && choice === defaultEffort;
+          const label = choice === ReasoningDisabled.Off ? 'Off' : choice;
           return (
             <box key={choice} flexDirection="row">
               <text

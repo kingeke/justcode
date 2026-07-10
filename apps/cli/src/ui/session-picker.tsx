@@ -22,15 +22,21 @@ const MUTED = '#8a8a8a';
 const MUTED_RGBA = RGBA.fromHex(MUTED);
 const INVERSE = createTextAttributes({ inverse: true });
 
+/** The kinds of row the session picker renders. */
+export enum SessionRowKind {
+  Header = 'header',
+  Session = 'session',
+}
+
 /** A focusable list entry: a collapsible group header, or a session. */
 type PickerRow =
   | {
-      kind: 'header';
+      kind: SessionRowKind.Header;
       group: PickerGroup;
       count: number;
       collapsed: boolean;
     }
-  | { kind: 'session'; session: ConversationSummary };
+  | { kind: SessionRowKind.Session; session: ConversationSummary };
 
 interface SessionPickerProps {
   sessions: ConversationSummary[];
@@ -152,10 +158,17 @@ export function SessionPicker({
       filteredSessions
     )) {
       const collapsed = !searching && collapsedGroups.has(group);
-      built.push({ kind: 'header', group, count: inGroup.length, collapsed });
+      built.push({
+        kind: SessionRowKind.Header,
+        group,
+        count: inGroup.length,
+        collapsed,
+      });
       if (!collapsed) {
         built.push(
-          ...inGroup.map((session) => ({ kind: 'session', session }) as const)
+          ...inGroup.map(
+            (session) => ({ kind: SessionRowKind.Session, session }) as const
+          )
         );
       }
     }
@@ -172,7 +185,7 @@ export function SessionPicker({
   useEffect(() => {
     // Land on the first session, not the leading group header, so Enter right
     // after opening still resumes the most recent session.
-    const first = rowsRef.current[0]?.kind === 'header' ? 1 : 0;
+    const first = rowsRef.current[0]?.kind === SessionRowKind.Header ? 1 : 0;
     setFocusedIndex(rowsRef.current.length > first ? first : 0);
     scrollOffsetRef.current = 0;
   }, [query, sessions]);
@@ -185,7 +198,7 @@ export function SessionPicker({
 
     if (key.ctrl && key.name === KeyName.P) {
       const row = rows[focusedIndex];
-      if (row?.kind === 'session') {
+      if (row?.kind === SessionRowKind.Session) {
         onTogglePin(row.session.sessionId, !row.session.pinned);
       }
       return;
@@ -194,7 +207,7 @@ export function SessionPicker({
     if (key.name === KeyName.Return) {
       const row = rows[focusedIndex];
       if (!row) return;
-      if (row.kind === 'session') {
+      if (row.kind === SessionRowKind.Session) {
         onSelect(row.session.sessionId);
         return;
       }
@@ -288,7 +301,7 @@ export function SessionPicker({
             const absoluteIndex = scrollOffsetRef.current + index;
             const isSelected = absoluteIndex === focusedIndex;
 
-            if (row.kind === 'header') {
+            if (row.kind === SessionRowKind.Header) {
               return (
                 <box
                   key={`header-${row.group}`}

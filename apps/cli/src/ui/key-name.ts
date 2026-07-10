@@ -24,6 +24,8 @@ export enum KeyName {
   N = 'n',
   X = 'x',
   P = 'p',
+  KpEnter = 'kpenter',
+  Linefeed = 'linefeed',
 }
 
 const KEY_NAME_SET = new Set<string>([

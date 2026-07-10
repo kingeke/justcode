@@ -4,6 +4,7 @@ import {
   buildSkillCommandIndex,
   parseSkillCommand,
   parseSkillManifest,
+  SkillScope,
   renderSkillCommandPrompt,
   type InstalledSkill,
   type SkillCommandDefinition,
@@ -209,5 +210,12 @@ describe('renderSkillCommandPrompt', () => {
   it('returns the body untouched when there is no placeholder', () => {
     const command = makeCommand('scan');
     expect(renderSkillCommandPrompt(command, 'extra args')).toBe('Run scan.');
+  });
+});
+
+describe('SkillScope', () => {
+  it('has stable string values', () => {
+    expect(SkillScope.Local).toBe('local');
+    expect(SkillScope.Global).toBe('global');
   });
 });

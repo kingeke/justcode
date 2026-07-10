@@ -1,5 +1,11 @@
 import { logRequestResponse } from '@core/application/debug-log';
 
+/** Recoverable polling errors returned by the token endpoint (RFC 8628). */
+export enum DeviceFlowError {
+  AuthorizationPending = 'authorization_pending',
+  SlowDown = 'slow_down',
+}
+
 /**
  * Generic OAuth 2.0 device-authorization-grant helper (RFC 8628), used by the
  * GitHub Copilot sign-in. Requests a device code, surfaces the user code +
@@ -71,9 +77,9 @@ export async function runDeviceFlow(
     if (token.access_token) return token.access_token;
 
     switch (token.error) {
-      case 'authorization_pending':
+      case DeviceFlowError.AuthorizationPending:
         break;
-      case 'slow_down':
+      case DeviceFlowError.SlowDown:
         intervalMs += 5000;
         break;
       default:

@@ -13,26 +13,39 @@ import type { ToolDefinition } from '@core/ports/tool';
  * their results as typed content blocks.
  */
 
+export enum AnthropicBlockType {
+  Text = 'text',
+  ToolUse = 'tool_use',
+  ToolResult = 'tool_result',
+  Image = 'image',
+}
+
+export enum AnthropicDeltaType {
+  TextDelta = 'text_delta',
+  ThinkingDelta = 'thinking_delta',
+  InputJsonDelta = 'input_json_delta',
+}
+
 export interface AnthropicTextBlock {
-  type: 'text';
+  type: AnthropicBlockType.Text;
   text: string;
 }
 
 export interface AnthropicToolUseBlock {
-  type: 'tool_use';
+  type: AnthropicBlockType.ToolUse;
   id: string;
   name: string;
   input: unknown;
 }
 
 export interface AnthropicToolResultBlock {
-  type: 'tool_result';
+  type: AnthropicBlockType.ToolResult;
   tool_use_id: string;
   content: string;
 }
 
 export interface AnthropicImageBlock {
-  type: 'image';
+  type: AnthropicBlockType.Image;
   source: {
     type: 'base64';
     media_type: string;
@@ -47,7 +60,7 @@ export type AnthropicContentBlock =
   | AnthropicImageBlock;
 
 export interface AnthropicWireMessage {
-  role: 'user' | 'assistant';
+  role: MessageRole;
   content: AnthropicContentBlock[];
 }
 
@@ -74,10 +87,7 @@ export function toAnthropicWireRequest(
   const systemParts: string[] = [];
   const wire: AnthropicWireMessage[] = [];
 
-  const push = (
-    role: 'user' | 'assistant',
-    blocks: AnthropicContentBlock[]
-  ) => {
+  const push = (role: MessageRole, blocks: AnthropicContentBlock[]) => {
     if (blocks.length === 0) return;
     const last = wire[wire.length - 1];
     if (last && last.role === role) {
@@ -94,9 +104,9 @@ export function toAnthropicWireRequest(
     }
 
     if (message.role === MessageRole.Tool) {
-      push('user', [
+      push(MessageRole.User, [
         {
-          type: 'tool_result',
+          type: AnthropicBlockType.ToolResult,
           tool_use_id: message.toolCallId ?? '',
           content: message.content,
         },
@@ -107,17 +117,17 @@ export function toAnthropicWireRequest(
     if (message.role === MessageRole.Assistant) {
       const blocks: AnthropicContentBlock[] = [];
       if (message.content.trim()) {
-        blocks.push({ type: 'text', text: message.content });
+        blocks.push({ type: AnthropicBlockType.Text, text: message.content });
       }
       for (const call of message.toolCalls ?? []) {
         blocks.push({
-          type: 'tool_use',
+          type: AnthropicBlockType.ToolUse,
           id: call.id,
           name: call.name,
           input: parseToolInput(call.arguments),
         });
       }
-      push('assistant', blocks);
+      push(MessageRole.Assistant, blocks);
       continue;
     }
 
@@ -125,7 +135,7 @@ export function toAnthropicWireRequest(
     const userBlocks: AnthropicContentBlock[] = [];
     for (const image of message.images ?? []) {
       userBlocks.push({
-        type: 'image',
+        type: AnthropicBlockType.Image,
         source: {
           type: 'base64',
           media_type: image.mediaType,
@@ -136,9 +146,9 @@ export function toAnthropicWireRequest(
     // Skip an empty text block (image-only message) — the API rejects it.
     const userText = renderMessageContentForModel(message);
     if (userText.trim() || userBlocks.length === 0) {
-      userBlocks.push({ type: 'text', text: userText });
+      userBlocks.push({ type: AnthropicBlockType.Text, text: userText });
     }
-    push('user', userBlocks);
+    push(MessageRole.User, userBlocks);
   }
 
   return {
@@ -163,7 +173,7 @@ export function parseAnthropicToolCalls(
   blocks: Array<{ type?: string; id?: string; name?: string; input?: unknown }>
 ): ToolCall[] {
   return blocks
-    .filter((block) => block.type === 'tool_use')
+    .filter((block) => block.type === AnthropicBlockType.ToolUse)
     .map((block, index) => ({
       id: block.id ?? `call_${index}`,
       name: block.name ?? '',

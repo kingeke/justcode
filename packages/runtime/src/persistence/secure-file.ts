@@ -1,6 +1,8 @@
 import { chmod, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+import { NodePlatform } from '@core/domain/node-platform';
+
 /** Owner-only file mode (rw-------) for on-disk secrets. */
 export const SECRET_FILE_MODE = 0o600;
 /** Owner-only directory mode (rwx------) for the config dir holding secrets. */
@@ -11,7 +13,7 @@ export const SECRET_DIR_MODE = 0o700;
 // read-only attribute — so we skip them there and rely on the config living
 // under the per-user profile dir, which Windows already ACL-restricts to the
 // owning user. This is NOT full cross-OS enforcement, just best-effort on POSIX.
-const isWindows = process.platform === 'win32';
+const isWindows = process.platform === NodePlatform.Win32;
 
 /**
  * In-process write queue, keyed by target path. Two overlapping `writeFile`

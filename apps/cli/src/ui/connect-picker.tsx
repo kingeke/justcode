@@ -39,16 +39,17 @@ const MUTED = '#8a8a8a';
 const MUTED_RGBA = RGBA.fromHex(MUTED);
 const INVERSE = createTextAttributes({ inverse: true });
 
-type WizardStep =
-  | 'provider'
-  | 'name'
-  | 'auth-method'
-  | 'api-key'
-  | 'base-url'
-  | 'executable-path'
-  | 'config-dir'
-  | 'oauth-connect'
-  | 'connecting';
+export enum WizardStep {
+  Provider = 'provider',
+  Name = 'name',
+  AuthMethod = 'auth-method',
+  ApiKey = 'api-key',
+  BaseUrl = 'base-url',
+  ExecutablePath = 'executable-path',
+  ConfigDir = 'config-dir',
+  OauthConnect = 'oauth-connect',
+  Connecting = 'connecting',
+}
 
 const AUTH_METHOD_OPTIONS = [
   { label: 'Sign in', description: 'Use your subscription (browser sign-in)' },
@@ -118,7 +119,7 @@ interface ConnectPickerProps {
 
 export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
   const [query, setQuery] = useState('');
-  const [step, setStep] = useState<WizardStep>('provider');
+  const [step, setStep] = useState<WizardStep>(WizardStep.Provider);
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [selectedProvider, setSelectedProvider] =
     useState<ProviderConnectionInfo | null>(null);
@@ -186,14 +187,14 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
     Math.max(0, Math.min(next, providers.length - 1));
 
   useEffect(() => {
-    if (step !== 'provider') return;
+    if (step !== WizardStep.Provider) return;
     setFocusedIndex(0);
     scrollOffsetRef.current = 0;
   }, [query, step]);
 
   // Kick off the OAuth flow when we enter the oauth-connect step.
   useEffect(() => {
-    if (step !== 'oauth-connect' || !selectedProvider) return;
+    if (step !== WizardStep.OauthConnect || !selectedProvider) return;
     const controller = new AbortController();
     abortRef.current = controller;
     void connectProviderOAuth(selectedProvider, controller.signal);
@@ -208,22 +209,22 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       key.name === KeyName.Escape || (key.ctrl && key.name === KeyName.C);
 
     // OAuth-connect: only allow esc/ctrl+c to abort.
-    if (step === 'oauth-connect') {
+    if (step === WizardStep.OauthConnect) {
       if (isBack) {
         abortRef.current?.abort();
         codeResolverRef.current = null;
         setCodePrompt(null);
         setCodeInput('');
         setError(null);
-        setStep('provider');
+        setStep(WizardStep.Provider);
       }
       return;
     }
 
     // Auth-method picker keyboard.
-    if (step === 'auth-method') {
+    if (step === WizardStep.AuthMethod) {
       if (isBack) {
-        setStep('provider');
+        setStep(WizardStep.Provider);
         return;
       }
       if (key.name === KeyName.Up) {
@@ -237,21 +238,21 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       if (key.name === KeyName.Return) {
         if (authMethodIndex === 0) {
           setOauthStatus('');
-          setStep('oauth-connect');
+          setStep(WizardStep.OauthConnect);
         } else {
-          setStep('api-key');
+          setStep(WizardStep.ApiKey);
         }
         return;
       }
       return;
     }
 
-    if (step !== 'provider') {
+    if (step !== WizardStep.Provider) {
       // The api-key / base-url steps own keyboard input via TextArea; here we
       // only intercept Escape to step back. Enter is handled by onSubmit.
       if (isBack) {
         setError(null);
-        setStep('provider');
+        setStep(WizardStep.Provider);
       }
       return;
     }
@@ -270,7 +271,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
         setApiKey('');
         setBaseUrl('');
         setError(null);
-        setStep('name');
+        setStep(WizardStep.Name);
         return;
       }
       setSelectedProvider(entry);
@@ -288,7 +289,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
         setExecutablePath(savedExe);
         setConfigDir(existing.configDir ?? '');
         setDetectedConfigDirs([]);
-        setStep('executable-path');
+        setStep(WizardStep.ExecutablePath);
         if (!savedExe) {
           const detect =
             entry.id === ProviderId.Cursor
@@ -315,15 +316,15 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
         authMethods.includes(AuthMethod.ApiKey)
       ) {
         setAuthMethodIndex(0);
-        setStep('auth-method');
+        setStep(WizardStep.AuthMethod);
       } else if (
         authMethods.length === 1 &&
         authMethods[0] === AuthMethod.OAuth
       ) {
         setOauthStatus('');
-        setStep('oauth-connect');
+        setStep(WizardStep.OauthConnect);
       } else {
-        setStep('api-key');
+        setStep(WizardStep.ApiKey);
       }
       return;
     }
@@ -386,40 +387,40 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
     >
       <box flexDirection="row" justifyContent="space-between" marginBottom={1}>
         <text fg="cyan" attributes={BOLD}>
-          {step === 'provider'
+          {step === WizardStep.Provider
             ? 'Connect provider'
-            : step === 'name'
+            : step === WizardStep.Name
               ? 'New custom provider'
-              : step === 'auth-method'
+              : step === WizardStep.AuthMethod
                 ? `Authentication - ${selectedProvider?.name ?? ''}`
-                : step === 'oauth-connect'
+                : step === WizardStep.OauthConnect
                   ? `Signing in - ${selectedProvider?.name ?? ''}`
-                  : step === 'api-key'
+                  : step === WizardStep.ApiKey
                     ? `API key - ${selectedProvider?.name ?? ''}`
-                    : step === 'base-url'
+                    : step === WizardStep.BaseUrl
                       ? `Base URL - ${selectedProvider?.name ?? ''}`
-                      : step === 'executable-path'
+                      : step === WizardStep.ExecutablePath
                         ? `${directConnectCliName} executable - ${selectedProvider?.name ?? ''}`
-                        : step === 'config-dir'
+                        : step === WizardStep.ConfigDir
                           ? `${directConnectCliName} account - ${selectedProvider?.name ?? ''}`
                           : `Fetching models - ${selectedProvider?.name ?? ''}`}
         </text>
         <text fg={MUTED}>
-          {step === 'provider'
+          {step === WizardStep.Provider
             ? 'enter to configure · esc to cancel'
-            : step === 'auth-method'
+            : step === WizardStep.AuthMethod
               ? 'enter to select · esc to go back'
-              : step === 'oauth-connect'
+              : step === WizardStep.OauthConnect
                 ? codePrompt
                   ? 'enter to submit · esc to cancel'
                   : 'esc to cancel'
-                : step === 'connecting'
+                : step === WizardStep.Connecting
                   ? 'fetching models...'
                   : 'enter to continue · esc to go back'}
         </text>
       </box>
 
-      {step === 'provider' ? (
+      {step === WizardStep.Provider ? (
         <>
           <box marginBottom={1}>
             <text content={queryLineContent(query, 'search providers...')} />
@@ -468,7 +469,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
             </box>
           )}
         </>
-      ) : step === 'auth-method' ? (
+      ) : step === WizardStep.AuthMethod ? (
         <box flexDirection="column">
           <text fg={MUTED} marginBottom={1}>
             How do you want to connect {selectedProvider?.name ?? ''}?
@@ -488,7 +489,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
             </box>
           ))}
         </box>
-      ) : step === 'oauth-connect' ? (
+      ) : step === WizardStep.OauthConnect ? (
         <box flexDirection="column">
           {codePrompt ? (
             <box flexDirection="column">
@@ -538,7 +539,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
             </box>
           ) : null}
         </box>
-      ) : step === 'connecting' ? (
+      ) : step === WizardStep.Connecting ? (
         <box flexDirection="row">
           <Spinner fg="cyan" />
           <text fg={MUTED}> Connecting and fetching models...</text>
@@ -546,17 +547,17 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       ) : (
         <box flexDirection="column">
           <text fg={MUTED}>
-            {step === 'name'
+            {step === WizardStep.Name
               ? 'Enter a name for the custom provider.'
-              : step === 'api-key'
+              : step === WizardStep.ApiKey
                 ? selectedProvider?.apiKeyRequired
                   ? 'Enter the API key for this provider.'
                   : 'Optional API key. Leave blank and press enter to skip.'
-                : step === 'executable-path'
+                : step === WizardStep.ExecutablePath
                   ? directConnectCursor
                     ? 'Confirm or edit the `cursor-agent` executable to use. Leave blank to auto-detect it.'
                     : 'Confirm or edit the `claude` executable to use. Leave blank to let the Agent SDK find it.'
-                  : step === 'config-dir'
+                  : step === WizardStep.ConfigDir
                     ? directConnectCursor
                       ? 'Config directory (CURSOR_CONFIG_DIR) selecting the account. Leave blank for the default.'
                       : detectedConfigDirs.length > 1
@@ -567,13 +568,13 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
 
           <box marginTop={1} flexDirection="row">
             <text fg={MUTED}>
-              {step === 'name'
+              {step === WizardStep.Name
                 ? 'name> '
-                : step === 'api-key'
+                : step === WizardStep.ApiKey
                   ? 'key> '
-                  : step === 'executable-path'
+                  : step === WizardStep.ExecutablePath
                     ? 'path> '
-                    : step === 'config-dir'
+                    : step === WizardStep.ConfigDir
                       ? 'dir> '
                       : 'url> '}
             </text>
@@ -581,26 +582,26 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
               key={step}
               width="100%"
               value={
-                step === 'name'
+                step === WizardStep.Name
                   ? customName
-                  : step === 'api-key'
+                  : step === WizardStep.ApiKey
                     ? apiKey
-                    : step === 'executable-path'
+                    : step === WizardStep.ExecutablePath
                       ? executablePath
-                      : step === 'config-dir'
+                      : step === WizardStep.ConfigDir
                         ? configDir
                         : baseUrl
               }
               placeholder={
-                step === 'name'
+                step === WizardStep.Name
                   ? 'provider name...'
-                  : step === 'api-key'
+                  : step === WizardStep.ApiKey
                     ? 'paste api key...'
-                    : step === 'executable-path'
+                    : step === WizardStep.ExecutablePath
                       ? directConnectCursor
                         ? 'cursor-agent'
                         : 'claude'
-                      : step === 'config-dir'
+                      : step === WizardStep.ConfigDir
                         ? directConnectCursor
                           ? '~/.cursor'
                           : '~/.claude'
@@ -614,13 +615,13 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
               cursorColor="white"
               focused
               onInput={(nextValue) => {
-                if (step === 'name') {
+                if (step === WizardStep.Name) {
                   setCustomName(nextValue);
-                } else if (step === 'api-key') {
+                } else if (step === WizardStep.ApiKey) {
                   setApiKey(nextValue);
-                } else if (step === 'executable-path') {
+                } else if (step === WizardStep.ExecutablePath) {
                   setExecutablePath(nextValue);
-                } else if (step === 'config-dir') {
+                } else if (step === WizardStep.ConfigDir) {
                   setConfigDir(nextValue);
                 } else {
                   setBaseUrl(nextValue);
@@ -631,7 +632,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
 
                 const submitted = field.value;
 
-                if (step === 'name') {
+                if (step === WizardStep.Name) {
                   const name = submitted.trim();
                   if (!name) {
                     setError('A name is required.');
@@ -645,22 +646,22 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
                     createCustomProviderEntry(id, { name, baseUrl: '' })
                   );
                   setError(null);
-                  setStep('api-key');
+                  setStep(WizardStep.ApiKey);
                   return;
                 }
 
                 if (!selectedProvider) return;
 
-                if (step === 'executable-path') {
+                if (step === WizardStep.ExecutablePath) {
                   // Blank means "let the Agent SDK resolve `claude` itself".
                   // Advance to pick the account (config dir) before connecting.
                   setExecutablePath(submitted.trim());
                   setError(null);
-                  setStep('config-dir');
+                  setStep(WizardStep.ConfigDir);
                   return;
                 }
 
-                if (step === 'config-dir') {
+                if (step === WizardStep.ConfigDir) {
                   // Blank means the default account (~/.claude).
                   const dir = submitted.trim();
                   setConfigDir(dir);
@@ -674,7 +675,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
                   return;
                 }
 
-                if (step === 'api-key') {
+                if (step === WizardStep.ApiKey) {
                   const nextApiKey = submitted.trim();
                   if (selectedProvider.apiKeyRequired && !nextApiKey) {
                     setError('An API key is required for this provider.');
@@ -683,7 +684,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
 
                   setError(null);
                   setApiKey(nextApiKey);
-                  setStep('base-url');
+                  setStep(WizardStep.BaseUrl);
                   return;
                 }
 
@@ -704,7 +705,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
                 if (event.name === 'escape') {
                   event.preventDefault();
                   setError(null);
-                  setStep('provider');
+                  setStep(WizardStep.Provider);
                 }
               }}
               ref={(item) => {
@@ -730,7 +731,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
     nextExecutablePath?: string | undefined,
     nextConfigDir?: string | undefined
   ): Promise<void> {
-    setStep('connecting');
+    setStep(WizardStep.Connecting);
 
     try {
       const client = provider.create({
@@ -798,7 +799,9 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       );
       // Direct-connect providers fall back to the executable-path step so the
       // user can fix a wrong `claude` path; others return to the base-url step.
-      setStep(provider.directConnect ? 'executable-path' : 'base-url');
+      setStep(
+        provider.directConnect ? WizardStep.ExecutablePath : WizardStep.BaseUrl
+      );
     }
   }
 
@@ -809,7 +812,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
     const flow = getOAuthFlow(provider.id as ProviderId);
     if (!flow) {
       setError(`OAuth sign-in is not supported for ${provider.name}.`);
-      setStep('provider');
+      setStep(WizardStep.Provider);
       return;
     }
 
@@ -867,7 +870,7 @@ export function ConnectPicker(props: ConnectPickerProps): React.ReactNode {
       setError(
         caughtError instanceof Error ? caughtError.message : String(caughtError)
       );
-      setStep('provider');
+      setStep(WizardStep.Provider);
     }
   }
 

@@ -10,6 +10,7 @@ import {
   type ModelReasoning,
   type ProviderClient,
 } from '@core/ports/chat-model';
+import { ReasoningDisabled } from '@core/ports/chat-model';
 import {
   normalizeEffortLevels,
   toReasoningEffort,
@@ -117,7 +118,7 @@ export class OpenRouterProvider implements ProviderClient {
     // (`enabled: false`) — omitting the param lets a default-reasoning model keep
     // reasoning.
     const reasoning =
-      request.reasoningEffort === 'off'
+      request.reasoningEffort === ReasoningDisabled.Off
         ? { reasoning: { enabled: false } }
         : request.reasoningEffort
           ? { reasoning: { effort: request.reasoningEffort } }

@@ -9,7 +9,10 @@ const BOLD = createTextAttributes({ bold: true });
 const WARNING = '#f59e0b';
 const MUTED = '#8a8a8a';
 
-type ResetChoice = 'cancel' | 'reset';
+export enum ResetChoice {
+  Cancel = 'cancel',
+  Reset = 'reset',
+}
 
 interface ResetPickerProps {
   onConfirm: () => void;
@@ -17,8 +20,9 @@ interface ResetPickerProps {
 }
 
 export function ResetPicker(props: ResetPickerProps): React.ReactNode {
-  const [selectedChoice, setSelectedChoice] =
-    React.useState<ResetChoice>('cancel');
+  const [selectedChoice, setSelectedChoice] = React.useState<ResetChoice>(
+    ResetChoice.Cancel
+  );
 
   useKeyboard((key) => {
     if (key.name === KeyName.Escape || (key.ctrl && key.name === KeyName.C)) {
@@ -32,13 +36,13 @@ export function ResetPicker(props: ResetPickerProps): React.ReactNode {
       key.name === KeyName.Tab
     ) {
       setSelectedChoice((current) =>
-        current === 'cancel' ? 'reset' : 'cancel'
+        current === ResetChoice.Cancel ? ResetChoice.Reset : ResetChoice.Cancel
       );
       return;
     }
 
     if (key.name === KeyName.Return) {
-      if (selectedChoice === 'reset') {
+      if (selectedChoice === ResetChoice.Reset) {
         props.onConfirm();
         return;
       }
@@ -70,7 +74,7 @@ export function ResetPicker(props: ResetPickerProps): React.ReactNode {
         You will be returned to the connect screen and start from scratch.
       </text>
       <box marginTop={1} flexDirection="row" gap={1}>
-        {selectedChoice === 'cancel' ? (
+        {selectedChoice === ResetChoice.Cancel ? (
           <box paddingLeft={1} paddingRight={1} backgroundColor="white">
             <text fg="black" attributes={BOLD}>
               Cancel
@@ -81,7 +85,7 @@ export function ResetPicker(props: ResetPickerProps): React.ReactNode {
             <text>Cancel</text>
           </box>
         )}
-        {selectedChoice === 'reset' ? (
+        {selectedChoice === ResetChoice.Reset ? (
           <box paddingLeft={1} paddingRight={1} backgroundColor={WARNING}>
             <text fg="black" attributes={BOLD}>
               Reset everything

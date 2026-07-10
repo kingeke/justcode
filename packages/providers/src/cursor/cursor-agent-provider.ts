@@ -19,6 +19,7 @@ import {
 import type { ToolResult } from '@core/ports/tool';
 import { ToolName } from '@core/domain/tool-name';
 import { logRequestResponse } from '@core/application/debug-log';
+import { AgentSendMode } from '@providers/agent-send-mode';
 import {
   CursorMcpBridge,
   createCursorWorkspace,
@@ -413,11 +414,13 @@ export class CursorAgentProvider implements ProviderClient {
     // Out-of-band utility calls (title generation) never touch the persistent
     // session — they run as tool-less one-shot CLI invocations.
     if (request.ephemeral) {
-      return this.logged(request, 'ephemeral', () =>
+      return this.logged(request, AgentSendMode.Ephemeral, () =>
         this.runEphemeral(request)
       );
     }
-    return this.logged(request, 'session', () => this.sessionSendChat(request));
+    return this.logged(request, AgentSendMode.Session, () =>
+      this.sessionSendChat(request)
+    );
   }
 
   public async listModels(): Promise<ModelInfo[]> {
@@ -505,7 +508,7 @@ export class CursorAgentProvider implements ProviderClient {
    */
   private async logged(
     request: ChatRequest,
-    mode: 'session' | 'ephemeral',
+    mode: AgentSendMode,
     run: () => Promise<ChatResult>
   ): Promise<ChatResult> {
     const url = `cursor://${mode}/${request.sessionId ?? 'default'}`;

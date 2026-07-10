@@ -7,12 +7,18 @@ import {
   BUILT_IN_MODE_CATEGORY,
   CUSTOM_MODE_CATEGORY,
   type ChatMode,
-  type ModeIcon,
+  ModeIcon,
 } from '@core/domain/chat-mode';
 import type { ModelDefaults, ModelReference } from '@core/domain/model-default';
 
 const BOLD = createTextAttributes({ bold: true });
 const MUTED = '#8a8a8a';
+
+/** The two steps of the create-mode form. */
+export enum ModeFormStep {
+  Name = 'name',
+  Prompt = 'prompt',
+}
 
 /**
  * Maps a mode's semantic icon key to a monochrome glyph the terminal renders
@@ -20,16 +26,16 @@ const MUTED = '#8a8a8a';
  */
 export function modeGlyph(icon: ModeIcon): string {
   switch (icon) {
-    case 'build':
+    case ModeIcon.Build:
       return '⚒';
-    case 'ask':
+    case ModeIcon.Ask:
       return '?';
-    case 'plan':
+    case ModeIcon.Plan:
       // U+2261 (identical to), not U+2630 (trigram): the trigram has patchy
       // monospace coverage and often draws wider than the single cell the
       // layout engine reserves, bleeding into the next glyph.
       return '≡';
-    case 'custom':
+    case ModeIcon.Custom:
       return '✦';
   }
 }
@@ -76,7 +82,7 @@ type Row =
  */
 export function ModePicker(props: ModePickerProps): React.ReactNode {
   // null = the list; otherwise the create form, on its name or prompt step.
-  const [step, setStep] = useState<null | 'name' | 'prompt'>(null);
+  const [step, setStep] = useState<ModeFormStep | null>(null);
   const [name, setName] = useState('');
   const [prompt, setPrompt] = useState('');
 
@@ -125,8 +131,8 @@ export function ModePicker(props: ModePickerProps): React.ReactNode {
     // only handle Esc to back out to the list.
     if (step !== null) {
       if (key.name === KeyName.Escape) {
-        if (step === 'prompt') {
-          setStep('name');
+        if (step === ModeFormStep.Prompt) {
+          setStep(ModeFormStep.Name);
         } else {
           setStep(null);
         }
@@ -172,7 +178,7 @@ export function ModePicker(props: ModePickerProps): React.ReactNode {
       const row = rows[focusedIndex];
       if (!row) return;
       if (row.kind === RowKind.Create) {
-        setStep('name');
+        setStep(ModeFormStep.Name);
         return;
       }
       if (row.kind === RowKind.Mode) {
@@ -200,7 +206,7 @@ export function ModePicker(props: ModePickerProps): React.ReactNode {
             New mode
           </text>
           <text fg={MUTED}>
-            {step === 'name'
+            {step === ModeFormStep.Name
               ? 'enter next · esc cancel'
               : 'enter create · esc back'}
           </text>
@@ -212,13 +218,15 @@ export function ModePicker(props: ModePickerProps): React.ReactNode {
         </text>
 
         <box marginTop={1} flexDirection="row">
-          <text fg={MUTED}>{step === 'name' ? 'name>   ' : 'prompt> '}</text>
+          <text fg={MUTED}>
+            {step === ModeFormStep.Name ? 'name>   ' : 'prompt> '}
+          </text>
           <input
             key={step}
             width="100%"
-            value={step === 'name' ? name : prompt}
+            value={step === ModeFormStep.Name ? name : prompt}
             placeholder={
-              step === 'name'
+              step === ModeFormStep.Name
                 ? 'mode name...'
                 : 'system prompt (optional, enter to skip)...'
             }
@@ -230,13 +238,13 @@ export function ModePicker(props: ModePickerProps): React.ReactNode {
             cursorColor="white"
             focused
             onInput={(next) => {
-              if (step === 'name') setName(next);
+              if (step === ModeFormStep.Name) setName(next);
               else setPrompt(next);
             }}
             onSubmit={() => {
-              if (step === 'name') {
+              if (step === ModeFormStep.Name) {
                 if (!name.trim()) return;
-                setStep('prompt');
+                setStep(ModeFormStep.Prompt);
                 return;
               }
               const trimmed = prompt.trim();

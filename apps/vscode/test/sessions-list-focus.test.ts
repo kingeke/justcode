@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
 import { HostMessageType } from '@ext/shared/protocol';
-import { ChatStatus, initialState, reducer } from '@ext/webview/state';
+import {
+  ChatStatus,
+  ChatView,
+  initialState,
+  reducer,
+} from '@ext/webview/state';
 
 describe('SessionsList focus behavior', () => {
   const inChat = {
     ...initialState,
     status: ChatStatus.Ready,
-    view: 'chat' as const,
+    view: ChatView.Chat,
     hasConnectedProvider: true,
   };
 

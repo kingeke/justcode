@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import type { WebviewModel } from '@ext/shared/protocol';
-import { sortModels } from '@ext/webview/components/ModelPickerView';
+import {
+  sortModels,
+  SortMode,
+  SortDir,
+} from '@ext/webview/components/ModelPickerView';
 
 function model(id: string, fields: Partial<WebviewModel> = {}): WebviewModel {
   return {
@@ -25,18 +29,14 @@ describe('sortModels', () => {
 
     // Descending: largest first, the local (missing) model last — not bunched
     // at the top as it was before.
-    expect(ids(sortModels(models, 'context-window', 'desc'))).toEqual([
-      'big',
-      'small',
-      'local',
-    ]);
+    expect(
+      ids(sortModels(models, SortMode.ContextWindow, SortDir.Desc))
+    ).toEqual(['big', 'small', 'local']);
 
     // Ascending: smallest first, missing still last.
-    expect(ids(sortModels(models, 'context-window', 'asc'))).toEqual([
-      'small',
-      'big',
-      'local',
-    ]);
+    expect(
+      ids(sortModels(models, SortMode.ContextWindow, SortDir.Asc))
+    ).toEqual(['small', 'big', 'local']);
   });
 
   it('keeps priced models ahead of unpriced ones for cost sorts', () => {
@@ -46,12 +46,12 @@ describe('sortModels', () => {
       model('pricey', { inputCostPerM: 5 }),
     ];
 
-    expect(ids(sortModels(models, 'input-cost', 'asc'))).toEqual([
+    expect(ids(sortModels(models, SortMode.InputCost, SortDir.Asc))).toEqual([
       'cheap',
       'pricey',
       'free',
     ]);
-    expect(ids(sortModels(models, 'input-cost', 'desc'))).toEqual([
+    expect(ids(sortModels(models, SortMode.InputCost, SortDir.Desc))).toEqual([
       'pricey',
       'cheap',
       'free',

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUILD_MODE_ID,
+  BUILT_IN_MODES,
+  CUSTOM_MODE_ICON,
+  ModeIcon,
   addCustomMode,
   listModes,
   removeCustomMode,
@@ -33,5 +36,23 @@ describe('custom modes', () => {
     expect(removeCustomMode(BUILD_MODE_ID, created?.customModes)).toBeNull();
     expect(removeCustomMode('nope', created?.customModes)).toBeNull();
     expect(removeCustomMode('anything', {})).toBeNull();
+  });
+});
+
+describe('ModeIcon', () => {
+  it('has stable string values', () => {
+    expect(ModeIcon.Build).toBe('build');
+    expect(ModeIcon.Ask).toBe('ask');
+    expect(ModeIcon.Plan).toBe('plan');
+    expect(ModeIcon.Custom).toBe('custom');
+  });
+
+  it('built-in modes use the matching enum icons', () => {
+    const icons = BUILT_IN_MODES.map((m) => m.icon);
+    expect(icons).toEqual([ModeIcon.Build, ModeIcon.Ask, ModeIcon.Plan]);
+    expect(CUSTOM_MODE_ICON).toBe(ModeIcon.Custom);
+    expect(
+      listModes({ x: { name: 'X' } }).find((m) => m.id === 'x')?.icon
+    ).toBe(ModeIcon.Custom);
   });
 });

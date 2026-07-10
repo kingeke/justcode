@@ -1,5 +1,5 @@
 import { logRequestResponse } from '@core/application/debug-log';
-import { ReasoningEffort } from '@core/ports/chat-model';
+import { ReasoningDisabled, ReasoningEffort } from '@core/ports/chat-model';
 import type {
   ChatRequest,
   ChatResult,
@@ -11,7 +11,18 @@ import {
   toResponsesPayload,
   toResponsesToolDefinitions,
   toToolCall,
+  ResponsesItemType,
 } from '@providers/openai/openai-responses-wire';
+
+export enum ResponsesStreamEventType {
+  OutputTextDelta = 'response.output_text.delta',
+  ReasoningSummaryTextDelta = 'response.reasoning_summary_text.delta',
+  ReasoningTextDelta = 'response.reasoning_text.delta',
+  OutputItemDone = 'response.output_item.done',
+  Completed = 'response.completed',
+  Failed = 'response.failed',
+  Error = 'error',
+}
 
 export interface SendResponsesRequestOptions {
   /** Base URL of the provider; `/responses` is appended. */
@@ -59,7 +70,8 @@ export async function sendResponsesRequest({
     // medium when the caller hasn't picked a level (`'off'` isn't valid here).
     reasoning: {
       effort:
-        request.reasoningEffort && request.reasoningEffort !== 'off'
+        request.reasoningEffort &&
+        request.reasoningEffort !== ReasoningDisabled.Off
           ? request.reasoningEffort
           : ReasoningEffort.Medium,
       summary: 'auto',
@@ -153,30 +165,30 @@ export async function consumeResponsesStream(
       }
 
       switch (event.type) {
-        case 'response.output_text.delta':
+        case ResponsesStreamEventType.OutputTextDelta:
           if (event.delta) {
             content += event.delta;
             request.onToken?.(event.delta);
           }
           break;
-        case 'response.reasoning_summary_text.delta':
-        case 'response.reasoning_text.delta':
+        case ResponsesStreamEventType.ReasoningSummaryTextDelta:
+        case ResponsesStreamEventType.ReasoningTextDelta:
           if (event.delta) {
             reasoning += event.delta;
             request.onThinkingToken?.(event.delta);
           }
           break;
-        case 'response.output_item.done':
-          if (event.item?.type === 'function_call') {
+        case ResponsesStreamEventType.OutputItemDone:
+          if (event.item?.type === ResponsesItemType.FunctionCall) {
             const call = toToolCall(event.item);
             if (call) toolCalls.push(call);
           }
           break;
-        case 'response.completed':
+        case ResponsesStreamEventType.Completed:
           usage = mapUsage(event.response?.usage);
           break;
-        case 'response.failed':
-        case 'error':
+        case ResponsesStreamEventType.Failed:
+        case ResponsesStreamEventType.Error:
           throw new Error(
             event.response?.error?.message ??
               event.error?.message ??

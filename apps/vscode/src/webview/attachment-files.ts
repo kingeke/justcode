@@ -1,3 +1,4 @@
+import { FileEncoding } from '@ext/shared/protocol';
 import type { WebviewFileAttachment, WebviewImage } from '@ext/shared/protocol';
 
 /** The result of staging a set of dropped/picked/pasted files. */
@@ -97,7 +98,7 @@ export async function stageFiles(inputFiles: File[]): Promise<StagedFiles> {
         id,
         name: file.name,
         content: bytesToBase64(bytes),
-        encoding: 'base64',
+        encoding: FileEncoding.Base64,
         ...(file.type ? { mediaType: file.type } : {}),
       });
     } else {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { TodoWriteTool } from '@runtime/tools/todo-write-tool';
+import { TodoStatus, TodoWriteTool } from '@runtime/tools/todo-write-tool';
 
 describe('TodoWriteTool', () => {
   const tool = new TodoWriteTool();
@@ -17,9 +17,9 @@ describe('TodoWriteTool', () => {
 
   it('renders the list with status markers', async () => {
     const result = await run([
-      { content: 'design api', status: 'completed' },
-      { content: 'write code', status: 'in_progress' },
-      { content: 'add tests', status: 'pending' },
+      { content: 'design api', status: TodoStatus.Completed },
+      { content: 'write code', status: TodoStatus.InProgress },
+      { content: 'add tests', status: TodoStatus.Pending },
     ]);
 
     expect(result.isError).toBeFalsy();
@@ -38,8 +38,8 @@ describe('TodoWriteTool', () => {
     const view = tool.describe(
       JSON.stringify({
         todos: [
-          { content: 'a', status: 'completed' },
-          { content: 'b', status: 'pending' },
+          { content: 'a', status: TodoStatus.Completed },
+          { content: 'b', status: TodoStatus.Pending },
         ],
       })
     );
@@ -55,15 +55,15 @@ describe('TodoWriteTool', () => {
   });
 
   it('rejects empty content', async () => {
-    const result = await run([{ content: '  ', status: 'pending' }]);
+    const result = await run([{ content: '  ', status: TodoStatus.Pending }]);
     expect(result.isError).toBe(true);
     expect(result.content).toContain('non-empty "content"');
   });
 
   it('rejects more than one in_progress item', async () => {
     const result = await run([
-      { content: 'a', status: 'in_progress' },
-      { content: 'b', status: 'in_progress' },
+      { content: 'a', status: TodoStatus.InProgress },
+      { content: 'b', status: TodoStatus.InProgress },
     ]);
     expect(result.isError).toBe(true);
     expect(result.content).toContain('in progress');

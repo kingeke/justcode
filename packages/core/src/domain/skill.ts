@@ -65,7 +65,10 @@ export interface SkillCommandDefinition {
  * (available only inside that project), `global` in the shared cache directory
  * (available everywhere). A local skill shadows a global one of the same name.
  */
-export type SkillScope = 'local' | 'global';
+export enum SkillScope {
+  Local = 'local',
+  Global = 'global',
+}
 
 /** A skill on disk with its manifest and parsed commands. */
 export interface InstalledSkill {

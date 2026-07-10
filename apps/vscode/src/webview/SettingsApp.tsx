@@ -16,7 +16,8 @@ import {
   type SettingsModelReference,
   type SettingsPromptInfo,
   type SettingsSkill,
-  type SettingsSkillScope,
+  SettingsSkillScope,
+  SkillActionKind,
 } from '@ext/shared/settings-protocol';
 import {
   logoUri,
@@ -92,7 +93,7 @@ interface McpSaveState {
 
 /** Outcome of the most recent skill add/update/remove, shown on the tab. */
 interface SkillActionState {
-  action: 'add' | 'update' | 'remove';
+  action: SkillActionKind;
   success: boolean;
   message: string;
 }
@@ -1429,7 +1430,9 @@ function SkillsTab({
   onRemove: (name: string, scope: SettingsSkillScope) => void;
 }): React.JSX.Element {
   const [source, setSource] = React.useState('');
-  const [scope, setScope] = React.useState<SettingsSkillScope>('global');
+  const [scope, setScope] = React.useState<SettingsSkillScope>(
+    SettingsSkillScope.Global
+  );
   // Two-step remove: the first click arms the button, the second removes.
   const [confirmingRemove, setConfirmingRemove] = React.useState<string | null>(
     null
@@ -1454,8 +1457,12 @@ function SkillsTab({
     setSource('');
   };
 
-  const local = (skills ?? []).filter((skill) => skill.scope === 'local');
-  const global = (skills ?? []).filter((skill) => skill.scope === 'global');
+  const local = (skills ?? []).filter(
+    (skill) => skill.scope === SettingsSkillScope.Local
+  );
+  const global = (skills ?? []).filter(
+    (skill) => skill.scope === SettingsSkillScope.Global
+  );
   const localNames = new Set(local.map((skill) => skill.name));
 
   const renderSkill = (skill: SettingsSkill): React.JSX.Element => {
@@ -1487,7 +1494,8 @@ function SkillsTab({
               {skill.commands.length === 1 ? 'command' : 'commands'}
             </span>
           ) : null}
-          {skill.scope === 'global' && localNames.has(skill.name) ? (
+          {skill.scope === SettingsSkillScope.Global &&
+          localNames.has(skill.name) ? (
             <span className="skill-card-shadowed">
               shadowed by the local install
             </span>

@@ -11,6 +11,7 @@ import { join } from 'node:path';
 
 import { APP_NAME } from '@core/branding';
 import { cacheDirectory } from '@core/application/cache-dir';
+import { NodePlatform } from '@core/domain/node-platform';
 
 /**
  * Fire-and-forget OS notifications for moments the user should come back to
@@ -54,7 +55,7 @@ export function buildNotifyCommand(
   branded = false
 ): NotifyCommand | null {
   const { title, message, iconPath } = notification;
-  if (platform === 'darwin') {
+  if (platform === NodePlatform.Darwin) {
     if (hasTerminalNotifier) {
       return {
         command: 'terminal-notifier',
@@ -283,12 +284,14 @@ function findNotifierApp(binaryPath: string): string | null {
  */
 export function notifyOS(notification: OsNotification): void {
   const brandedPath =
-    process.platform === 'darwin'
+    process.platform === NodePlatform.Darwin
       ? resolveBrandedNotifier(notification.iconPath)
       : null;
   const notifierPath =
     brandedPath ??
-    (process.platform === 'darwin' ? resolveTerminalNotifier() : null);
+    (process.platform === NodePlatform.Darwin
+      ? resolveTerminalNotifier()
+      : null);
   const primary = buildNotifyCommand(
     process.platform,
     notification,
@@ -302,13 +305,20 @@ export function notifyOS(notification: OsNotification): void {
     primary.command = notifierPath;
   }
   run(primary, () => {
-    if (process.platform !== 'darwin' || primary.command === 'osascript') {
+    if (
+      process.platform !== NodePlatform.Darwin ||
+      primary.command === 'osascript'
+    ) {
       return;
     }
     // terminal-notifier resolved but failed to run (stale shim, gem wrapper
     // without the binary…): mark it unusable and retry via osascript.
     terminalNotifierPath = null;
-    const fallback = buildNotifyCommand('darwin', notification, false);
+    const fallback = buildNotifyCommand(
+      NodePlatform.Darwin,
+      notification,
+      false
+    );
     if (fallback) run(fallback);
   });
 }

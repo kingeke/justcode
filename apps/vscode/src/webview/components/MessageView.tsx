@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { WebviewRole, type WebviewMessage } from '@ext/shared/protocol';
+import { ToolName } from '@core/domain/tool-name';
 import { DiffView } from '@ext/webview/components/DiffView';
 import {
   CheckIcon,
@@ -150,7 +151,16 @@ function MessageViewImpl({
           {expandTools ? (
             <>
               <div className="tool-section-label">Result</div>
-              <pre className="tool-result">{message.content}</pre>
+              {message.toolName === ToolName.Task ? (
+                <div
+                  className="markdown-body"
+                  dangerouslySetInnerHTML={{
+                    __html: renderMarkdown(message.content),
+                  }}
+                />
+              ) : (
+                <pre className="tool-result">{message.content}</pre>
+              )}
             </>
           ) : null}
         </div>
@@ -227,7 +237,16 @@ function MessageViewImpl({
           </div>
         ) : null}
         {message.content ? (
-          <pre className="msg-content">{message.content}</pre>
+          message.role === WebviewRole.User ? (
+            <div
+              className="msg-content markdown-body"
+              dangerouslySetInnerHTML={{
+                __html: renderMarkdown(message.content),
+              }}
+            />
+          ) : (
+            <pre className="msg-content">{message.content}</pre>
+          )
         ) : null}
         {timing ||
         onRetry ||

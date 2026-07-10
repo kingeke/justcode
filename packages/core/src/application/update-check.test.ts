@@ -8,6 +8,7 @@ import {
   detectChannel,
   getUpdateNotice,
   upgradeCommandFor,
+  UpdateChannel,
 } from '@core/application/update-check';
 
 describe('compareVersions', () => {
@@ -48,12 +49,14 @@ describe('detectChannel', () => {
 
 describe('upgradeCommandFor', () => {
   it('gives the package-manager command per channel', () => {
-    expect(upgradeCommandFor('npm')).toContain('npm update -g');
+    expect(upgradeCommandFor(UpdateChannel.Npm)).toContain('npm update -g');
     // `brew update` must come first so a stale local tap is refreshed before
     // the upgrade (otherwise `brew upgrade` is a no-op on an old formula).
-    expect(upgradeCommandFor('brew')).toContain('brew update && brew upgrade');
-    expect(upgradeCommandFor('curl')).toContain('install.sh');
-    expect(upgradeCommandFor('unknown')).toMatch(/releases/i);
+    expect(upgradeCommandFor(UpdateChannel.Brew)).toContain(
+      'brew update && brew upgrade'
+    );
+    expect(upgradeCommandFor(UpdateChannel.Curl)).toContain('install.sh');
+    expect(upgradeCommandFor(UpdateChannel.Unknown)).toMatch(/releases/i);
   });
 });
 
@@ -121,5 +124,34 @@ describe('getUpdateNotice', () => {
     await seedCache('9.9.9');
     process.env.JUSTCODE_DEBUG = '1';
     expect(await getUpdateNotice('0.1.0')).toBeNull();
+  });
+});
+
+describe('UpdateChannel', () => {
+  it('has stable string values', () => {
+    expect(UpdateChannel.Curl).toBe('curl');
+    expect(UpdateChannel.Npm).toBe('npm');
+    expect(UpdateChannel.Brew).toBe('brew');
+    expect(UpdateChannel.Unknown).toBe('unknown');
+  });
+
+  it('detectChannel returns enum members', () => {
+    expect(detectChannel('/Users/me/.justcode/bin/justcode', '')).toBe(
+      UpdateChannel.Curl
+    );
+    expect(detectChannel('/opt/homebrew/Cellar/justcode/bin/x', '')).toBe(
+      UpdateChannel.Brew
+    );
+    expect(detectChannel('/x/node_modules/justcode/index.js', '')).toBe(
+      UpdateChannel.Npm
+    );
+    expect(detectChannel('/tmp/random', '/tmp/random')).toBe(
+      UpdateChannel.Unknown
+    );
+  });
+
+  it('upgradeCommandFor branches by enum member', () => {
+    expect(upgradeCommandFor(UpdateChannel.Npm)).toContain('npm update -g');
+    expect(upgradeCommandFor(UpdateChannel.Brew)).toContain('brew upgrade');
   });
 });

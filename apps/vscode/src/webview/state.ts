@@ -94,7 +94,11 @@ export interface QueuedMessage {
   files?: WebviewFileAttachment[];
 }
 
-export type ChatView = 'sessions' | 'chat' | 'model-picker';
+export enum ChatView {
+  Sessions = 'sessions',
+  Chat = 'chat',
+  ModelPicker = 'model-picker',
+}
 
 export interface ChatState {
   status: ChatStatus;
@@ -261,7 +265,7 @@ export interface SubAgentRunView {
 
 export const initialState: ChatState = {
   status: ChatStatus.Loading,
-  view: 'sessions',
+  view: ChatView.Sessions,
   collapseResponses: false,
   showConversationSidebar: true,
   sessions: [],
@@ -422,7 +426,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
       return {
         ...state,
         status: ChatStatus.Ready,
-        view: 'chat',
+        view: ChatView.Chat,
         sessionId: action.sessionId,
         providerId: action.providerId,
         activeModel: action.activeModel,
@@ -600,7 +604,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
       return {
         ...state,
         status: ChatStatus.Ready,
-        view: 'sessions',
+        view: ChatView.Sessions,
         sessions: action.sessions,
         hasConnectedProvider: action.hasConnectedProvider,
         activeSessionIds: action.activeSessionIds,

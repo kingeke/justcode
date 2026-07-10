@@ -6,6 +6,7 @@ import {
   type ModelInfo,
   type ProviderClient,
 } from '@core/ports/chat-model';
+import { ReasoningDisabled } from '@core/ports/chat-model';
 import { ProviderId } from '@core/ports/provider-catalog';
 import type { ToolCall } from '@core/domain/message';
 import { HttpError, joinUrl, requestJson } from '@providers/http/http-client';
@@ -14,7 +15,16 @@ import {
   parseAnthropicToolCalls,
   toAnthropicToolDefinitions,
   toAnthropicWireRequest,
+  AnthropicBlockType,
+  AnthropicDeltaType,
 } from '@providers/anthropic/anthropic-wire';
+
+export enum AnthropicStreamEventType {
+  MessageStart = 'message_start',
+  ContentBlockStart = 'content_block_start',
+  ContentBlockDelta = 'content_block_delta',
+  MessageDelta = 'message_delta',
+}
 import {
   requiresAdaptiveThinking,
   supportsThinking,
@@ -77,7 +87,8 @@ export class AnthropicProvider implements ProviderClient {
     // budget plus the default reply allowance. Models predating thinking
     // reject the block entirely, so gate on the model id.
     const thinkingEffort =
-      request.reasoningEffort && request.reasoningEffort !== 'off'
+      request.reasoningEffort &&
+      request.reasoningEffort !== ReasoningDisabled.Off
         ? request.reasoningEffort
         : undefined;
     const thinking =
@@ -133,7 +144,7 @@ export class AnthropicProvider implements ProviderClient {
     );
 
     const content = (response.content ?? [])
-      .filter((block) => block.type === 'text')
+      .filter((block) => block.type === AnthropicBlockType.Text)
       .map((block) => block.text ?? '')
       .join('');
     const toolCalls = parseAnthropicToolCalls(response.content ?? []);
@@ -334,7 +345,7 @@ export class AnthropicStreamAccumulator {
     usage?: { output_tokens?: number };
   }): void {
     switch (event.type) {
-      case 'message_start':
+      case AnthropicStreamEventType.MessageStart:
         // See the non-streaming path: `input_tokens` is only the uncached
         // portion, so add the cached prefix back in to get the full context size.
         this.cachedTokens = event.message?.usage?.cache_read_input_tokens ?? 0;
@@ -343,8 +354,8 @@ export class AnthropicStreamAccumulator {
           this.cachedTokens +
           (event.message?.usage?.cache_creation_input_tokens ?? 0);
         break;
-      case 'content_block_start':
-        if (event.content_block?.type === 'tool_use') {
+      case AnthropicStreamEventType.ContentBlockStart:
+        if (event.content_block?.type === AnthropicBlockType.ToolUse) {
           this.toolsByIndex.set(event.index ?? 0, {
             id: event.content_block.id ?? '',
             name: event.content_block.name ?? '',
@@ -352,21 +363,24 @@ export class AnthropicStreamAccumulator {
           });
         }
         break;
-      case 'content_block_delta': {
+      case AnthropicStreamEventType.ContentBlockDelta: {
         const delta = event.delta;
-        if (delta?.type === 'text_delta' && delta.text) {
+        if (delta?.type === AnthropicDeltaType.TextDelta && delta.text) {
           this.text += delta.text;
           this.onToken?.(delta.text);
-        } else if (delta?.type === 'thinking_delta' && delta.thinking) {
+        } else if (
+          delta?.type === AnthropicDeltaType.ThinkingDelta &&
+          delta.thinking
+        ) {
           this.thinking += delta.thinking;
           this.onThinkingToken?.(delta.thinking);
-        } else if (delta?.type === 'input_json_delta') {
+        } else if (delta?.type === AnthropicDeltaType.InputJsonDelta) {
           const tool = this.toolsByIndex.get(event.index ?? 0);
           if (tool) tool.json += delta.partial_json ?? '';
         }
         break;
       }
-      case 'message_delta':
+      case AnthropicStreamEventType.MessageDelta:
         if (event.usage?.output_tokens != null) {
           this.outputTokens = event.usage.output_tokens;
         }

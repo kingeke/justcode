@@ -8,7 +8,11 @@ const CONTEXT_LINES = 3;
 const MAX_DIFF_LINES = 40;
 const ELLIPSIS = '⋯';
 
-type DiffLineKind = 'add' | 'del' | 'context';
+export enum DiffLineKind {
+  Add = 'add',
+  Del = 'del',
+  Context = 'context',
+}
 
 interface RenderedDiffLine {
   kind: DiffLineKind;
@@ -31,7 +35,10 @@ export function DiffView({ diff }: { diff: WebviewDiff }): React.JSX.Element {
         {lines.map((line, index) => {
           // Collapsed "N unchanged lines" markers are meta text, not code — show
           // them verbatim rather than syntax-highlighting them.
-          if (line.kind === 'context' && line.text.startsWith(ELLIPSIS)) {
+          if (
+            line.kind === DiffLineKind.Context &&
+            line.text.startsWith(ELLIPSIS)
+          ) {
             return (
               <div key={`c-${index}`} className="diff-line diff-context">
                 <span className="diff-gutter"> </span>
@@ -41,11 +48,15 @@ export function DiffView({ diff }: { diff: WebviewDiff }): React.JSX.Element {
           }
 
           const gutter =
-            line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' ';
+            line.kind === DiffLineKind.Add
+              ? '+'
+              : line.kind === DiffLineKind.Del
+                ? '-'
+                : ' ';
           const className =
-            line.kind === 'add'
+            line.kind === DiffLineKind.Add
               ? 'diff-line diff-added'
-              : line.kind === 'del'
+              : line.kind === DiffLineKind.Del
                 ? 'diff-line diff-removed'
                 : 'diff-line diff-context';
           return (
@@ -72,7 +83,7 @@ function toRenderedLines(diff: WebviewDiff): RenderedDiffLine[] {
   const keep = new Array<boolean>(lines.length).fill(false);
 
   for (let index = 0; index < lines.length; index += 1) {
-    if (lines[index]?.kind === 'context') continue;
+    if (lines[index]?.kind === DiffLineKind.Context) continue;
     const from = Math.max(0, index - CONTEXT_LINES);
     const to = Math.min(lines.length - 1, index + CONTEXT_LINES);
     for (let keepIndex = from; keepIndex <= to; keepIndex += 1) {
@@ -96,7 +107,7 @@ function toRenderedLines(diff: WebviewDiff): RenderedDiffLine[] {
     }
 
     rendered.push({
-      kind: 'context',
+      kind: DiffLineKind.Context,
       text: `${ELLIPSIS} ${skipped} unchanged line${skipped === 1 ? '' : 's'}`,
     });
   }
@@ -108,7 +119,7 @@ function toRenderedLines(diff: WebviewDiff): RenderedDiffLine[] {
   const hidden = rendered.length - MAX_DIFF_LINES;
   return [
     ...rendered.slice(0, MAX_DIFF_LINES),
-    { kind: 'context', text: `${ELLIPSIS} (${hidden} more lines)` },
+    { kind: DiffLineKind.Context, text: `${ELLIPSIS} (${hidden} more lines)` },
   ];
 }
 
@@ -122,10 +133,10 @@ function toDiffLines(diff: WebviewDiff): RenderedDiffLine[] {
     }
 
     const kind: DiffLineKind = part.added
-      ? 'add'
+      ? DiffLineKind.Add
       : part.removed
-        ? 'del'
-        : 'context';
+        ? DiffLineKind.Del
+        : DiffLineKind.Context;
 
     for (const text of partLines) {
       lines.push({ kind, text });

@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { getModeMention } from '@core/application/prompt-attachment-service';
+import type { ChatMode } from '@core/domain/chat-mode';
 import {
   HostMessageType,
   SettingsSection,
@@ -17,6 +18,7 @@ import {
 import { onHostMessage, postToHost } from '@ext/webview/vscode-api';
 import {
   ChatStatus,
+  ChatView,
   LiveTurnItemKind,
   LocalActionType,
   initialState,
@@ -157,7 +159,8 @@ export function App(): React.JSX.Element {
   // full-screen view (model picker) is up — picking a model there is part of
   // the edit, not a click outside it.
   React.useEffect(() => {
-    if (editingMessageId === null || state.view !== 'chat') return undefined;
+    if (editingMessageId === null || state.view !== ChatView.Chat)
+      return undefined;
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') cancelEditMessage();
     };
@@ -567,7 +570,10 @@ export function App(): React.JSX.Element {
     // first (the host applies SelectMode before Submit — see
     // startImplementation), then send the message with the mention stripped.
     let content = rawContent;
-    const modeMention = getModeMention(rawContent, state.modes);
+    const modeMention = getModeMention(
+      rawContent,
+      state.modes as unknown as ChatMode[]
+    );
     if (modeMention) {
       content = modeMention.content;
       if (modeMention.modeId !== state.activeModeId) {
@@ -802,7 +808,7 @@ export function App(): React.JSX.Element {
     name: string
   ): void => {
     setModelDefaultTarget({ target, id, name });
-    dispatch({ type: LocalActionType.SetView, view: 'model-picker' });
+    dispatch({ type: LocalActionType.SetView, view: ChatView.ModelPicker });
   };
 
   const clearDefaultModelFor = (
@@ -868,7 +874,7 @@ export function App(): React.JSX.Element {
   // the webview opens straight into a restored chat.
   const { view: currentView, sessions: knownSessions } = state;
   React.useEffect(() => {
-    if (currentView !== 'chat' || knownSessions.length > 0) return;
+    if (currentView !== ChatView.Chat || knownSessions.length > 0) return;
     postToHost({ type: WebviewMessageType.ListSessions, focus: false });
   }, [currentView, knownSessions.length]);
 
@@ -883,7 +889,7 @@ export function App(): React.JSX.Element {
   };
 
   const openModelPicker = (): void => {
-    dispatch({ type: LocalActionType.SetView, view: 'model-picker' });
+    dispatch({ type: LocalActionType.SetView, view: ChatView.ModelPicker });
   };
 
   const refreshModels = (): void => {
@@ -918,7 +924,7 @@ export function App(): React.JSX.Element {
 
   const closeModelPicker = (): void => {
     setModelDefaultTarget(null);
-    dispatch({ type: LocalActionType.SetView, view: 'chat' });
+    dispatch({ type: LocalActionType.SetView, view: ChatView.Chat });
   };
 
   const connectProvider = (): void => {
@@ -1141,7 +1147,7 @@ export function App(): React.JSX.Element {
 
   const chatDisabled = !state.activeModel;
 
-  if (state.view === 'sessions' || state.status === ChatStatus.Loading) {
+  if (state.view === ChatView.Sessions || state.status === ChatStatus.Loading) {
     if (!state.hasConnectedProvider && state.status !== ChatStatus.Loading) {
       return (
         <div className="no-provider-screen">
@@ -1180,7 +1186,7 @@ export function App(): React.JSX.Element {
     );
   }
 
-  if (state.view === 'model-picker') {
+  if (state.view === ChatView.ModelPicker) {
     // In "set default" context the highlighted row is the target's bound model
     // (not the session's active one): the user is editing that mode's/agent's
     // binding, which may differ from the model they're currently on.

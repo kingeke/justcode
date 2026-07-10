@@ -116,6 +116,7 @@ import {
   type WebviewSubAgentRunSnapshot,
   WebviewSubAgentPhase,
   WebviewSubAgentStatus,
+  WebviewModeIcon,
 } from '@ext/shared/protocol';
 import {
   addCustomMode,
@@ -125,6 +126,7 @@ import {
   isKnownMode,
   listModes,
   resolveModeSystemPrompt,
+  type ChatMode,
   type CustomModeConfig,
 } from '@core/domain/chat-mode';
 import {
@@ -134,7 +136,11 @@ import {
   setSubAgentDefaultModel,
   type ModelDefaults,
 } from '@core/domain/model-default';
-import { WebviewModelDefaultTarget } from '@ext/shared/protocol';
+import {
+  WebviewModelDefaultTarget,
+  FileEncoding,
+  WebviewReasoningDisabled,
+} from '@ext/shared/protocol';
 
 /** Longest tool-result snippet we forward to the webview as a preview. */
 const RESULT_PREVIEW_LIMIT = 2000;
@@ -833,7 +839,7 @@ export class ChatBridge {
     this.askPrompt = globalConfig.askSystemPrompt;
     this.planPrompt = globalConfig.planSystemPrompt;
     this.customModesConfig = customModes;
-    this.modes = listModes(customModes);
+    this.modes = toWebviewModes(listModes(customModes));
     this.modelDefaults = {
       byMode: globalConfig.modelDefaults?.byMode ?? {},
       bySubAgent: globalConfig.modelDefaults?.bySubAgent ?? {},
@@ -1470,7 +1476,10 @@ export class ChatBridge {
         // The webview-flavored choice carries the same string values as @core's
         // ReasoningEffortChoice; bridge the nominal enum/literal mismatch here.
         ...(reasoningEffort
-          ? { reasoningEffort: reasoningEffort as ReasoningEffortChoice }
+          ? {
+              reasoningEffort:
+                reasoningEffort as unknown as ReasoningEffortChoice,
+            }
           : {}),
         ...(this.models.find((m) => m.id === this.activeModel)?.reasoning
           ?.mandatory
@@ -2830,7 +2839,10 @@ export class ChatBridge {
         model: this.activeModel,
         signal: abortController.signal,
         ...(reasoningEffort
-          ? { reasoningEffort: reasoningEffort as ReasoningEffortChoice }
+          ? {
+              reasoningEffort:
+                reasoningEffort as unknown as ReasoningEffortChoice,
+            }
           : {}),
         onToken: (token) => {
           summaryChars += token.length;
@@ -3111,7 +3123,7 @@ export class ChatBridge {
       modelDefaults: this.modelDefaults,
     });
     this.customModesConfig = config.customModes ?? {};
-    this.modes = listModes(this.customModesConfig);
+    this.modes = toWebviewModes(listModes(this.customModesConfig));
     if (!isKnownMode(this.activeModeId, this.customModesConfig)) {
       this.activeModeId = BUILD_MODE_ID;
     }
@@ -3281,7 +3293,7 @@ export class ChatBridge {
     const { id, customModes } = created;
 
     this.customModesConfig = customModes;
-    this.modes = listModes(customModes);
+    this.modes = toWebviewModes(listModes(customModes));
     this.applyMode(id);
     await writeGlobalConfig(configDir, {
       ...config,
@@ -3302,7 +3314,7 @@ export class ChatBridge {
     if (!removed) return;
 
     this.customModesConfig = removed.customModes;
-    this.modes = listModes(removed.customModes);
+    this.modes = toWebviewModes(listModes(removed.customModes));
     const nextActive =
       this.activeModeId === modeId ? BUILD_MODE_ID : this.activeModeId;
     this.applyMode(nextActive);
@@ -3507,6 +3519,15 @@ function toProviderError(
 }
 
 /** Derives a stable, readable, unique id for a custom mode from its name. */
+function toWebviewModes(modes: ChatMode[]): WebviewMode[] {
+  return modes.map((mode) => ({
+    id: mode.id,
+    name: mode.name,
+    icon: mode.icon as unknown as WebviewModeIcon,
+    custom: mode.custom,
+  }));
+}
+
 function toWebviewModel(model: ModelInfo): WebviewModel {
   const entry = PROVIDER_BY_ID[model.providerId];
   const result: WebviewModel = {
@@ -3527,12 +3548,13 @@ function toWebviewModel(model: ModelInfo): WebviewModel {
   if (model.reasoning) {
     // The enum values are the same strings the protocol re-declares as literals.
     result.reasoning = {
-      effortLevels: model.reasoning.effortLevels as WebviewReasoningEffort[],
+      effortLevels: model.reasoning
+        .effortLevels as unknown as WebviewReasoningEffort[],
       mandatory: model.reasoning.mandatory,
       ...(model.reasoning.defaultEffort
         ? {
             defaultEffort: model.reasoning
-              .defaultEffort as WebviewReasoningEffort,
+              .defaultEffort as unknown as WebviewReasoningEffort,
           }
         : {}),
     };
@@ -3552,7 +3574,11 @@ function effectiveEffort(
   if (!reasoning) return undefined;
   // A mandatory model always reasons, so a stale "off" (no longer offered by the
   // picker) can't disable it — fall back to the default effort instead.
-  if (stored && !(reasoning.mandatory && stored === 'off')) return stored;
+  if (
+    stored &&
+    !(reasoning.mandatory && stored === WebviewReasoningDisabled.Off)
+  )
+    return stored;
   return (reasoning.defaultEffort ?? reasoning.effortLevels[0]) as
     | WebviewReasoningChoice
     | undefined;
@@ -3585,7 +3611,7 @@ export async function materializeFileAttachments(
 ): Promise<MessageAttachment[]> {
   const attachments: MessageAttachment[] = [];
   for (const file of files) {
-    if (file.encoding !== 'base64') {
+    if (file.encoding !== FileEncoding.Base64) {
       attachments.push({ path: file.name, content: file.content });
       continue;
     }

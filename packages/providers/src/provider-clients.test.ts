@@ -10,7 +10,7 @@ import { OpenRouterProvider } from '@providers/openrouter/openrouter-provider';
 import { OpenAiCompatibleProvider } from '@providers/openai-compatible/openai-compatible-provider';
 import { ProviderId } from '@core/ports/provider-catalog';
 import { setDebugLoggingEnabled } from '@core/application/debug-log';
-import { ReasoningEffort } from '@core/ports/chat-model';
+import { ReasoningDisabled, ReasoningEffort } from '@core/ports/chat-model';
 import { MessageRole, type ChatMessage } from '@core/domain/message';
 
 function userMessage(content: string): ChatMessage {
@@ -207,7 +207,7 @@ describe('provider clients', () => {
     await new OllamaProvider('http://127.0.0.1:11434').sendChat({
       model: 'some-local-model',
       messages: [userMessage('hello')],
-      reasoningEffort: 'off',
+      reasoningEffort: ReasoningDisabled.Off,
     });
 
     expect(sentBody(fetchMock).reasoning_effort).toBe('none');

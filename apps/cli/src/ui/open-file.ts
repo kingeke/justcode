@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 
+import { NodePlatform } from '@core/domain/node-platform';
+
 export async function openFileInEditor(filePath: string): Promise<void> {
   const editor = process.env.VISUAL?.trim() || process.env.EDITOR?.trim();
   const command = editor ?? getSystemOpenCommand();
@@ -23,11 +25,11 @@ export async function openFileInEditor(filePath: string): Promise<void> {
 }
 
 function getSystemOpenCommand(): string {
-  if (process.platform === 'darwin') {
+  if (process.platform === NodePlatform.Darwin) {
     return 'open';
   }
 
-  if (process.platform === 'win32') {
+  if (process.platform === NodePlatform.Win32) {
     return 'cmd';
   }
 
@@ -35,7 +37,7 @@ function getSystemOpenCommand(): string {
 }
 
 function getSystemOpenArgs(filePath: string): string[] {
-  if (process.platform === 'win32') {
+  if (process.platform === NodePlatform.Win32) {
     return ['/c', 'start', '', filePath];
   }
 

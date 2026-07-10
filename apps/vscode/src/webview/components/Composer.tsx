@@ -13,6 +13,7 @@ import {
   BUILT_IN_MODE_CATEGORY,
   CUSTOM_MODE_CATEGORY,
   modePlaceholder,
+  type ChatMode,
 } from '@core/domain/chat-mode';
 import {
   clampComposerHeight,
@@ -35,6 +36,7 @@ import type {
   WebviewTool,
   WebviewUsage,
 } from '@ext/shared/protocol';
+import { WebviewReasoningDisabled } from '@ext/shared/protocol';
 import {
   CogIcon,
   LayersIcon,
@@ -506,14 +508,16 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   // What's in effect now: the stored choice, or the model default when unset. A
   // mandatory model ignores a stale "off" (it always reasons), matching the host.
   const usableStored =
-    reasoning?.mandatory && storedEffort === 'off' ? undefined : storedEffort;
+    reasoning?.mandatory && storedEffort === WebviewReasoningDisabled.Off
+      ? undefined
+      : storedEffort;
   const effectiveEffort: WebviewReasoningChoice =
-    usableStored ?? defaultEffort ?? 'off';
+    usableStored ?? defaultEffort ?? WebviewReasoningDisabled.Off;
   // Mandatory models always reason, so "off" isn't offered; optional ones lead
   // with it (mirrors the CLI's reasoning picker).
   const reasoningChoices: WebviewReasoningChoice[] = reasoning?.mandatory
     ? [...reasoningLevels]
-    : ['off', ...reasoningLevels];
+    : [WebviewReasoningDisabled.Off, ...reasoningLevels];
 
   const submit = (): void => {
     const trimmed = value.trim();
@@ -598,7 +602,13 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   // Chat modes matching the `@` query, offered ahead of files so `@plan`-style
   // mentions can switch modes. Applying one inserts the mode's id.
   const modeMentionSuggestions = React.useMemo(
-    () => (symbolMention ? [] : filterModeSuggestions(props.modes, fileQuery)),
+    () =>
+      symbolMention
+        ? []
+        : (filterModeSuggestions(
+            props.modes as unknown as ChatMode[],
+            fileQuery
+          ) as unknown as WebviewMode[]),
     [symbolMention, fileQuery, props.modes]
   );
   const mentionSuggestions = React.useMemo<string[]>(() => {
@@ -1308,7 +1318,8 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                     {reasoningChoices.map((choice) => {
                       const isCurrent = choice === effectiveEffort;
                       const isDefault =
-                        choice !== 'off' && choice === defaultEffort;
+                        choice !== WebviewReasoningDisabled.Off &&
+                        choice === defaultEffort;
                       return (
                         <button
                           key={choice}
@@ -1320,7 +1331,9 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                           }}
                         >
                           <span className="reasoning-choice-label">
-                            {choice === 'off' ? 'Off' : choice}
+                            {choice === WebviewReasoningDisabled.Off
+                              ? 'Off'
+                              : choice}
                             {isDefault ? (
                               <span className="reasoning-choice-default">
                                 {' '}

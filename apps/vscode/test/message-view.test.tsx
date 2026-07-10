@@ -220,6 +220,40 @@ new`);
     expect(markup).not.toContain('msg-retry-btn');
   });
 
+  it('renders user message content as markdown', () => {
+    const markup = renderToStaticMarkup(
+      <MessageView
+        message={{
+          id: 'u-md',
+          role: WebviewRole.User,
+          content: '**bold** text',
+        }}
+      />
+    );
+
+    expect(markup).toContain('msg-content markdown-body');
+    expect(markup).toContain('<strong>bold</strong>');
+    expect(markup).not.toContain('<pre class="msg-content">');
+  });
+
+  it('renders a task tool result as markdown', () => {
+    const markup = renderToStaticMarkup(
+      <MessageView
+        expandTools={true}
+        message={{
+          id: 'tool-task',
+          role: WebviewRole.Tool,
+          content: '## Report\n**done**',
+          toolName: 'task',
+        }}
+      />
+    );
+
+    expect(markup).toContain('markdown-body');
+    expect(markup).toContain('<strong>done</strong>');
+    expect(markup).not.toContain('tool-result');
+  });
+
   it('renders input preview for whitelisted historical tools', () => {
     const markup = renderToStaticMarkup(
       <MessageView

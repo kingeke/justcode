@@ -1,5 +1,7 @@
 import * as React from 'react';
 
+import { WebviewModeIcon } from '@ext/shared/protocol';
+
 /**
  * Inline SVG icons drawn with `currentColor`, so they inherit text color and
  * VSCode theming without shipping an icon font (which would need a relaxed CSP
@@ -308,17 +310,17 @@ export function ModeIcon({
   icon,
   size = 14,
 }: {
-  icon: 'build' | 'ask' | 'plan' | 'custom';
+  icon: WebviewModeIcon;
   size?: number;
 }): React.JSX.Element {
   switch (icon) {
-    case 'build':
+    case WebviewModeIcon.Build:
       return <HammerIcon size={size} />;
-    case 'ask':
+    case WebviewModeIcon.Ask:
       return <ChatIcon size={size} />;
-    case 'plan':
+    case WebviewModeIcon.Plan:
       return <ClipboardIcon size={size} />;
-    case 'custom':
+    case WebviewModeIcon.Custom:
       return <SparkleIcon size={size} />;
   }
 }

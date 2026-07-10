@@ -41,7 +41,7 @@ import {
   type InstalledSkill,
   type SkillCommandDefinition,
   type SkillManifest,
-  type SkillScope,
+  SkillScope,
 } from '@core/domain/skill';
 
 const execFileAsync = promisify(execFile);
@@ -556,11 +556,14 @@ export async function discoverAllSkills(options: {
   workspaceRoot?: string | undefined;
 }): Promise<{ skills: InstalledSkill[]; errors: string[] }> {
   const local = options.workspaceRoot
-    ? await discoverSkills(localSkillsDirectory(options.workspaceRoot), 'local')
+    ? await discoverSkills(
+        localSkillsDirectory(options.workspaceRoot),
+        SkillScope.Local
+      )
     : { skills: [], errors: [] };
   const global = await discoverSkills(
     skillsDirectory(options.configDirectory),
-    'global'
+    SkillScope.Global
   );
   const localNames = new Set(local.skills.map((skill) => skill.manifest.name));
   return {

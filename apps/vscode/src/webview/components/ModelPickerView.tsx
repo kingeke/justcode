@@ -5,24 +5,23 @@ import { PlusIcon, RefreshIcon } from '@ext/webview/components/Icons';
 
 // ── Sort ─────────────────────────────────────────────────────────────────────
 
-export type SortMode =
-  | 'provider'
-  | 'input-cost'
-  | 'output-cost'
-  | 'context-window';
-export type SortDir = 'asc' | 'desc';
+export enum SortMode {
+  Provider = 'provider',
+  InputCost = 'input-cost',
+  OutputCost = 'output-cost',
+  ContextWindow = 'context-window',
+}
+export enum SortDir {
+  Asc = 'asc',
+  Desc = 'desc',
+}
 
-const SORT_MODES: SortMode[] = [
-  'provider',
-  'input-cost',
-  'output-cost',
-  'context-window',
-];
+const SORT_MODES: SortMode[] = Object.values(SortMode);
 const SORT_LABELS: Record<SortMode, string> = {
-  provider: 'Provider',
-  'input-cost': 'Input cost',
-  'output-cost': 'Output cost',
-  'context-window': 'Context',
+  [SortMode.Provider]: 'Provider',
+  [SortMode.InputCost]: 'Input cost',
+  [SortMode.OutputCost]: 'Output cost',
+  [SortMode.ContextWindow]: 'Context',
 };
 
 /**
@@ -39,7 +38,7 @@ function compareNumeric(
   if (a == null && b == null) return 0;
   if (a == null) return 1;
   if (b == null) return -1;
-  return dir === 'asc' ? a - b : b - a;
+  return dir === SortDir.Asc ? a - b : b - a;
 }
 
 export function sortModels(
@@ -48,14 +47,15 @@ export function sortModels(
   dir: SortDir
 ): WebviewModel[] {
   return [...models].sort((a, b) => {
-    if (mode === 'provider') {
+    if (mode === SortMode.Provider) {
       const cmp = a.providerName.localeCompare(b.providerName);
-      return dir === 'asc' ? cmp : -cmp;
+      return dir === SortDir.Asc ? cmp : -cmp;
     }
-    if (mode === 'context-window') {
+    if (mode === SortMode.ContextWindow) {
       return compareNumeric(a.contextWindow, b.contextWindow, dir);
     }
-    const key = mode === 'input-cost' ? 'inputCostPerM' : 'outputCostPerM';
+    const key =
+      mode === SortMode.InputCost ? 'inputCostPerM' : 'outputCostPerM';
     return compareNumeric(a[key], b[key], dir);
   });
 }
@@ -121,8 +121,8 @@ export function ModelPickerView({
   onRefresh,
 }: ModelPickerViewProps): React.JSX.Element {
   const [query, setQuery] = React.useState('');
-  const [sortMode, setSortMode] = React.useState<SortMode>('provider');
-  const [sortDir, setSortDir] = React.useState<SortDir>('asc');
+  const [sortMode, setSortMode] = React.useState<SortMode>(SortMode.Provider);
+  const [sortDir, setSortDir] = React.useState<SortDir>(SortDir.Asc);
   const [refreshing, setRefreshing] = React.useState(false);
   const [collapsedProviders, setCollapsedProviders] = React.useState<
     Set<string>
@@ -160,7 +160,7 @@ export function ModelPickerView({
   const sorted = sortModels(filtered, sortMode, sortDir);
 
   // Group only when sorting by provider.
-  const byProvider = sortMode === 'provider';
+  const byProvider = sortMode === SortMode.Provider;
   const groups: {
     providerId: string;
     providerName: string;
@@ -211,10 +211,10 @@ export function ModelPickerView({
   // it ascending. Only one mode is ever active.
   const onSortClick = (mode: SortMode): void => {
     if (mode === sortMode) {
-      setSortDir((dir) => (dir === 'asc' ? 'desc' : 'asc'));
+      setSortDir((dir) => (dir === SortDir.Asc ? SortDir.Desc : SortDir.Asc));
     } else {
       setSortMode(mode);
-      setSortDir('asc');
+      setSortDir(SortDir.Asc);
     }
   };
 
@@ -282,7 +282,7 @@ export function ModelPickerView({
               onClick={() => onSortClick(mode)}
             >
               {SORT_LABELS[mode]}
-              {active ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+              {active ? (sortDir === SortDir.Asc ? ' ↑' : ' ↓') : ''}
             </button>
           );
         })}

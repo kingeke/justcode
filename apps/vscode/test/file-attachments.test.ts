@@ -10,6 +10,7 @@ import {
   materializeFileAttachments,
   toWebviewMessages,
 } from '@ext/host/chat-bridge';
+import { FileEncoding } from '@ext/shared/protocol';
 
 describe('materializeFileAttachments', () => {
   let directory: string;
@@ -41,7 +42,7 @@ describe('materializeFileAttachments', () => {
           id: 'f1',
           name: 'passport.pdf',
           content: bytes.toString('base64'),
-          encoding: 'base64',
+          encoding: FileEncoding.Base64,
           mediaType: 'application/pdf',
         },
       ],
@@ -65,7 +66,7 @@ describe('materializeFileAttachments', () => {
           id: 'f1',
           name: '../../escape.bin',
           content: Buffer.from('x').toString('base64'),
-          encoding: 'base64',
+          encoding: FileEncoding.Base64,
         },
       ],
       directory

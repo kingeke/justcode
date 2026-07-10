@@ -13,6 +13,7 @@ import {
   type ToolCall,
 } from '@core/domain/message';
 import {
+  ReasoningDisabled,
   ToolsUnsupportedError,
   type ModelInfo,
   type ProviderClient,
@@ -1384,7 +1385,9 @@ export class ChatSessionService {
         // Not part of the conversation: session-oriented providers must not
         // let this call's system prompt take over the chat session.
         ephemeral: true,
-        ...(input.disableReasoning ? { reasoningEffort: 'off' as const } : {}),
+        ...(input.disableReasoning
+          ? { reasoningEffort: ReasoningDisabled.Off }
+          : {}),
         ...(input.signal ? { signal: input.signal } : {}),
         messages: [
           createMessage(MessageRole.System, SESSION_TITLE_SYSTEM_PROMPT),

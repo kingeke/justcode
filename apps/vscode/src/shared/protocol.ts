@@ -157,9 +157,15 @@ export interface WebviewFileAttachment {
   /** Text content, or base64 bytes when `encoding` is 'base64'. */
   content: string;
   /** How `content` is encoded; defaults to 'text'. */
-  encoding?: 'text' | 'base64';
+  encoding?: FileEncoding;
   /** MIME type when known (binary files), e.g. "application/pdf". */
   mediaType?: string;
+}
+
+/** How a file attachment's `content` is encoded. */
+export enum FileEncoding {
+  Text = 'text',
+  Base64 = 'base64',
 }
 
 /** A session summary for the sessions-list screen. */
@@ -173,15 +179,23 @@ export interface WebviewSessionSummary {
 }
 
 /** Reasoning/thinking intensity, mirrors `@core` ReasoningEffort enum values. */
-export type WebviewReasoningEffort =
-  | 'low'
-  | 'medium'
-  | 'high'
-  | 'xhigh'
-  | 'max';
+export enum WebviewReasoningEffort {
+  Low = 'low',
+  Medium = 'medium',
+  High = 'high',
+  XHigh = 'xhigh',
+  Max = 'max',
+}
+
+/** Explicit "reasoning off" choice, mirrors `@core` ReasoningDisabled. */
+export enum WebviewReasoningDisabled {
+  Off = 'off',
+}
 
 /** A reasoning choice the user can pick: an effort level, or explicit "off". */
-export type WebviewReasoningChoice = WebviewReasoningEffort | 'off';
+export type WebviewReasoningChoice =
+  | WebviewReasoningEffort
+  | WebviewReasoningDisabled.Off;
 
 /**
  * Reasoning capability advertised for a model, flattened from `@core`
@@ -395,11 +409,20 @@ export interface WebviewSkillCommand {
 }
 
 /** A chat mode for the mode picker. The active one is `activeModeId`. */
+/** Semantic icon key for a chat mode; mirrors @core ModeIcon (kept local so the
+ * dependency-free webview protocol needn't import host code). */
+export enum WebviewModeIcon {
+  Build = 'build',
+  Ask = 'ask',
+  Plan = 'plan',
+  Custom = 'custom',
+}
+
 export interface WebviewMode {
   id: string;
   name: string;
   /** Semantic icon key; the webview maps it to an SVG (mirrors @core ModeIcon). */
-  icon: 'build' | 'ask' | 'plan' | 'custom';
+  icon: WebviewModeIcon;
   /** Whether the user created this mode (vs. a built-in Build/Ask/Plan). */
   custom: boolean;
 }

@@ -6,7 +6,11 @@ import type {
 } from '@core/ports/tool';
 
 /** The lifecycle states a todo can be in. */
-export type TodoStatus = 'pending' | 'in_progress' | 'completed';
+export enum TodoStatus {
+  Pending = 'pending',
+  InProgress = 'in_progress',
+  Completed = 'completed',
+}
 
 export interface TodoItem {
   content: string;
@@ -14,16 +18,16 @@ export interface TodoItem {
 }
 
 const STATUS_VALUES: readonly TodoStatus[] = [
-  'pending',
-  'in_progress',
-  'completed',
+  TodoStatus.Pending,
+  TodoStatus.InProgress,
+  TodoStatus.Completed,
 ];
 
 /** Marker shown for each status when the list is rendered as text. */
 const STATUS_MARKER: Record<TodoStatus, string> = {
-  pending: '[ ]',
-  in_progress: '[~]',
-  completed: '[x]',
+  [TodoStatus.Pending]: '[ ]',
+  [TodoStatus.InProgress]: '[~]',
+  [TodoStatus.Completed]: '[x]',
 };
 
 /**
@@ -82,7 +86,9 @@ export class TodoWriteTool implements Tool {
       return { title: 'todowrite (invalid arguments)' };
     }
     const { todos } = parsed;
-    const done = todos.filter((todo) => todo.status === 'completed').length;
+    const done = todos.filter(
+      (todo) => todo.status === TodoStatus.Completed
+    ).length;
     const title =
       todos.length === 0
         ? 'Clear todos'
@@ -145,7 +151,7 @@ function tryParse(rawArguments: string): ParseResult {
   }
 
   const inProgress = todos.filter(
-    (todo) => todo.status === 'in_progress'
+    (todo) => todo.status === TodoStatus.InProgress
   ).length;
   if (inProgress > 1) {
     return {

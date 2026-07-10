@@ -3,6 +3,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { NodePlatform } from '@core/domain/node-platform';
+
 export interface ClipboardImage {
   /** MIME type, e.g. `image/png`. */
   mediaType: string;
@@ -19,10 +21,10 @@ export interface ClipboardImage {
  */
 export function readClipboardImage(): ClipboardImage | undefined {
   try {
-    if (process.platform === 'darwin') {
+    if (process.platform === NodePlatform.Darwin) {
       return readClipboardImageMac();
     }
-    if (process.platform === 'win32') {
+    if (process.platform === NodePlatform.Win32) {
       return readClipboardImageWindows();
     }
     return readClipboardImageLinux();
@@ -148,9 +150,9 @@ export function pasteFromClipboard(): string | undefined {
 // also works over SSH.)
 export function copyToClipboard(text: string): boolean {
   const candidates: ReadonlyArray<readonly [string, readonly string[]]> =
-    process.platform === 'darwin'
+    process.platform === NodePlatform.Darwin
       ? [['pbcopy', []]]
-      : process.platform === 'win32'
+      : process.platform === NodePlatform.Win32
         ? [['clip', []]]
         : [
             ['wl-copy', []],

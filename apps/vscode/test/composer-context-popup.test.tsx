@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { Composer, type ComposerProps } from '@ext/webview/components/Composer';
+import { WebviewModeIcon } from '@ext/shared/protocol';
 
 function baseProps(overrides: Partial<ComposerProps> = {}): ComposerProps {
   return {
@@ -49,7 +50,7 @@ function baseProps(overrides: Partial<ComposerProps> = {}): ComposerProps {
       {
         id: 'ask',
         name: 'Ask',
-        icon: 'ask',
+        icon: WebviewModeIcon.Ask,
         custom: false,
       },
     ],

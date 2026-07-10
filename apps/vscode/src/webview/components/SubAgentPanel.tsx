@@ -316,6 +316,9 @@ function startedLabel(startedAt: number): string {
 }
 
 function elapsedLabel(startedAt: number, endedAt: number): string {
-  const seconds = Math.max(1, Math.round((endedAt - startedAt) / 1000));
-  return `${seconds}s`;
+  const totalSeconds = Math.max(1, Math.round((endedAt - startedAt) / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }

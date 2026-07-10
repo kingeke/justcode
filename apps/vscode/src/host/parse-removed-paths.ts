@@ -61,13 +61,19 @@ function joinPath(base: string, rel: string): string {
 
 const HAS_SHELL_META = /[*?$~{}[\]!`()<>]/;
 
+/** The shell commands that delete a file, recognised by the path scanner. */
+export enum RemoveCommand {
+  Rm = 'rm',
+  Unlink = 'unlink',
+}
+
 function isRemoveCommand(token: string): boolean {
   const name = stripQuotes(token);
   return (
-    name === 'rm' ||
-    name === 'unlink' ||
-    name.endsWith('/rm') ||
-    name.endsWith('/unlink')
+    name === RemoveCommand.Rm ||
+    name === RemoveCommand.Unlink ||
+    name.endsWith(`/${RemoveCommand.Rm}`) ||
+    name.endsWith(`/${RemoveCommand.Unlink}`)
   );
 }
 

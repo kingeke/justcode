@@ -24,6 +24,7 @@ import {
   type ProviderUsageWindow,
   type TokenUsage,
 } from '@core/ports/chat-model';
+import { ReasoningDisabled } from '@core/ports/chat-model';
 import { ProviderId } from '@core/ports/provider-catalog';
 import {
   MessageRole,
@@ -35,6 +36,7 @@ import type { ToolDefinition, ToolResult } from '@core/ports/tool';
 import { ToolName } from '@core/domain/tool-name';
 import { logRequestResponse } from '@core/application/debug-log';
 import { normalizeEffortLevels } from '@providers/http/reasoning';
+import { AgentSendMode } from '@providers/agent-send-mode';
 
 /**
  * Claude subscription provider backed by the official Claude Agent SDK.
@@ -384,11 +386,13 @@ export class ClaudeAgentProvider implements ProviderClient {
     // Out-of-band utility calls (title generation) never touch the persistent
     // session: their system prompt would otherwise become the session's.
     if (request.ephemeral) {
-      return this.logged(request, 'ephemeral', () =>
+      return this.logged(request, AgentSendMode.Ephemeral, () =>
         this.runEphemeral(request)
       );
     }
-    return this.logged(request, 'session', () => this.sessionSendChat(request));
+    return this.logged(request, AgentSendMode.Session, () =>
+      this.sessionSendChat(request)
+    );
   }
 
   /**
@@ -400,7 +404,7 @@ export class ClaudeAgentProvider implements ProviderClient {
    */
   private async logged(
     request: ChatRequest,
-    mode: 'session' | 'ephemeral',
+    mode: AgentSendMode,
     run: () => Promise<ChatResult>
   ): Promise<ChatResult> {
     const url = `claude-code://${mode}/${request.sessionId ?? 'default'}`;
@@ -1123,6 +1127,7 @@ function effortOptions(
   effort: ChatRequest['reasoningEffort']
 ): Pick<Options, 'thinking' | 'effort'> {
   if (!effort) return {};
-  if (effort === 'off') return { thinking: { type: 'disabled' } };
+  if (effort === ReasoningDisabled.Off)
+    return { thinking: { type: 'disabled' } };
   return { effort };
 }

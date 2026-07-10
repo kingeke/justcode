@@ -8,7 +8,10 @@ const BOLD = createTextAttributes({ bold: true });
 const WARNING = '#f59e0b';
 const MUTED = '#8a8a8a';
 
-type Choice = 'cancel' | 'delete';
+export enum ClearSessionsChoice {
+  Cancel = 'cancel',
+  Delete = 'delete',
+}
 
 interface ClearSessionsPickerProps {
   /** How many sessions will be deleted if confirmed. */
@@ -20,7 +23,8 @@ interface ClearSessionsPickerProps {
 export function ClearSessionsPicker(
   props: ClearSessionsPickerProps
 ): React.ReactNode {
-  const [selectedChoice, setSelectedChoice] = React.useState<Choice>('cancel');
+  const [selectedChoice, setSelectedChoice] =
+    React.useState<ClearSessionsChoice>(ClearSessionsChoice.Cancel);
 
   useKeyboard((key) => {
     if (key.name === KeyName.Escape || (key.ctrl && key.name === KeyName.C)) {
@@ -34,13 +38,15 @@ export function ClearSessionsPicker(
       key.name === KeyName.Tab
     ) {
       setSelectedChoice((current) =>
-        current === 'cancel' ? 'delete' : 'cancel'
+        current === ClearSessionsChoice.Cancel
+          ? ClearSessionsChoice.Delete
+          : ClearSessionsChoice.Cancel
       );
       return;
     }
 
     if (key.name === KeyName.Return) {
-      if (selectedChoice === 'delete') {
+      if (selectedChoice === ClearSessionsChoice.Delete) {
         props.onConfirm();
         return;
       }
@@ -68,7 +74,7 @@ export function ClearSessionsPicker(
         All {props.count} saved session{plural} will be permanently deleted.
       </text>
       <box marginTop={1} flexDirection="row" gap={1}>
-        {selectedChoice === 'cancel' ? (
+        {selectedChoice === ClearSessionsChoice.Cancel ? (
           <box paddingLeft={1} paddingRight={1} backgroundColor="white">
             <text fg="black" attributes={BOLD}>
               Cancel
@@ -79,7 +85,7 @@ export function ClearSessionsPicker(
             <text>Cancel</text>
           </box>
         )}
-        {selectedChoice === 'delete' ? (
+        {selectedChoice === ClearSessionsChoice.Delete ? (
           <box paddingLeft={1} paddingRight={1} backgroundColor={WARNING}>
             <text fg="black" attributes={BOLD}>
               Delete all {props.count} session{plural}
