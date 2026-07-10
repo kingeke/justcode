@@ -87,8 +87,14 @@ import {
 import {
   createMessage,
   MessageRole,
+  type ChatMessage,
   type MessageImage,
 } from '@core/domain/message';
+import { ToolName } from '@core/domain/tool-name';
+import {
+  pairedToolResultIds,
+  toolResultsByCallId,
+} from '@cli/ui/tool-result-pairing';
 import { DEFAULT_SYSTEM_PROMPT } from '@core/application/system-prompt';
 import type {
   ModelInfo,
@@ -171,6 +177,17 @@ const BOLD = createTextAttributes({ bold: true });
 // dim renders inconsistently (often near-white) across terminals, whereas a grey
 // fg reads as reliably subdued — matching the previous Ink look.
 const MUTED = '#8a8a8a';
+
+/**
+ * Tools whose result renders as its own labelled box (the command box, the todo
+ * list, the plan), so the transcript skips the redundant `⚙ tool(...)` line for
+ * their calls.
+ */
+const SELF_RENDERING_TOOLS: ReadonlySet<ToolName> = new Set([
+  ToolName.Bash,
+  ToolName.TodoWrite,
+  ToolName.PresentPlan,
+]);
 
 interface ChatAppProps {
   /** Exits the app (tears down the OpenTUI renderer). */
@@ -1141,7 +1158,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       if (message.role !== MessageRole.Assistant || !message.toolCalls)
         continue;
       for (const call of message.toolCalls) {
-        if (call.name === 'bash') map.set(call.id, call.arguments);
+        if (call.name === ToolName.Bash) map.set(call.id, call.arguments);
       }
     }
     return map;
@@ -1151,13 +1168,75 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     () =>
       (conversation?.messages ?? []).filter(
         (message) =>
-          message.role === MessageRole.Tool && message.name === 'bash'
+          message.role === MessageRole.Tool && message.name === ToolName.Bash
       ),
     [conversation]
   );
   const selectedBashMessage =
     browseIndex !== null ? bashToolMessages[browseIndex] : undefined;
   const selectedBashId = selectedBashMessage?.id;
+
+  // The transcript, oldest epoch first. Compacted-away messages render above the
+  // live ones so the full history stays visible.
+  const transcriptMessages = useMemo(
+    () => [
+      ...(conversation?.previousMessages ?? []),
+      ...(conversation?.messages ?? []),
+    ],
+    [conversation]
+  );
+
+  // Each tool result, keyed by the call that produced it, so the transcript
+  // renders call → result instead of every call followed by every result.
+  const toolResultByCallId = useMemo(
+    () => toolResultsByCallId(transcriptMessages),
+    [transcriptMessages]
+  );
+
+  // One tool result's block: bash/todowrite/present_plan draw their own boxes,
+  // everything else the generic inline result. Shared by the paired render (under
+  // the call) and the unpaired fallback.
+  const renderToolResult = (message: ChatMessage): React.ReactNode => {
+    if (message.name === ToolName.Bash) {
+      // When /expand-tools is off, inline stays a one-line summary (the box
+      // opens in a pinned panel via browsing); when on, every command shows its
+      // full input/output inline.
+      return (
+        <BashResult
+          command={bashCommandFromArgs(
+            message.toolCallId
+              ? bashCommandByCallId.get(message.toolCallId)
+              : undefined
+          )}
+          output={message.content}
+          expanded={expandTools}
+          selected={message.id === selectedBashId}
+        />
+      );
+    }
+    if (message.name === ToolName.TodoWrite) {
+      return <TodoBlock content={message.content} />;
+    }
+    if (message.name === ToolName.PresentPlan) {
+      return <PlanBlock content={message.content} />;
+    }
+    return (
+      <ToolResultInline
+        content={message.content}
+        expanded={expandTools}
+        diff={
+          message.toolCallId ? liveToolDiffs[message.toolCallId] : undefined
+        }
+      />
+    );
+  };
+
+  // Ids of the tool messages rendered inline under their call, so the top-level
+  // pass skips them.
+  const pairedToolMessageIds = useMemo(
+    () => pairedToolResultIds(transcriptMessages, toolResultByCallId),
+    [transcriptMessages, toolResultByCallId]
+  );
 
   const refreshWorkspaceFiles = useCallback((): void => {
     void props.promptAttachmentService
@@ -2237,7 +2316,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       const message = messages[i];
       if (
         message?.role === MessageRole.Tool &&
-        message.name === 'present_plan' &&
+        message.name === ToolName.PresentPlan &&
         message.content.trim()
       ) {
         return message.content;
@@ -3175,7 +3254,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         // until its 'end' fills the result. The real messages replace these
         // optimistic ones when the turn commits.
         const initialContent =
-          event.toolName === 'todowrite' ? (event.view.preview ?? '') : '';
+          event.toolName === ToolName.TodoWrite
+            ? (event.view.preview ?? '')
+            : '';
         setConversation((prev) =>
           prev
             ? {
@@ -3601,7 +3682,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             // append whatever partial assistant response was captured.
             const messages = current.messages.map((message) =>
               message.role === MessageRole.Tool &&
-              message.name === 'bash' &&
+              message.name === ToolName.Bash &&
               message.content === ''
                 ? { ...message, content: 'Command was cancelled.' }
                 : message
@@ -4145,15 +4226,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         {conversation?.messages.length ? (
           // Compacted-away epochs render first, so the full transcript stays
           // visible; each epoch's summary message draws a divider above itself.
-          [
-            ...(conversation.previousMessages ?? []),
-            ...conversation.messages,
-          ].map((message) => {
+          transcriptMessages.map((message) => {
             // Collapse mode: render only the user's messages so the transcript
             // is just what was asked, without the model's replies in between.
             if (collapseResponses && message.role !== MessageRole.User) {
               return null;
             }
+            // Already rendered inline, under the tool call that produced it.
+            if (pairedToolMessageIds.has(message.id)) return null;
             // A compaction summary opens a new epoch: draw a divider and render
             // the summary muted and left-aligned — it's carried-over context,
             // not something the user typed.
@@ -4217,20 +4297,28 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     !(thinking && message.toolCalls?.length) ? (
                       <MarkdownView content={message.content} />
                     ) : null}
-                    {/* bash, todowrite, and present_plan render their own boxes
-                        below, so skip them here to avoid a redundant ⚙ line. */}
-                    {message.toolCalls
-                      ?.filter(
-                        (call) =>
-                          call.name !== 'bash' &&
-                          call.name !== 'todowrite' &&
-                          call.name !== 'present_plan'
-                      )
-                      .map((call) => (
-                        <text key={call.id} fg="magenta">
-                          ⚙ {call.name}({summarizeToolArgs(call.arguments)})
-                        </text>
-                      ))}
+                    {/* Each call renders with its own result directly beneath it,
+                        so a turn that calls several tools at once reads
+                        call → result, call → result rather than every call
+                        followed by every result. bash, todowrite, and
+                        present_plan render their own boxes, so they skip the
+                        redundant ⚙ line. */}
+                    {message.toolCalls?.map((call) => {
+                      const result = toolResultByCallId.get(call.id);
+                      const ownBox = SELF_RENDERING_TOOLS.has(
+                        call.name as ToolName
+                      );
+                      return (
+                        <box key={call.id} flexDirection="column">
+                          {ownBox ? null : (
+                            <text fg="magenta">
+                              ⚙ {call.name}({summarizeToolArgs(call.arguments)})
+                            </text>
+                          )}
+                          {result ? renderToolResult(result) : null}
+                        </box>
+                      );
+                    })}
                     {/* When the LLM received the request that produced this
                         reply — only under the final answer of a turn, not
                         every tool-call step. */}
@@ -4243,35 +4331,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     ) : null}
                   </box>
                 ) : message.role === MessageRole.Tool ? (
-                  message.name === 'bash' ? (
-                    // When /expand-tools is off, inline stays a one-line summary
-                    // (the box opens in a pinned panel via browsing); when on,
-                    // every command shows its full input/output inline.
-                    <BashResult
-                      command={bashCommandFromArgs(
-                        message.toolCallId
-                          ? bashCommandByCallId.get(message.toolCallId)
-                          : undefined
-                      )}
-                      output={message.content}
-                      expanded={expandTools}
-                      selected={message.id === selectedBashId}
-                    />
-                  ) : message.name === 'todowrite' ? (
-                    <TodoBlock content={message.content} />
-                  ) : message.name === 'present_plan' ? (
-                    <PlanBlock content={message.content} />
-                  ) : (
-                    <ToolResultInline
-                      content={message.content}
-                      expanded={expandTools}
-                      diff={
-                        message.toolCallId
-                          ? liveToolDiffs[message.toolCallId]
-                          : undefined
-                      }
-                    />
-                  )
+                  // An unpaired result (its assistant message is missing, e.g. an
+                  // older session); paired ones render under their call above.
+                  renderToolResult(message)
                 ) : (
                   <text
                     content={
