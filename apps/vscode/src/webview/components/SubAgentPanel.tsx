@@ -21,6 +21,12 @@ export function SubAgentPanel({
   runs: SubAgentRunView[];
   onOpen: (runId: string) => void;
 }): React.JSX.Element | null {
+  // Re-render on a timer while any run is live so its elapsed time ticks up.
+  const anyRunning = runs.some(
+    (run) => run.status === WebviewSubAgentStatus.Running
+  );
+  const now = useLiveNow(anyRunning);
+
   if (runs.length === 0) return null;
 
   return (
@@ -55,7 +61,9 @@ export function SubAgentPanel({
                   ? `${run.toolUseCount} tool use${run.toolUseCount === 1 ? '' : 's'}`
                   : ''}
                 {run.status === WebviewSubAgentStatus.Running
-                  ? ` · ${run.latestActivity ?? 'starting…'}`
+                  ? `${
+                      run.latestActivity ? ` · ${run.latestActivity}` : ''
+                    } · ${elapsedLabel(run.startedAt, now)}`
                   : run.endedAt
                     ? ` · ${elapsedLabel(run.startedAt, run.endedAt)}`
                     : ''}
@@ -313,6 +321,22 @@ function statusGlyph(status: WebviewSubAgentStatus): string {
 function startedLabel(startedAt: number): string {
   if (!Number.isFinite(startedAt) || startedAt <= 0) return '';
   return formatTime(new Date(startedAt).toISOString());
+}
+
+/**
+ * A ticking clock that re-renders once a second while `active`, so a running
+ * sub agent's elapsed time counts up in real time. Frozen when inactive to
+ * avoid needless re-renders.
+ */
+function useLiveNow(active: boolean): number {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!active) return undefined;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
 }
 
 function elapsedLabel(startedAt: number, endedAt: number): string {

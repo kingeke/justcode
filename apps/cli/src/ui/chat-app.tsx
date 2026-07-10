@@ -4660,9 +4660,11 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     ),
                     tc(
                       entry.status === SubAgentRunStatus.Running
-                        ? entry.latestActivity
-                          ? ` · ${entry.latestActivity}`
-                          : ' · starting…'
+                        ? `${
+                            entry.latestActivity
+                              ? ` · ${entry.latestActivity}`
+                              : ''
+                          } · ${formatDuration(Date.now() - entry.startedAt)}`
                         : entry.endedAt
                           ? ` · ${formatDuration(
                               entry.endedAt - entry.startedAt

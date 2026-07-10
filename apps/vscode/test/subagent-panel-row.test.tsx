@@ -50,4 +50,27 @@ describe('SubAgentPanel row layout', () => {
     expect(block).toContain('min-width: 0');
     expect(block).toContain('text-overflow: ellipsis');
   });
+
+  it('shows a live elapsed timer (with latest activity) while a run is active', () => {
+    const liveRuns: SubAgentRunView[] = [
+      {
+        runId: 'run-live',
+        agentType: 'general',
+        description: 'Wait 2 minutes 30 seconds',
+        toolUseCount: 1,
+        status: WebviewSubAgentStatus.Running,
+        latestActivity: 'bash: sleep 150',
+        startedAt: Date.now() - 90_000,
+      },
+    ];
+    const liveMarkup = renderToStaticMarkup(
+      <SubAgentPanel runs={liveRuns} onOpen={() => {}} />
+    );
+    // ~90s elapsed formats as "1m 30s", and the timer trails the activity.
+    expect(liveMarkup).toContain('1m 30s');
+    expect(liveMarkup).toContain('bash: sleep 150');
+    expect(liveMarkup.indexOf('bash: sleep 150')).toBeLessThan(
+      liveMarkup.indexOf('1m 30s')
+    );
+  });
 });
