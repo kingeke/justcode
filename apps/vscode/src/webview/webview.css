@@ -2773,7 +2773,11 @@ textarea:focus {
 }
 
 .icon-btn-send {
-  color: var(--vscode-button-background);
+  /* Same foreground as the neighbouring toolbar icons, but full opacity so
+     the enabled state is clearly brighter than the 0.35-opacity disabled one.
+     (Not button-background: that fill color can be a near-invisible grey on
+     dark themes, making the enabled arrow look permanently disabled.) */
+  color: var(--vscode-foreground);
   opacity: 1;
 }
 

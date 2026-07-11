@@ -25,12 +25,16 @@ interface OpenAiResponsesProviderOptions {
  * Codex exposes.
  */
 const CODEX_MODELS: ReadonlyArray<{ id: string; displayName: string }> = [
+  { id: 'gpt-5.6-sol', displayName: 'GPT-5.6 Sol' },
+  { id: 'gpt-5.6-terra', displayName: 'GPT-5.6 Terra' },
+  { id: 'gpt-5.6-luna', displayName: 'GPT-5.6 Luna' },
   { id: 'gpt-5.5', displayName: 'GPT-5.5' },
   { id: 'gpt-5.4', displayName: 'GPT-5.4' },
   { id: 'gpt-5.4-mini', displayName: 'GPT-5.4 mini' },
 ];
 
-const DEFAULT_CODEX_MODEL = 'gpt-5.5';
+// Codex's default power setting runs gpt-5.6-sol (the flagship 5.6 model).
+const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
 
 /**
  * OpenAI provider backed by the Codex Responses API (ChatGPT subscription

@@ -127,6 +127,14 @@ export function ModelPickerView({
   const [collapsedProviders, setCollapsedProviders] = React.useState<
     Set<string>
   >(new Set());
+  // Collapsed groups while a search is live. Kept apart from the persistent
+  // set so a search always starts with every match visible, yet the chevrons
+  // still work mid-search; reset whenever the query changes.
+  const [searchCollapsedProviders, setSearchCollapsedProviders] =
+    React.useState<Set<string>>(new Set());
+  React.useEffect(() => {
+    setSearchCollapsedProviders(new Set());
+  }, [query]);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
@@ -181,11 +189,18 @@ export function ModelPickerView({
     }
   }
 
-  // A live search overrides collapsing so matches are never hidden; the
-  // collapsed set is kept and applies again once the query is cleared.
+  // A live search starts with every match visible (the persistent collapsed
+  // set is kept and applies again once the query is cleared), but toggling
+  // still works mid-search via the transient search set.
   const searching = query.trim().length > 0;
+  const activeCollapsed = searching
+    ? searchCollapsedProviders
+    : collapsedProviders;
   const toggleProvider = (providerId: string): void => {
-    setCollapsedProviders((prev) => {
+    const setActive = searching
+      ? setSearchCollapsedProviders
+      : setCollapsedProviders;
+    setActive((prev) => {
       const next = new Set(prev);
       if (next.has(providerId)) {
         next.delete(providerId);
@@ -199,10 +214,12 @@ export function ModelPickerView({
   // Fold or unfold every provider group at once. "Collapse all" until every
   // visible group is collapsed, then it flips to "Expand all".
   const allCollapsed =
-    groups.length > 0 &&
-    groups.every((g) => collapsedProviders.has(g.providerId));
+    groups.length > 0 && groups.every((g) => activeCollapsed.has(g.providerId));
   const toggleAllProviders = (): void => {
-    setCollapsedProviders(
+    const setActive = searching
+      ? setSearchCollapsedProviders
+      : setCollapsedProviders;
+    setActive(
       allCollapsed ? new Set() : new Set(groups.map((g) => g.providerId))
     );
   };
@@ -325,8 +342,7 @@ export function ModelPickerView({
           </div>
         ) : byProvider ? (
           groups.map((group) => {
-            const collapsed =
-              !searching && collapsedProviders.has(group.providerId);
+            const collapsed = activeCollapsed.has(group.providerId);
             return (
               <div key={group.providerId} className="model-group">
                 <button

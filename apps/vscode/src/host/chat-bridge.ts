@@ -1173,9 +1173,6 @@ export class ChatBridge {
     const perProvider = await Promise.allSettled(
       providers.map((p) => p.listModels())
     );
-    // Dedup on provider + id, not id alone: the same model id (e.g.
-    // "gpt-5.4-mini") is offered by multiple providers (openai, copilot, ...)
-    // and each is a distinct, separately selectable entry.
     const key = (m: ModelInfo): string => `${m.providerId}:${m.id}`;
     const seen = new Set<string>();
     const merged: ModelInfo[] = [];

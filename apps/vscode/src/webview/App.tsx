@@ -43,6 +43,7 @@ import {
   CollapseIcon,
   JsonIcon,
   PaperclipIcon,
+  PlusIcon,
   PencilIcon,
 } from '@ext/webview/components/Icons';
 import { ChangesPanel } from '@ext/webview/components/ChangesPanel';
@@ -1423,6 +1424,20 @@ export function App(): React.JSX.Element {
           onClick={viewChatLog}
         >
           <JsonIcon size={16} />
+        </button>
+        <button
+          type="button"
+          className="icon-btn"
+          title={
+            state.compacting
+              ? 'Compacting — wait for it to finish or stop it first'
+              : 'New chat'
+          }
+          aria-label="New chat"
+          disabled={state.compacting}
+          onClick={newSession}
+        >
+          <PlusIcon size={16} />
         </button>
       </div>
 

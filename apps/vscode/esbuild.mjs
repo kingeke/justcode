@@ -67,12 +67,11 @@ const hostBuild = {
   // and crashes extension activation. It is only loaded lazily (dynamic
   // import in @providers/claude-code) and stays external so it is never
   // evaluated inside this bundle; the Claude Code provider is CLI-only today.
-  external: [
-    'vscode',
-    'undici',
-    'node:undici',
-    '@anthropic-ai/claude-agent-sdk',
-  ],
+  // `undici` is bundled: the packaged extension ships no node_modules, and
+  // provider streaming (streamFetch) needs undici's own fetch + Agent pair
+  // to disable the 300s headers/body timeouts. `node:undici` stays external
+  // for the runtime-embedded lookup in extension.ts.
+  external: ['vscode', 'node:undici', '@anthropic-ai/claude-agent-sdk'],
 };
 
 // The webview runs in a browser context; bundle React + the UI to an IIFE and

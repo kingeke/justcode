@@ -74,7 +74,8 @@
     "marked-shiki": "^1.2.1",
     "marked-terminal": "^7.3.0",
     "react": "^19.2.0",
-    "shiki": "^4.2.0"
+    "shiki": "^4.2.0",
+    "undici": "^8.7.0"
   },
   "devDependencies": {
     "@types/marked-terminal": "^6.1.1",

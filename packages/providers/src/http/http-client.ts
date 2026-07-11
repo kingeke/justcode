@@ -1,6 +1,7 @@
 import type { ToolCall } from '@core/domain/message';
 import { logRequestResponse } from '@core/application/debug-log';
 import { appUserAgent } from '@core/version';
+import { streamFetch } from '@providers/http/stream-dispatcher';
 import { sanitizeToolCallName } from '@providers/openai-compatible/openai-wire';
 
 export class HttpError extends Error {
@@ -232,7 +233,7 @@ export async function requestSseStream(
     body: options.body,
   };
 
-  const response = await fetch(url, requestOptions);
+  const response = await streamFetch(url, requestOptions);
 
   if (!response.ok) {
     const responseText = await response.text();
@@ -388,7 +389,7 @@ export async function requestNdjsonStream(
     body: options.body,
   };
 
-  const response = await fetch(url, requestOptions);
+  const response = await streamFetch(url, requestOptions);
 
   if (!response.ok) {
     const responseText = await response.text();

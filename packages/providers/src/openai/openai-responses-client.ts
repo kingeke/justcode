@@ -7,6 +7,7 @@ import type {
 } from '@core/ports/chat-model';
 import type { ToolCall } from '@core/domain/message';
 import { HttpError, joinUrl } from '@providers/http/http-client';
+import { streamFetch } from '@providers/http/stream-dispatcher';
 import {
   toResponsesPayload,
   toResponsesToolDefinitions,
@@ -84,7 +85,7 @@ export async function sendResponsesRequest({
   const url = joinUrl(baseUrl, '/responses');
   const requestLog = { url, method: 'POST', headers, body };
 
-  const response = await fetch(url, {
+  const response = await streamFetch(url, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),

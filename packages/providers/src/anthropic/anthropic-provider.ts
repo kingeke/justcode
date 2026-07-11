@@ -10,6 +10,7 @@ import { ReasoningDisabled } from '@core/ports/chat-model';
 import { ProviderId } from '@core/ports/provider-catalog';
 import type { ToolCall } from '@core/domain/message';
 import { HttpError, joinUrl, requestJson } from '@providers/http/http-client';
+import { streamFetch } from '@providers/http/stream-dispatcher';
 import { logRequestResponse } from '@core/application/debug-log';
 import {
   parseAnthropicToolCalls,
@@ -215,7 +216,7 @@ export class AnthropicProvider implements ProviderClient {
     };
 
     const url = joinUrl(this.options.baseUrl, '/v1/messages');
-    const response = await fetch(url, requestOptions);
+    const response = await streamFetch(url, requestOptions);
     if (!response.ok) {
       const responseText = await response.text();
       await logRequestResponse({

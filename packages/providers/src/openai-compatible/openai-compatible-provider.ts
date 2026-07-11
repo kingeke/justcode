@@ -107,7 +107,7 @@ export class OpenAiCompatibleProvider implements ProviderClient {
   /**
    * Per-model `supported_endpoints` learned from {@link listModels} (Copilot).
    * Used to route a turn to `/responses` for models that can't be reached via
-   * `/chat/completions` (e.g. gpt-5.4-mini, gpt-5.5).
+   * `/chat/completions`.
    */
   private readonly modelEndpoints = new Map<string, string[]>();
 
