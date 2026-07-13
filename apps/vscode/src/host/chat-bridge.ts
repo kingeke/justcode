@@ -33,6 +33,7 @@ import {
   type ToolActivityEvent,
 } from '@core/application/chat-session-service';
 import type { ToolInvocationView, UserQuestionRequest } from '@core/ports/tool';
+import { formatCost } from '@core/domain/format-cost';
 import { ToolName } from '@core/domain/tool-name';
 import { cacheDirectory } from '@core/application/cache-dir';
 import {
@@ -2602,7 +2603,7 @@ export class ChatBridge {
       const plan = summary.plan ? `${summary.plan} · ` : '';
       const cost =
         summary.sessionCostUsd != null
-          ? ` · session ≈$${summary.sessionCostUsd.toFixed(4)}`
+          ? ` · session ≈$${formatCost(summary.sessionCostUsd)}`
           : '';
       this.post({
         type: HostMessageType.Notice,

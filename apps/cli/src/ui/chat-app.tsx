@@ -71,6 +71,7 @@ import {
   type Conversation,
   type SessionStats,
 } from '@core/domain/conversation';
+import { formatCost } from '@core/domain/format-cost';
 import type { ManageableToolInfo } from '@core/domain/tool-metadata';
 import {
   BUILD_MODE_ID,
@@ -643,7 +644,7 @@ function metricsLineContent(
   if (metrics.cost > 0) {
     chunks.push(
       tc(' $', { fg: MUTED }),
-      tc(metrics.cost.toFixed(4), { fg: UiColor.White })
+      tc(formatCost(metrics.cost), { fg: UiColor.White })
     );
   }
 
@@ -2533,7 +2534,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             if (summary.sessionCostUsd != null) {
               chunks.push(tc(' · ', { fg: MUTED }));
               chunks.push(
-                tc(`session ≈$${summary.sessionCostUsd.toFixed(4)}`, {
+                tc(`session ≈$${formatCost(summary.sessionCostUsd)}`, {
                   fg: MUTED,
                 })
               );

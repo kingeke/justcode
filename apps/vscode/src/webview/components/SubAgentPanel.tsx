@@ -1,5 +1,6 @@
 import * as React from 'react';
 
+import { formatCost } from '@core/domain/format-cost';
 import {
   WebviewSubAgentStatus,
   type WebviewMessage,
@@ -278,7 +279,7 @@ function SubAgentMetricsFooter({
     `out ${(usage?.outputTokens ?? 0).toLocaleString()}`,
   ];
   if (usage?.cost != null && usage.cost > 0) {
-    parts.push(`$${usage.cost.toFixed(4)}`);
+    parts.push(`$${formatCost(usage.cost)}`);
   }
   if (stats?.ttftMs !== undefined) {
     parts.push(`TTFT ${formatDurationMs(stats.ttftMs)}`);

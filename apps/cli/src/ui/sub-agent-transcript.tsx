@@ -9,6 +9,7 @@ import {
 } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
 
+import { formatCost } from '@core/domain/format-cost';
 import { MessageRole } from '@core/domain/message';
 import { SubAgentRunStatus, type SubAgentRun } from '@core/domain/sub-agent';
 import {
@@ -105,7 +106,7 @@ function runMetricsContent(run: SubAgentRun): StyledText {
   if (usage?.cost != null && usage.cost > 0) {
     chunks.push(
       tc(' $', { fg: MUTED }),
-      tc(usage.cost.toFixed(4), { fg: 'white' })
+      tc(formatCost(usage.cost), { fg: 'white' })
     );
   }
 

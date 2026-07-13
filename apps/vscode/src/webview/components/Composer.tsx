@@ -15,6 +15,7 @@ import {
   modePlaceholder,
   type ChatMode,
 } from '@core/domain/chat-mode';
+import { formatCost } from '@core/domain/format-cost';
 import {
   clampComposerHeight,
   COMPOSER_MIN_ROWS,
@@ -49,6 +50,11 @@ import {
   StopIcon,
   ToolIcon,
 } from '@ext/webview/components/Icons';
+import {
+  ComposerSettingId,
+  SettingInfoButton,
+  SettingInfoText,
+} from '@ext/webview/components/SettingInfo';
 
 // The Claude Code provider id (matches `ProviderId.ClaudeCode`). Hardcoded here
 // rather than imported from the catalog, which pulls Node-only provider code
@@ -276,6 +282,11 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   const [editingHistoryLimit, setEditingHistoryLimit] = React.useState(false);
   const [autoCompactDraft, setAutoCompactDraft] = React.useState('');
   const [editingAutoCompact, setEditingAutoCompact] = React.useState(false);
+  // Which setting's info description is expanded in the settings popup.
+  const [openSettingInfo, setOpenSettingInfo] =
+    React.useState<ComposerSettingId | null>(null);
+  const toggleSettingInfo = (id: ComposerSettingId): void =>
+    setOpenSettingInfo((current) => (current === id ? null : id));
   const settingsRef = React.useRef<HTMLDivElement>(null);
   // Commits any in-progress settings edits before the popup closes. Closing
   // unmounts the inputs without firing their onBlur, so the drafts would be
@@ -297,6 +308,11 @@ export function Composer(props: ComposerProps): React.JSX.Element {
     };
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [showSettings]);
+
+  // Collapse any expanded setting description when the settings popup closes.
+  React.useEffect(() => {
+    if (!showSettings) setOpenSettingInfo(null);
   }, [showSettings]);
 
   // Close the context-info popup when clicking outside it.
@@ -1418,7 +1434,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         <span className="settings-popup-label">
                           Total Session Cost
                         </span>
-                        <span>${props.usage.cost.toFixed(4)}</span>
+                        <span>${formatCost(props.usage.cost)}</span>
                       </div>
                     ) : null}
                   </div>
@@ -1602,6 +1618,13 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                     <div className="settings-popup-row">
                       <span className="settings-popup-label">
                         Max file read
+                        <SettingInfoButton
+                          id={ComposerSettingId.MaxFileRead}
+                          open={
+                            openSettingInfo === ComposerSettingId.MaxFileRead
+                          }
+                          onToggle={toggleSettingInfo}
+                        />
                       </span>
                       {editingReadLimit ? (
                         <input
@@ -1628,9 +1651,21 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         </button>
                       )}
                     </div>
+                    <SettingInfoText
+                      id={ComposerSettingId.MaxFileRead}
+                      open={openSettingInfo === ComposerSettingId.MaxFileRead}
+                    />
                     <div className="settings-popup-row">
                       <span className="settings-popup-label">
                         Max Context Window
+                        <SettingInfoButton
+                          id={ComposerSettingId.MaxContextWindow}
+                          open={
+                            openSettingInfo ===
+                            ComposerSettingId.MaxContextWindow
+                          }
+                          onToggle={toggleSettingInfo}
+                        />
                         <span className="settings-popup-hint">
                           set 0 to turn off
                         </span>
@@ -1667,9 +1702,22 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         </button>
                       )}
                     </div>
+                    <SettingInfoText
+                      id={ComposerSettingId.MaxContextWindow}
+                      open={
+                        openSettingInfo === ComposerSettingId.MaxContextWindow
+                      }
+                    />
                     <div className="settings-popup-row">
                       <span className="settings-popup-label">
                         Auto-compact at
+                        <SettingInfoButton
+                          id={ComposerSettingId.AutoCompactAt}
+                          open={
+                            openSettingInfo === ComposerSettingId.AutoCompactAt
+                          }
+                          onToggle={toggleSettingInfo}
+                        />
                         <span className="settings-popup-hint">
                           set 0 to turn off
                         </span>
@@ -1705,9 +1753,21 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         </button>
                       )}
                     </div>
+                    <SettingInfoText
+                      id={ComposerSettingId.AutoCompactAt}
+                      open={openSettingInfo === ComposerSettingId.AutoCompactAt}
+                    />
                     <div className="settings-popup-row">
                       <span className="settings-popup-label">
                         Lazy tool loading
+                        <SettingInfoButton
+                          id={ComposerSettingId.LazyToolLoading}
+                          open={
+                            openSettingInfo ===
+                            ComposerSettingId.LazyToolLoading
+                          }
+                          onToggle={toggleSettingInfo}
+                        />
                       </span>
                       <button
                         type="button"
@@ -1723,6 +1783,12 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         <span className="toggle-knob" />
                       </button>
                     </div>
+                    <SettingInfoText
+                      id={ComposerSettingId.LazyToolLoading}
+                      open={
+                        openSettingInfo === ComposerSettingId.LazyToolLoading
+                      }
+                    />
                   </div>
 
                   <div className="settings-popup-section">
@@ -1732,6 +1798,13 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                     <div className="settings-popup-row">
                       <span className="settings-popup-label">
                         Auto approvals
+                        <SettingInfoButton
+                          id={ComposerSettingId.AutoApprovals}
+                          open={
+                            openSettingInfo === ComposerSettingId.AutoApprovals
+                          }
+                          onToggle={toggleSettingInfo}
+                        />
                       </span>
                       <button
                         type="button"
@@ -1747,9 +1820,20 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         <span className="toggle-knob" />
                       </button>
                     </div>
+                    <SettingInfoText
+                      id={ComposerSettingId.AutoApprovals}
+                      open={openSettingInfo === ComposerSettingId.AutoApprovals}
+                    />
                     <div className="settings-popup-row">
                       <span className="settings-popup-label">
                         Show thinking
+                        <SettingInfoButton
+                          id={ComposerSettingId.ShowThinking}
+                          open={
+                            openSettingInfo === ComposerSettingId.ShowThinking
+                          }
+                          onToggle={toggleSettingInfo}
+                        />
                       </span>
                       <button
                         type="button"
@@ -1765,9 +1849,21 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         <span className="toggle-knob" />
                       </button>
                     </div>
+                    <SettingInfoText
+                      id={ComposerSettingId.ShowThinking}
+                      open={openSettingInfo === ComposerSettingId.ShowThinking}
+                    />
                     <div className="settings-popup-row">
                       <span className="settings-popup-label">
                         Expand tool details
+                        <SettingInfoButton
+                          id={ComposerSettingId.ExpandToolDetails}
+                          open={
+                            openSettingInfo ===
+                            ComposerSettingId.ExpandToolDetails
+                          }
+                          onToggle={toggleSettingInfo}
+                        />
                       </span>
                       <button
                         type="button"
@@ -1783,9 +1879,23 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         <span className="toggle-knob" />
                       </button>
                     </div>
+                    <SettingInfoText
+                      id={ComposerSettingId.ExpandToolDetails}
+                      open={
+                        openSettingInfo === ComposerSettingId.ExpandToolDetails
+                      }
+                    />
                     <div className="settings-popup-row">
                       <span className="settings-popup-label">
                         Local model refresh
+                        <SettingInfoButton
+                          id={ComposerSettingId.LocalModelRefresh}
+                          open={
+                            openSettingInfo ===
+                            ComposerSettingId.LocalModelRefresh
+                          }
+                          onToggle={toggleSettingInfo}
+                        />
                       </span>
                       <button
                         type="button"
@@ -1801,9 +1911,23 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         <span className="toggle-knob" />
                       </button>
                     </div>
+                    <SettingInfoText
+                      id={ComposerSettingId.LocalModelRefresh}
+                      open={
+                        openSettingInfo === ComposerSettingId.LocalModelRefresh
+                      }
+                    />
                     <div className="settings-popup-row">
                       <span className="settings-popup-label">
                         Models auto-refresh
+                        <SettingInfoButton
+                          id={ComposerSettingId.ModelsAutoRefresh}
+                          open={
+                            openSettingInfo ===
+                            ComposerSettingId.ModelsAutoRefresh
+                          }
+                          onToggle={toggleSettingInfo}
+                        />
                       </span>
                       <button
                         type="button"
@@ -1819,6 +1943,12 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                         <span className="toggle-knob" />
                       </button>
                     </div>
+                    <SettingInfoText
+                      id={ComposerSettingId.ModelsAutoRefresh}
+                      open={
+                        openSettingInfo === ComposerSettingId.ModelsAutoRefresh
+                      }
+                    />
                   </div>
                 </div>
               ) : null}
@@ -1894,7 +2024,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
               <>
                 <span className="metric-label"> · $</span>
                 <span className="metric-value">
-                  {props.usage.cost.toFixed(4)}
+                  {formatCost(props.usage.cost)}
                 </span>
               </>
             ) : null}

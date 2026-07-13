@@ -2855,6 +2855,36 @@ textarea:focus {
   white-space: nowrap;
 }
 
+/* Small ⓘ toggle next to a setting label; reveals the description below. */
+.settings-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.45;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.settings-info-btn:hover,
+.settings-info-btn-active {
+  opacity: 0.9;
+}
+
+/* Inline description shown under a setting row while its ⓘ is active. */
+.settings-popup-info {
+  margin-top: -4px;
+  max-width: 240px;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.7;
+  white-space: normal;
+}
+
 .context-popup {
   min-width: 200px;
 }

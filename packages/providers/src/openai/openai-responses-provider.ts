@@ -24,13 +24,21 @@ interface OpenAiResponsesProviderOptions {
  * `Missing scopes: api.model.read`), so the set is fixed here, mirroring what
  * Codex exposes.
  */
-const CODEX_MODELS: ReadonlyArray<{ id: string; displayName: string }> = [
-  { id: 'gpt-5.6-sol', displayName: 'GPT-5.6 Sol' },
-  { id: 'gpt-5.6-terra', displayName: 'GPT-5.6 Terra' },
-  { id: 'gpt-5.6-luna', displayName: 'GPT-5.6 Luna' },
-  { id: 'gpt-5.5', displayName: 'GPT-5.5' },
-  { id: 'gpt-5.4', displayName: 'GPT-5.4' },
-  { id: 'gpt-5.4-mini', displayName: 'GPT-5.4 mini' },
+const CODEX_MODELS: ReadonlyArray<{
+  id: string;
+  displayName: string;
+  contextWindow: number;
+}> = [
+  { id: 'gpt-5.6-sol', displayName: 'GPT-5.6 Sol', contextWindow: 1_050_000 },
+  {
+    id: 'gpt-5.6-terra',
+    displayName: 'GPT-5.6 Terra',
+    contextWindow: 1_050_000,
+  },
+  { id: 'gpt-5.6-luna', displayName: 'GPT-5.6 Luna', contextWindow: 1_050_000 },
+  { id: 'gpt-5.5', displayName: 'GPT-5.5', contextWindow: 1_050_000 },
+  { id: 'gpt-5.4', displayName: 'GPT-5.4', contextWindow: 1_050_000 },
+  { id: 'gpt-5.4-mini', displayName: 'GPT-5.4 mini', contextWindow: 400_000 },
 ];
 
 // Codex's default power setting runs gpt-5.6-sol (the flagship 5.6 model).
@@ -53,6 +61,7 @@ export class OpenAiResponsesProvider implements ProviderClient {
     return CODEX_MODELS.map((model) => ({
       id: model.id,
       displayName: model.displayName,
+      contextWindow: model.contextWindow,
       providerId: this.providerId,
     }));
   }
