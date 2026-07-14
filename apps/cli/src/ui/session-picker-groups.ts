@@ -16,6 +16,16 @@ export enum PinnedGroup {
 /** A recency bucket, or the pinned pseudo-group that precedes them all. */
 export type PickerGroup = SessionGroup | PinnedGroup;
 
+/**
+ * The groups the picker starts with folded shut: only Pinned, Today and
+ * Yesterday are open by default, keeping recent work in view while the long
+ * tail stays tucked away until the user expands it. Mirrors the extension's
+ * `defaultCollapsedGroups`.
+ */
+export function defaultCollapsedGroups(): Set<PickerGroup> {
+  return new Set<PickerGroup>([SessionGroup.LastSevenDays, SessionGroup.Older]);
+}
+
 export function sessionGroupFor(iso: string): SessionGroup {
   const then = new Date(iso);
   const startOfToday = new Date();

@@ -6,20 +6,33 @@
 
 import type { WebviewSessionSummary } from '@ext/shared/protocol';
 
-export const SESSION_GROUPS = [
-  'Today',
-  'Yesterday',
-  'Last 7 days',
-  'Older',
-] as const;
-
-export type SessionGroup = (typeof SESSION_GROUPS)[number];
+/** Recency buckets, in display order. */
+export enum SessionGroup {
+  Today = 'Today',
+  Yesterday = 'Yesterday',
+  LastSevenDays = 'Last 7 days',
+  Older = 'Older',
+}
 
 /** Pseudo-group listing pinned sessions above the recency buckets. */
-export const PINNED_GROUP = 'Pinned';
+export enum PinnedGroup {
+  Pinned = 'Pinned',
+}
 
 /** A recency bucket, or the pinned pseudo-group that precedes them all. */
-export type SessionListGroup = typeof PINNED_GROUP | SessionGroup;
+export type SessionListGroup = PinnedGroup | SessionGroup;
+
+/**
+ * The groups every session list starts with folded shut: only Pinned, Today
+ * and Yesterday are open by default, keeping recent work in view while the
+ * long tail stays tucked away until the user expands it.
+ */
+export function defaultCollapsedGroups(): Set<SessionListGroup> {
+  return new Set<SessionListGroup>([
+    SessionGroup.LastSevenDays,
+    SessionGroup.Older,
+  ]);
+}
 
 /**
  * Buckets sessions for display: pinned ones first (lifted out of their recency
@@ -33,8 +46,8 @@ export function groupSessions(
   const pinned = sessions.filter((session) => session.pinned);
   const unpinned = sessions.filter((session) => !session.pinned);
   return [
-    { group: PINNED_GROUP as SessionListGroup, sessions: pinned },
-    ...SESSION_GROUPS.map((group) => ({
+    { group: PinnedGroup.Pinned as SessionListGroup, sessions: pinned },
+    ...Object.values(SessionGroup).map((group) => ({
       group: group as SessionListGroup,
       sessions: unpinned.filter(
         (session) => sessionGroupFor(session.updatedAt) === group
@@ -70,14 +83,14 @@ export function sessionGroupFor(iso: string): SessionGroup {
   const then = new Date(iso);
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
-  if (then >= startOfToday) return 'Today';
+  if (then >= startOfToday) return SessionGroup.Today;
   const startOfYesterday = new Date(startOfToday);
   startOfYesterday.setDate(startOfYesterday.getDate() - 1);
-  if (then >= startOfYesterday) return 'Yesterday';
+  if (then >= startOfYesterday) return SessionGroup.Yesterday;
   const startOfWeek = new Date(startOfToday);
   startOfWeek.setDate(startOfWeek.getDate() - 7);
-  if (then >= startOfWeek) return 'Last 7 days';
-  return 'Older';
+  if (then >= startOfWeek) return SessionGroup.LastSevenDays;
+  return SessionGroup.Older;
 }
 
 export function relativeTime(iso: string): string {

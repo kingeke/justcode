@@ -12,6 +12,7 @@ import { useKeyboard } from '@opentui/react';
 import type { ConversationSummary } from '@core/ports/conversation-repository';
 import { fuzzyFilter } from '@cli/ui/fuzzy-filter.js';
 import {
+  defaultCollapsedGroups,
   groupPickerSessions,
   type PickerGroup,
 } from '@cli/ui/session-picker-groups.js';
@@ -131,10 +132,11 @@ export function SessionPicker({
 }: SessionPickerProps): React.ReactNode {
   const [query, setQuery] = useState('');
   const [focusedIndex, setFocusedIndex] = useState(0);
-  // Recency groups the user folded shut (Enter on a header row). Ignored while
-  // a query is active, so searching always surfaces every match.
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<PickerGroup>>(
-    () => new Set()
+  // Recency groups folded shut (toggled with Enter on a header row) — only
+  // Today and Yesterday start open. Ignored while a query is active, so
+  // searching always surfaces every match.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<PickerGroup>>(() =>
+    defaultCollapsedGroups()
   );
   const scrollOffsetRef = useRef(0);
 

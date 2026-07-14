@@ -9,6 +9,7 @@ import {
 } from '@ext/webview/components/Icons';
 
 import {
+  defaultCollapsedGroups,
   groupSessions,
   relativeTime,
   type SessionListGroup,
@@ -47,11 +48,11 @@ export function SessionSwitcher(
   const [query, setQuery] = React.useState('');
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [draftTitle, setDraftTitle] = React.useState('');
-  // Recency groups the user folded shut. Ignored while searching, so a query
-  // always surfaces every match.
+  // Recency groups folded shut — only Today and Yesterday start open. Ignored
+  // while searching, so a query always surfaces every match.
   const [collapsedGroups, setCollapsedGroups] = React.useState<
     Set<SessionListGroup>
-  >(() => new Set());
+  >(() => defaultCollapsedGroups());
   const anchorRef = React.useRef<HTMLDivElement>(null);
 
   const toggleGroup = (group: SessionListGroup): void => {

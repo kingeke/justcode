@@ -3,7 +3,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { ConversationSummary } from '@core/ports/conversation-repository';
-import { groupPickerSessions } from '@cli/ui/session-picker-groups.js';
+import {
+  defaultCollapsedGroups,
+  groupPickerSessions,
+  PinnedGroup,
+  SessionGroup,
+} from '@cli/ui/session-picker-groups.js';
 
 function summary(
   sessionId: string,
@@ -50,6 +55,18 @@ describe('groupPickerSessions', () => {
   });
 });
 
+describe('defaultCollapsedGroups', () => {
+  it('collapses only the Last 7 days and Older buckets', () => {
+    const collapsed = defaultCollapsedGroups();
+
+    expect(collapsed.has(SessionGroup.LastSevenDays)).toBe(true);
+    expect(collapsed.has(SessionGroup.Older)).toBe(true);
+    expect(collapsed.has(SessionGroup.Today)).toBe(false);
+    expect(collapsed.has(SessionGroup.Yesterday)).toBe(false);
+    expect(collapsed.has(PinnedGroup.Pinned)).toBe(false);
+  });
+});
+
 describe('session picker chrome', () => {
   const source = readFileSync(
     join(process.cwd(), 'apps/cli/src/ui/session-picker.tsx'),
@@ -58,5 +75,9 @@ describe('session picker chrome', () => {
 
   it('advertises the pin shortcut in the header hints', () => {
     expect(source).toContain('ctrl+p to pin');
+  });
+
+  it('seeds the collapsed groups from the shared default', () => {
+    expect(source).toMatch(/\(\) =>\s*defaultCollapsedGroups\(\)/);
   });
 });
