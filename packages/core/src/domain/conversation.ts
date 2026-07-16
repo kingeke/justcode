@@ -1,4 +1,5 @@
 import type { ChatMessage } from '@core/domain/message';
+import type { ModelReference } from '@core/domain/model-default';
 import type { SubAgentRun } from '@core/domain/sub-agent';
 
 /**
@@ -61,6 +62,13 @@ export interface Conversation {
    * the legacy "gateway call loads everything" behavior).
    */
   activeTools?: string[];
+  /**
+   * The provider+model this session last talked to (stamped on every turn and
+   * on an explicit model switch), so resuming the session brings that model
+   * back instead of keeping whatever happens to be active. Absent for sessions
+   * saved before the field existed — those resume on the host's current model.
+   */
+  model?: ModelReference;
   /**
    * Sub agent runs spawned by this conversation's `task` tool calls, each
    * carrying its own full transcript. Never sent to the model — persisted so

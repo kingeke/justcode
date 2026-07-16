@@ -87,6 +87,7 @@ export class FileConversationRepository implements ConversationRepository {
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
       ...(conversation.pinned ? { pinned: true } : {}),
+      ...(conversation.model ? { model: conversation.model } : {}),
       // Count compacted-away messages too, so a freshly compacted session
       // doesn't list as a near-empty one.
       messageCount:
@@ -145,6 +146,7 @@ export class FileConversationRepository implements ConversationRepository {
               updatedAt:
                 record.updatedAt ?? fileStat?.mtime.toISOString() ?? '',
               ...(record.pinned ? { pinned: Boolean(record.pinned) } : {}),
+              ...(record.model ? { model: record.model } : {}),
               messageCount,
             } satisfies ConversationSummary;
           })

@@ -2104,12 +2104,30 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     setActiveModel('');
     setActiveModelInfo(null);
     const modelForSession = requestedModel ?? props.requestedModel;
-    void props.chatSessionService
-      .startSession(
+    void (async () => {
+      // A session remembers the provider+model it last talked to. When that
+      // model lives on another provider, switch to it first so `startSession`
+      // resolves the stored model against the right catalog. If the stored
+      // provider can't be resolved (e.g. no longer configured), open the
+      // session on the current one instead.
+      try {
+        const persisted =
+          await props.chatSessionService.loadConversation(sessionId);
+        const storedModel = persisted.model;
+        if (storedModel && storedModel.providerId !== activeProviderId) {
+          const newProvider = resolveProviderClient(storedModel.providerId);
+          props.chatSessionService.switchProvider(newProvider);
+          setActiveProviderId(storedModel.providerId);
+        }
+      } catch {
+        // Best-effort: a real load failure surfaces via startSession below.
+      }
+      return props.chatSessionService.startSession(
         modelForSession
           ? { sessionId, requestedModel: modelForSession }
           : { sessionId }
-      )
+      );
+    })()
       .then((startedSession) => {
         const modelInfo =
           startedSession.availableModels.find(
@@ -2210,6 +2228,12 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     }
     setActiveModel(model.id);
     setActiveModelInfo(model);
+    // Remember the switch on the session itself, so reopening this session
+    // later brings the model back even when no message follows the switch.
+    void props.chatSessionService.saveSessionModel(currentSessionId, {
+      providerId: model.providerId,
+      modelId: model.id,
+    });
     props.onModelChange?.(model.id, model.providerId);
     return true;
   };

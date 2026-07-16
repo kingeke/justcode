@@ -222,6 +222,13 @@ export function SessionsView({
                                     {session.messageCount !== 1
                                       ? 's'
                                       : ''} · {relativeTime(session.updatedAt)}
+                                    {session.model ? (
+                                      <>
+                                        {' · '}
+                                        {session.model.providerName} →{' '}
+                                        {session.model.modelId}
+                                      </>
+                                    ) : null}
                                   </>
                                 )}
                               </span>

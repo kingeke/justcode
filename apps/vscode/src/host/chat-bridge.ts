@@ -445,6 +445,17 @@ export class ChatBridge {
         this.activeModel = message.modelId;
         await this.persistModelSelection(message.modelId, message.providerId);
         await this.switchToProvider(message.providerId);
+        // Remember the switch on the session itself, so reopening this
+        // session later brings the model back even when no message follows.
+        if (this.services) {
+          await this.services.chatSessionService.saveSessionModel(
+            this.sessionId,
+            {
+              providerId: message.providerId as ProviderId,
+              modelId: message.modelId,
+            }
+          );
+        }
         return;
       case WebviewMessageType.SetReasoningEffort:
         await this.setReasoningEffort(
@@ -2283,6 +2294,16 @@ export class ChatBridge {
           updatedAt: s.updatedAt,
           messageCount: s.messageCount,
           ...(s.pinned ? { pinned: true } : {}),
+          ...(s.model
+            ? {
+                model: {
+                  providerName:
+                    PROVIDER_BY_ID[s.model.providerId]?.name ??
+                    s.model.providerId,
+                  modelId: s.model.modelId,
+                },
+              }
+            : {}),
         })),
         hasConnectedProvider: services.allProviders.length > 0,
         focus,
@@ -2316,6 +2337,40 @@ export class ChatBridge {
     this.resetMetrics();
     const activeTurn = this.activeTurns.get(sessionId);
 
+    // Restore the session's own provider+model when it recorded one, so
+    // reopening a chat talks to the model it was using rather than whatever
+    // is active now. Skipped while the session's turn is still running — that
+    // turn's model stays authoritative. Best-effort: any failure opens the
+    // session on the current model instead.
+    let persistedConversation: Conversation | undefined;
+    if (!activeTurn && this.services) {
+      try {
+        persistedConversation =
+          await this.services.chatSessionService.loadConversation(sessionId);
+        const stored = persistedConversation.model;
+        if (stored) {
+          const known = this.models.some(
+            (model) =>
+              model.id === stored.modelId &&
+              model.providerId === stored.providerId
+          );
+          if (stored.providerId !== this.services.providerId) {
+            await this.switchToProvider(stored.providerId);
+            if (this.services.providerId === stored.providerId) {
+              this.activeModel = stored.modelId;
+              // The cached list may not cover the new provider; clearing it
+              // forces the full `sendReady` path to fetch the right catalog.
+              if (!known) this.models = [];
+            }
+          } else if (known) {
+            this.activeModel = stored.modelId;
+          }
+        }
+      } catch {
+        persistedConversation = undefined;
+      }
+    }
+
     // Fast path: switching sessions doesn't change the provider or its model
     // list, so skip the `startSession` model fetch that `sendReady` runs — a
     // live network call for local providers (Ollama/LM Studio), a disk
@@ -2347,7 +2402,10 @@ export class ChatBridge {
                 activeTurn.pendingUserMessage,
               ],
             }
-          : await this.services.chatSessionService.loadConversation(sessionId);
+          : (persistedConversation ??
+            (await this.services.chatSessionService.loadConversation(
+              sessionId
+            )));
         this.conversation = conversation;
         this.restoreStats(conversation);
         const resolvedFiles = await readResolvedFiles(configDir, sessionId);

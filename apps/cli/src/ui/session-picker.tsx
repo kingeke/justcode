@@ -10,6 +10,7 @@ import { KeyName, printableInput } from '@cli/ui/key-name.js';
 import { useKeyboard } from '@opentui/react';
 
 import type { ConversationSummary } from '@core/ports/conversation-repository';
+import { PROVIDER_BY_ID } from '@core/ports/provider-catalog';
 import { fuzzyFilter } from '@cli/ui/fuzzy-filter.js';
 import {
   defaultCollapsedGroups,
@@ -104,6 +105,17 @@ function sessionMetaContent(
       fg: MUTED,
     }),
   ];
+
+  // The provider → model the session last talked to, when it recorded one.
+  if (session.model) {
+    const providerName =
+      PROVIDER_BY_ID[session.model.providerId]?.name ??
+      session.model.providerId;
+    chunks.push(
+      tc('  '),
+      tc(`${providerName} → ${session.model.modelId}`, { fg: MUTED })
+    );
+  }
 
   if (isCurrent) {
     chunks.push(tc('  ✓', { fg: 'green' }));

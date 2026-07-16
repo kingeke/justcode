@@ -3,6 +3,7 @@ import {
   type Conversation,
   type SessionStats,
 } from '@core/domain/conversation';
+import type { ModelReference } from '@core/domain/model-default';
 import {
   createMessage,
   markLlmReceived,
@@ -342,8 +343,22 @@ export class ChatSessionService {
   ): Promise<StartSessionResult> {
     const conversation = await this.repository.load(input.sessionId);
     const availableModels = await this.provider.listModels();
+    // A session remembers the model it last talked to; resuming it prefers
+    // that over the host's requested model, so switching back to an old
+    // session brings its model back. Only honored when the stored model
+    // belongs to (and is still offered by) the active provider — the host is
+    // responsible for switching providers before starting the session.
+    const storedModel =
+      conversation.model &&
+      conversation.model.providerId === this.provider.providerId &&
+      (availableModels.length === 0 ||
+        availableModels.some(
+          (model) => model.id === conversation.model?.modelId
+        ))
+        ? conversation.model.modelId
+        : undefined;
     const activeModel = this.resolveModel(
-      input.requestedModel,
+      storedModel ?? input.requestedModel,
       availableModels
     );
 
@@ -446,6 +461,29 @@ export class ChatSessionService {
       await this.repository.save({ ...latest, stats });
     } catch {
       // Ignore: losing a stats update only costs a footer readout on reload.
+    }
+  }
+
+  /**
+   * Persists the provider+model a session is talking to, so resuming it later
+   * restores that model. Called on an explicit model switch; every completed
+   * turn also stamps the model, so this only matters for switches that aren't
+   * followed by a message. Mirrors {@link saveSessionStats}: re-loads the
+   * latest conversation and writes only the model over it, so a racing save
+   * can't lose messages. Best-effort — a failure must never surface to the UI.
+   */
+  public async saveSessionModel(
+    sessionId: string,
+    model: ModelReference
+  ): Promise<void> {
+    try {
+      const latest = await this.repository.load(sessionId);
+      // A missing file loads as an empty conversation; don't materialize a
+      // session on disk just to hold a model choice — the first turn stamps it.
+      if (latest.messages.length === 0) return;
+      await this.repository.save({ ...latest, model });
+    } catch {
+      // Ignore: losing this update only costs a model restore on reload.
     }
   }
 
@@ -1064,6 +1102,12 @@ export class ChatSessionService {
         : {}),
       messages: working,
       updatedAt: new Date().toISOString(),
+      // Stamp the provider+model this turn ran on, so resuming the session
+      // restores it instead of keeping whatever model is active then.
+      model: {
+        providerId: this.provider.providerId,
+        modelId: input.model,
+      },
       // Persist the gateway-toggled tool set so resuming the session restores
       // it. Left absent while the gateway has never run, so sessions that never
       // use tools don't grow the field. Stamped even when the set is empty

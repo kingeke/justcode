@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createConversation } from '@core/domain/conversation';
 import { SubAgentRunStatus, SubAgentType } from '@core/domain/sub-agent';
 import { createMessage, MessageRole } from '@core/domain/message';
+import { ProviderId } from '@core/ports/provider-catalog';
 import {
   FileConversationRepository,
   sessionFilePath,
@@ -60,6 +61,33 @@ describe('FileConversationRepository', () => {
     expect(reloadedConversation.messages[1]?.thinking).toEqual({
       content: 'thinking aloud',
       durationMs: 123,
+    });
+  });
+
+  it('round-trips the session model with the conversation', async () => {
+    const repository = new FileConversationRepository(directory);
+    const conversation = createConversation('model-session');
+    conversation.messages.push(createMessage(MessageRole.User, 'Hello'));
+    conversation.model = {
+      providerId: ProviderId.Ollama,
+      modelId: 'qwen3',
+    };
+
+    await repository.save(conversation);
+
+    const reloadedConversation = await repository.load('model-session');
+
+    expect(reloadedConversation.model).toEqual({
+      providerId: ProviderId.Ollama,
+      modelId: 'qwen3',
+    });
+
+    // The lean summary carries it too, so session lists can show it without
+    // parsing message histories.
+    const summaries = await repository.list();
+    expect(summaries[0]?.model).toEqual({
+      providerId: ProviderId.Ollama,
+      modelId: 'qwen3',
     });
   });
 

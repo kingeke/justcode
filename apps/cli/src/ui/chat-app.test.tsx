@@ -212,3 +212,20 @@ describe('chat app user message layout', () => {
     expect(source).not.toContain('🖼');
   });
 });
+
+describe('chat app per-session model', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'apps/cli/src/ui/chat-app.tsx'),
+    'utf8'
+  );
+
+  it('switches to a resumed session’s stored provider before starting it', () => {
+    expect(source).toContain('.loadConversation(sessionId)');
+    expect(source).toContain('storedModel.providerId !== activeProviderId');
+    expect(source).toContain('setActiveProviderId(storedModel.providerId);');
+  });
+
+  it('persists an explicit model switch onto the session itself', () => {
+    expect(source).toContain('saveSessionModel(currentSessionId');
+  });
+});

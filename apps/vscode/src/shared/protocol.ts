@@ -168,6 +168,16 @@ export enum FileEncoding {
   Base64 = 'base64',
 }
 
+/**
+ * The provider → model a session last talked to, shown in the sessions list.
+ * The provider's display name is resolved host-side (the webview has no
+ * catalog access).
+ */
+export interface WebviewSessionModel {
+  providerName: string;
+  modelId: string;
+}
+
 /** A session summary for the sessions-list screen. */
 export interface WebviewSessionSummary {
   sessionId: string;
@@ -176,6 +186,8 @@ export interface WebviewSessionSummary {
   messageCount: number;
   /** Whether the user pinned this session; pinned sessions list first. */
   pinned?: boolean | undefined;
+  /** The provider → model the session last talked to, when it recorded one. */
+  model?: WebviewSessionModel | undefined;
 }
 
 /** Reasoning/thinking intensity, mirrors `@core` ReasoningEffort enum values. */

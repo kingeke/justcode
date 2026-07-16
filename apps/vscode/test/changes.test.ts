@@ -35,6 +35,10 @@ function liveTool(
   };
 }
 
+function userMessage(id: string): WebviewMessage {
+  return { id, role: WebviewRole.User, content: 'do something' };
+}
+
 describe('deriveChangedFiles', () => {
   it('counts added and removed lines for an edit', () => {
     const files = deriveChangedFiles(
@@ -293,6 +297,128 @@ describe('deriveChangedFiles', () => {
       current: '',
       deleted: true,
       created: false,
+    });
+  });
+
+  it('re-baselines a file edited again in a later turn', () => {
+    // Turn 1 made orig -> mid; turn 2 made mid -> final. The row shows only
+    // the latest turn's change, not the session's cumulative diff.
+    const files = deriveChangedFiles(
+      [
+        userMessage('u1'),
+        toolMessage('a.ts', 'orig\n', 'mid\n'),
+        userMessage('u2'),
+        toolMessage('a.ts', 'mid\n', 'final\n'),
+      ],
+      [],
+      new Map()
+    );
+
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({
+      baseline: 'mid\n',
+      current: 'final\n',
+      editCount: 2,
+    });
+  });
+
+  it('still aggregates multiple edits within the latest turn', () => {
+    const files = deriveChangedFiles(
+      [
+        userMessage('u1'),
+        toolMessage('a.ts', 'orig\n', 'one\n'),
+        userMessage('u2'),
+        toolMessage('a.ts', 'one\n', 'two\n'),
+        toolMessage('a.ts', 'two\n', 'three\n'),
+      ],
+      [],
+      new Map()
+    );
+
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({
+      baseline: 'one\n',
+      current: 'three\n',
+      editCount: 3,
+    });
+  });
+
+  it('excludes changes made outside the session from a later turn’s diff', () => {
+    // Between turns the file changed externally (manual edit / git): the new
+    // turn's oldText reflects disk, so the external change is never shown.
+    const files = deriveChangedFiles(
+      [
+        userMessage('u1'),
+        toolMessage('a.ts', 'orig\n', 'model\n'),
+        userMessage('u2'),
+        toolMessage('a.ts', 'user-edited\n', 'user-edited\nplus\n'),
+      ],
+      [],
+      new Map()
+    );
+
+    expect(files[0]).toMatchObject({
+      baseline: 'user-edited\n',
+      added: 1,
+      removed: 0,
+    });
+  });
+
+  it('re-baselines against a live tool edit in the newest turn', () => {
+    const files = deriveChangedFiles(
+      [
+        userMessage('u1'),
+        toolMessage('a.ts', 'orig\n', 'mid\n'),
+        userMessage('u2'),
+      ],
+      [liveTool('a.ts', 'mid\n', 'final\n')],
+      new Map()
+    );
+
+    expect(files[0]).toMatchObject({ baseline: 'mid\n', current: 'final\n' });
+  });
+
+  it('supersedes a previous turn’s keep with the new turn’s baseline', () => {
+    // Kept at "first" in turn 1; turn 2 edits from disk ("first"). Diffing
+    // from the turn baseline and from the keep agree here, but if the file
+    // had moved on since the keep, the turn baseline is the correct one.
+    const files = deriveChangedFiles(
+      [
+        userMessage('u1'),
+        toolMessage('a.ts', 'orig\n', 'first\n'),
+        userMessage('u2'),
+        toolMessage('a.ts', 'moved-on\n', 'moved-on\nmore\n'),
+      ],
+      [],
+      new Map([['a.ts', { editCount: 1, baseline: 'first\n' }]])
+    );
+
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({
+      baseline: 'moved-on\n',
+      current: 'moved-on\nmore\n',
+      added: 1,
+      removed: 0,
+    });
+  });
+
+  it('keeps honoring a resolution made within the current turn', () => {
+    // Both edits are in the same turn; the user kept after the first, so only
+    // the second edit's change shows.
+    const files = deriveChangedFiles(
+      [
+        userMessage('u1'),
+        toolMessage('a.ts', 'orig\n', 'kept\n'),
+        toolMessage('a.ts', 'kept\n', 'kept\nplus\n'),
+      ],
+      [],
+      new Map([['a.ts', { editCount: 1, baseline: 'kept\n' }]])
+    );
+
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({
+      baseline: 'kept\n',
+      current: 'kept\nplus\n',
     });
   });
 

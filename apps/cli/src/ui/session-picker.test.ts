@@ -81,3 +81,19 @@ describe('session picker chrome', () => {
     expect(source).toMatch(/\(\) =>\s*defaultCollapsedGroups\(\)/);
   });
 });
+
+describe('session picker model column', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'apps/cli/src/ui/session-picker.tsx'),
+    'utf8'
+  );
+
+  it('shows the provider → model the session last talked to', () => {
+    expect(source).toContain('session.model');
+    expect(source).toContain('`${providerName} → ${session.model.modelId}`');
+  });
+
+  it('resolves the provider display name from the catalog', () => {
+    expect(source).toContain('PROVIDER_BY_ID[session.model.providerId]?.name');
+  });
+});

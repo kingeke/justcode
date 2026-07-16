@@ -1,17 +1,23 @@
 import { diffLines } from 'diff';
 
-import type { WebviewDiff, WebviewMessage } from '@ext/shared/protocol';
+import {
+  WebviewRole,
+  type WebviewDiff,
+  type WebviewMessage,
+} from '@ext/shared/protocol';
 import type { ToolActivity } from '@ext/webview/state';
 
 /**
- * One file's net change across the whole session, aggregated from every tool
- * diff that touched it. `baseline` is the file's content before the session's
- * first edit, `current` is its latest proposed content — so the +/- counts and
- * the inline diff reflect the cumulative change, not the last individual edit.
+ * One file's net change for the latest turn that touched it, aggregated from
+ * every tool diff of that turn. `baseline` is the file's content right before
+ * the turn's first edit, `current` is its latest proposed content — so the
+ * +/- counts and the inline diff reflect what the model just changed, not the
+ * whole session's cumulative history (a long or resumed session would
+ * otherwise keep diffing against content from way back).
  */
 export interface ChangedFile {
   path: string;
-  /** Content before the first edit this session; '' when the file was created. */
+  /** Content before the latest turn's first edit; '' when it created the file. */
   baseline: string;
   /** Latest content after the most recent edit. */
   current: string;
@@ -49,12 +55,16 @@ export interface ResolvedFile {
 /**
  * Collapses every file-changing tool diff in the transcript (and any live,
  * in-flight tool activity) into one row per path. Diffs are visited in
- * chronological order so the first occurrence of a path fixes its baseline and
- * later ones advance the current content.
+ * chronological order; edits within one turn aggregate (first edit fixes the
+ * baseline, later ones advance the current content), but a later turn touching
+ * the file re-baselines the row to the content right before that turn's first
+ * edit — so the panel always shows what changed *now*, not the session's
+ * cumulative history.
  *
  * `resolved` maps a path to where the user last kept/undid it. A file is hidden
  * while its edit count hasn't advanced past that mark; once it has, the panel
- * diffs from the resolution's recorded baseline rather than the original.
+ * diffs from the resolution's recorded baseline when the resolution happened
+ * within the current turn (an older one is superseded by the turn re-baseline).
  */
 export function deriveChangedFiles(
   messages: WebviewMessage[],
@@ -75,6 +85,11 @@ export function deriveChangedFiles(
       baseline: string;
       current: string;
       count: number;
+      // Turn the current baseline was taken from (its first edit's oldText).
+      turn: number;
+      // How many edits had landed before that baseline was taken, so a
+      // resolution can be told apart as older/newer than the re-baseline.
+      countAtBaseline: number;
       // Content the file held right before its most recent deletion (the
       // deleting diff's old text). Lets a deletion be shown and restored to
       // exactly what was removed, even if the file was also edited first.
@@ -82,12 +97,22 @@ export function deriveChangedFiles(
     }
   >();
 
-  const fold = (diff: WebviewDiff | undefined): void => {
+  const fold = (diff: WebviewDiff | undefined, turn: number): void => {
     if (!diff) return;
     const existing = byPath.get(diff.path);
     const deletedFrom =
       diff.newText === '' && diff.oldText !== '' ? diff.oldText : '';
     if (existing) {
+      // A later turn re-baselines the row to the file's content right before
+      // its first edit of that turn. Earlier turns' changes drop out of the
+      // diff — and because the baseline is taken from what's on disk *now*,
+      // manual edits, git operations, or other sessions' changes made in
+      // between never get attributed to this turn either.
+      if (turn > existing.turn) {
+        existing.turn = turn;
+        existing.baseline = diff.oldText;
+        existing.countAtBaseline = existing.count;
+      }
       existing.current = diff.newText;
       existing.count += 1;
       if (deletedFrom) existing.lastDeletedFrom = deletedFrom;
@@ -98,6 +123,8 @@ export function deriveChangedFiles(
       baseline: diff.oldText,
       current: diff.newText,
       count: 1,
+      turn,
+      countAtBaseline: 0,
       lastDeletedFrom: deletedFrom,
     });
   };
@@ -105,10 +132,17 @@ export function deriveChangedFiles(
   // Only fold diffs from edits that actually landed on disk. A rejected/failed
   // call (`isError`) and the one still awaiting approval carry a preview diff
   // that was never applied, so they must not count toward the changes panel.
+  // Each user message starts a new turn, which re-baselines the files it edits.
+  let turnIndex = 0;
   for (const message of messages) {
+    if (message.role === WebviewRole.User) {
+      turnIndex += 1;
+      continue;
+    }
     if (message.toolView?.isError) continue;
-    fold(message.toolView?.diff);
+    fold(message.toolView?.diff, turnIndex);
   }
+  // Live tools always belong to the newest turn.
   for (const tool of liveTools) {
     if (tool.isError) continue;
     if (
@@ -118,7 +152,7 @@ export function deriveChangedFiles(
     ) {
       continue;
     }
-    fold(tool.view.diff);
+    fold(tool.view.diff, turnIndex);
   }
 
   const files: ChangedFile[] = [];
@@ -152,9 +186,14 @@ export function deriveChangedFiles(
       continue;
     }
 
-    // After a keep/undo, diff against the state that resolution left on disk
-    // rather than the original session baseline.
-    const baseline = resolvedAt ? resolvedAt.baseline : entry.baseline;
+    // After a keep/undo, diff against the state that resolution left on disk —
+    // but only when the resolution happened within the current turn (i.e.
+    // after the edit the baseline was taken from). An older resolution is
+    // superseded by the turn re-baseline.
+    const baseline =
+      resolvedAt && resolvedAt.editCount > entry.countAtBaseline
+        ? resolvedAt.baseline
+        : entry.baseline;
     // A no-op (the model rewrote the file back to the last resolved content)
     // shouldn't clutter the panel.
     if (baseline === entry.current) continue;

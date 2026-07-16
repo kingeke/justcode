@@ -466,6 +466,115 @@ describe('ChatSessionService', () => {
     expect(session.activeModel).toBe('llama3.1');
   });
 
+  it('prefers the model a session was saved with over the requested one', async () => {
+    const repository = new InMemoryConversationRepository();
+    repository.conversation = {
+      ...createConversation('session-1'),
+      model: { providerId: ProviderId.Ollama, modelId: 'qwen3' },
+    };
+    const provider: ProviderClient = {
+      ...createProviderStub(),
+      async listModels() {
+        return [
+          {
+            id: 'llama3.1',
+            displayName: 'llama3.1',
+            providerId: ProviderId.Ollama,
+          },
+          { id: 'qwen3', displayName: 'qwen3', providerId: ProviderId.Ollama },
+        ];
+      },
+    };
+    const service = new ChatSessionService(repository, provider);
+
+    const session = await service.startSession({
+      sessionId: 'session-1',
+      requestedModel: 'llama3.1',
+    });
+
+    expect(session.activeModel).toBe('qwen3');
+  });
+
+  it('ignores a stored session model that belongs to another provider', async () => {
+    // The host switches providers before starting the session; a stored model
+    // from a provider that could not be restored must not be sent here.
+    const repository = new InMemoryConversationRepository();
+    repository.conversation = {
+      ...createConversation('session-1'),
+      model: { providerId: ProviderId.Openai, modelId: 'gpt-4.1' },
+    };
+    const service = new ChatSessionService(repository, createProviderStub());
+
+    const session = await service.startSession({ sessionId: 'session-1' });
+
+    expect(session.activeModel).toBe('llama3.1');
+  });
+
+  it('ignores a stored session model the provider no longer offers', async () => {
+    const repository = new InMemoryConversationRepository();
+    repository.conversation = {
+      ...createConversation('session-1'),
+      model: { providerId: ProviderId.Ollama, modelId: 'removed-model' },
+    };
+    const service = new ChatSessionService(repository, createProviderStub());
+
+    const session = await service.startSession({ sessionId: 'session-1' });
+
+    expect(session.activeModel).toBe('llama3.1');
+  });
+
+  it('stamps the provider and model a turn ran on into the saved conversation', async () => {
+    const repository = new InMemoryConversationRepository();
+    const service = new ChatSessionService(repository, createProviderStub());
+
+    const result = await service.submitMessage({
+      conversation: titledConversation('session-1'),
+      model: 'llama3.1',
+      content: 'Hello',
+    });
+
+    expect(result.conversation.model).toEqual({
+      providerId: ProviderId.Ollama,
+      modelId: 'llama3.1',
+    });
+    expect(repository.conversation.model).toEqual({
+      providerId: ProviderId.Ollama,
+      modelId: 'llama3.1',
+    });
+  });
+
+  it('saveSessionModel rewrites only the model over the latest conversation', async () => {
+    const repository = new InMemoryConversationRepository();
+    repository.conversation = {
+      ...createConversation('session-1'),
+      messages: [createMessage(MessageRole.User, 'hi')],
+    };
+    const service = new ChatSessionService(repository, createProviderStub());
+
+    await service.saveSessionModel('session-1', {
+      providerId: ProviderId.Ollama,
+      modelId: 'qwen3',
+    });
+
+    expect(repository.conversation.model).toEqual({
+      providerId: ProviderId.Ollama,
+      modelId: 'qwen3',
+    });
+    expect(repository.conversation.messages).toHaveLength(1);
+  });
+
+  it('saveSessionModel does not materialize a session that has no messages', async () => {
+    const repository = new InMemoryConversationRepository();
+    const service = new ChatSessionService(repository, createProviderStub());
+
+    await service.saveSessionModel('session-1', {
+      providerId: ProviderId.Ollama,
+      modelId: 'qwen3',
+    });
+
+    expect(repository.conversation.model).toBeUndefined();
+  });
+
   it('persists user and assistant messages to conversation history', async () => {
     const repository = new InMemoryConversationRepository();
     const service = new ChatSessionService(repository, createProviderStub());
