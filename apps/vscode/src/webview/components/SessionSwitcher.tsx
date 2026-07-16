@@ -7,6 +7,7 @@ import {
   PinIcon,
   TrashIcon,
 } from '@ext/webview/components/Icons';
+import { isSelectAllShortcut, KeyboardKey } from '@ext/webview/platform';
 
 import {
   defaultCollapsedGroups,
@@ -84,7 +85,7 @@ export function SessionSwitcher(
       if (!anchorRef.current?.contains(event.target as Node)) setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === KeyboardKey.Escape) setOpen(false);
     };
     document.addEventListener('mousedown', onMouseDown);
     document.addEventListener('keydown', onKeyDown);
@@ -184,9 +185,15 @@ export function SessionSwitcher(
                                     setDraftTitle(event.target.value)
                                   }
                                   onKeyDown={(event) => {
-                                    if (event.key === 'Enter')
+                                    if (isSelectAllShortcut(event)) {
+                                      // The workbench keybinding eats
+                                      // Ctrl/Cmd+A before the input's native
+                                      // select-all runs.
+                                      event.preventDefault();
+                                      event.currentTarget.select();
+                                    } else if (event.key === KeyboardKey.Enter)
                                       commitRename(session.sessionId);
-                                    else if (event.key === 'Escape')
+                                    else if (event.key === KeyboardKey.Escape)
                                       setEditingId(null);
                                     // Keep Escape from also closing the popup.
                                     event.stopPropagation();

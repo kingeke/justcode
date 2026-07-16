@@ -19,6 +19,10 @@ import {
 } from '@cli/ui/sub-agent-transcript-helpers.js';
 import { KeyName } from '@cli/ui/key-name.js';
 import { prepareMarkdown } from '@cli/ui/markdown.js';
+import {
+  createCodeBlockRenderNode,
+  type CodeBlockRenderNode,
+} from '@cli/ui/markdown-code-block.js';
 import { MARKDOWN_SYNTAX_STYLES } from '@cli/ui/markdown-theme.js';
 import { formatTime } from '@cli/ui/format-message-timing.js';
 
@@ -33,6 +37,16 @@ function getSyntaxStyle(): SyntaxStyle {
     syntaxStyle = SyntaxStyle.fromStyles(MARKDOWN_SYNTAX_STYLES);
   }
   return syntaxStyle;
+}
+
+// Lazy render hook (mirrors chat-app's): boxes fenced code blocks so the
+// transcript matches the main chat's extension-style code containers.
+let codeBlockRenderNode: CodeBlockRenderNode | null = null;
+function getCodeBlockRenderNode(): CodeBlockRenderNode {
+  if (!codeBlockRenderNode) {
+    codeBlockRenderNode = createCodeBlockRenderNode();
+  }
+  return codeBlockRenderNode;
 }
 
 function tc(
@@ -293,6 +307,7 @@ export function SubAgentTranscript({
                   syntaxStyle={getSyntaxStyle()}
                   tableOptions={{ style: 'grid' }}
                   flexShrink={0}
+                  renderNode={getCodeBlockRenderNode()}
                 />
               ) : null}
               {message.toolCalls?.map((call) => (

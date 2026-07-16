@@ -7,6 +7,7 @@ import {
   PlusIcon,
   TrashIcon,
 } from '@ext/webview/components/Icons';
+import { isSelectAllShortcut, KeyboardKey } from '@ext/webview/platform';
 import { logoUri } from '@ext/webview/vscode-api';
 import {
   defaultCollapsedGroups,
@@ -182,9 +183,15 @@ export function SessionsView({
                                 setDraftTitle(event.target.value)
                               }
                               onKeyDown={(event) => {
-                                if (event.key === 'Enter')
+                                if (isSelectAllShortcut(event)) {
+                                  // The workbench keybinding eats Ctrl/Cmd+A
+                                  // before the input's native select-all runs.
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  event.currentTarget.select();
+                                } else if (event.key === KeyboardKey.Enter)
                                   commitRename(session.sessionId);
-                                else if (event.key === 'Escape')
+                                else if (event.key === KeyboardKey.Escape)
                                   setEditingId(null);
                               }}
                               onBlur={() => commitRename(session.sessionId)}

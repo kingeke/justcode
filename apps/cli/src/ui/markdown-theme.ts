@@ -13,6 +13,7 @@
 
 interface ThemeStyle {
   fg?: string;
+  bg?: string;
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
@@ -20,7 +21,9 @@ interface ThemeStyle {
 }
 
 const FG = '#d4d4d4';
-const HEADING = '#58a6ff';
+// Headings render like the VS Code extension: bright neutral + bold (links stay blue).
+const HEADING = '#e6edf3';
+const LINK = '#58a6ff';
 const ACCENT = '#79c0ff';
 const RED = '#ff7b72';
 const STRING = '#a5d6ff';
@@ -28,6 +31,9 @@ const MUTED = '#8b949e';
 const FUNCTION = '#d2a8ff';
 const TYPE = '#ffa657';
 const TAG = '#7ee787';
+// Inline-code "chip" background — mirrors the extension's subtle grey pill
+// (rgba(127,127,127,.15)) blended over the app background (#24272D).
+const INLINE_CODE_BG = '#32363E';
 
 export const MARKDOWN_SYNTAX_STYLES: Record<string, ThemeStyle> = {
   default: { fg: FG },
@@ -37,18 +43,24 @@ export const MARKDOWN_SYNTAX_STYLES: Record<string, ThemeStyle> = {
   'markup.heading': { fg: HEADING, bold: true },
   'markup.heading.1': { fg: HEADING, bold: true },
   'markup.heading.2': { fg: HEADING, bold: true },
-  'markup.heading.3': { fg: ACCENT, bold: true },
-  'markup.heading.4': { fg: ACCENT, bold: true },
-  'markup.heading.5': { fg: ACCENT, bold: true },
-  'markup.heading.6': { fg: ACCENT, bold: true },
+  'markup.heading.3': { fg: HEADING, bold: true },
+  'markup.heading.4': { fg: HEADING, bold: true },
+  'markup.heading.5': { fg: HEADING, bold: true },
+  'markup.heading.6': { fg: HEADING, bold: true },
   'markup.strong': { fg: '#e6edf3', bold: true },
   'markup.italic': { fg: FG, italic: true },
   'markup.strikethrough': { fg: MUTED, dim: true },
-  'markup.raw': { fg: STRING },
-  'markup.list': { fg: RED },
+  // Inline code renders as a chip (colored fg on a subtle bg), mirroring the
+  // extension's `code` styling.
+  'markup.raw': { fg: STRING, bg: INLINE_CODE_BG },
+  // Fenced-code captures inside coalesced prose (e.g. a fence in a list item)
+  // must not inherit the inline chip background.
+  'markup.raw.block': { fg: STRING },
+  // Neutral list markers, like the extension's default bullets (was red).
+  'markup.list': { fg: MUTED },
   'markup.quote': { fg: MUTED, italic: true },
-  'markup.link': { fg: HEADING, underline: true },
-  'markup.link.label': { fg: HEADING },
+  'markup.link': { fg: LINK, underline: true },
+  'markup.link.label': { fg: LINK },
   'markup.link.url': { fg: MUTED, underline: true },
 
   // Common code captures for fenced code blocks.
@@ -77,8 +89,9 @@ export const MARKDOWN_SYNTAX_STYLES: Record<string, ThemeStyle> = {
  */
 export const MARKDOWN_MUTED_SYNTAX_STYLES: Record<string, ThemeStyle> =
   Object.fromEntries(
-    Object.entries(MARKDOWN_SYNTAX_STYLES).map(([name, style]) => [
-      name,
-      { ...style, fg: MUTED },
-    ])
+    Object.entries(MARKDOWN_SYNTAX_STYLES).map(([name, style]) => {
+      // No chip backgrounds in the muted variant: thinking stays a flat gray.
+      const { bg: _bg, ...rest } = style;
+      return [name, { ...rest, fg: MUTED }];
+    })
   );

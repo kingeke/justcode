@@ -138,6 +138,10 @@ import {
 } from '@cli/shared/toggle.js';
 import { prepareMarkdown } from '@cli/ui/markdown.js';
 import {
+  createCodeBlockRenderNode,
+  type CodeBlockRenderNode,
+} from '@cli/ui/markdown-code-block.js';
+import {
   MARKDOWN_MUTED_SYNTAX_STYLES,
   MARKDOWN_SYNTAX_STYLES,
 } from '@cli/ui/markdown-theme.js';
@@ -436,6 +440,17 @@ function getMutedSyntaxStyle(): SyntaxStyle {
   return mutedSyntaxStyle;
 }
 
+// One shared render hook that wraps committed fenced code blocks in a tinted,
+// bordered container (extension-style). Kept as a stable singleton so the
+// memoized MarkdownView never sees a new prop identity.
+let codeBlockRenderNode: CodeBlockRenderNode | null = null;
+function getCodeBlockRenderNode(): CodeBlockRenderNode {
+  if (!codeBlockRenderNode) {
+    codeBlockRenderNode = createCodeBlockRenderNode();
+  }
+  return codeBlockRenderNode;
+}
+
 // Renders raw markdown with OpenTUI's native <markdown> renderable, which lays out
 // tables, headings, lists and code blocks correctly inside the TUI (the previous
 // marked-terminal → ANSI pipeline mangled tables). Mirrors opencode's approach.
@@ -475,6 +490,11 @@ const MarkdownView = React.memo(function MarkdownView({
       tableOptions={{ style: 'grid' }}
       fg={muted ? MUTED : MARKDOWN_FG}
       flexShrink={0}
+      // Committed answers box their fenced code (extension-style container).
+      // The live block streams flat — a wrapped block can't update in place,
+      // so boxing it would recreate the renderable on every chunk — and muted
+      // thinking stays flat to read as secondary.
+      {...(live || muted ? {} : { renderNode: getCodeBlockRenderNode() })}
     />
   );
 });
