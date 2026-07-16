@@ -39,7 +39,7 @@ describe('toPlainText', () => {
 });
 
 describe('buildConversationItems', () => {
-  it('lists only user messages, in conversation order', () => {
+  it('lists only user messages, latest first', () => {
     const items = buildConversationItems([
       message('u1', WebviewRole.User, 'first question'),
       message('a1', WebviewRole.Assistant, 'an answer'),
@@ -47,10 +47,10 @@ describe('buildConversationItems', () => {
       message('u2', WebviewRole.User, 'second question'),
     ]);
 
-    expect(items.map((i) => i.messageId)).toEqual(['u1', 'u2']);
+    expect(items.map((i) => i.messageId)).toEqual(['u2', 'u1']);
     expect(items.map((i) => i.preview)).toEqual([
-      'first question',
       'second question',
+      'first question',
     ]);
   });
 
@@ -81,7 +81,7 @@ describe('buildConversationItems', () => {
     expect(item?.preview).toBe('Fix foo() is broken');
   });
 
-  it('keeps only the most recent messages up to the limit', () => {
+  it('keeps only the most recent messages up to the limit, latest first', () => {
     const many = Array.from(
       { length: CONVERSATION_SIDEBAR_LIMIT + 5 },
       (_, i) => message(`u${i}`, WebviewRole.User, `question ${i}`)
@@ -89,8 +89,8 @@ describe('buildConversationItems', () => {
     const items = buildConversationItems(many);
 
     expect(items).toHaveLength(CONVERSATION_SIDEBAR_LIMIT);
-    expect(items[0]?.messageId).toBe('u5');
-    expect(items.at(-1)?.messageId).toBe(`u${CONVERSATION_SIDEBAR_LIMIT + 4}`);
+    expect(items[0]?.messageId).toBe(`u${CONVERSATION_SIDEBAR_LIMIT + 4}`);
+    expect(items.at(-1)?.messageId).toBe('u5');
   });
 
   it('formats the sent time when the message has one', () => {

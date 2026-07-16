@@ -38,8 +38,8 @@ export function toPlainText(markdown: string): string {
 
 /**
  * Builds the display list for the conversation sidebar: the current session's
- * user messages (most recent `limit`, in conversation order), each flattened to
- * a plain-text preview capped at `maxChars` and ended with an ellipsis when cut.
+ * user messages (most recent `limit`, latest first), each flattened to a
+ * plain-text preview capped at `maxChars` and ended with an ellipsis when cut.
  * Pure and exported so the filtering/truncation can be unit-tested without a DOM.
  */
 export function buildConversationItems(
@@ -53,6 +53,7 @@ export function buildConversationItems(
         message.role === WebviewRole.User && message.content.trim() !== ''
     )
     .slice(-limit)
+    .reverse()
     .map((message) => {
       const text = toPlainText(message.content);
       return {
