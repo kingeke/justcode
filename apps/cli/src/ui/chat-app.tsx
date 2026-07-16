@@ -137,6 +137,7 @@ import {
   UiColor,
 } from '@cli/shared/toggle.js';
 import { prepareMarkdown } from '@cli/ui/markdown.js';
+import { userBubbleHugsRight } from '@cli/ui/user-bubble.js';
 import {
   createCodeBlockRenderNode,
   type CodeBlockRenderNode,
@@ -4321,7 +4322,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                 {message.role === MessageRole.User ? (
                   <box
                     flexDirection="column"
-                    alignItems="flex-end"
+                    // A message that fits hugs the right edge. A longer one
+                    // must stretch to the full row so its markdown gets a
+                    // definite width and wraps — a flex-end child keeps its
+                    // intrinsic width, overflows left, and gets clipped (the
+                    // start of the message would disappear).
+                    {...(userBubbleHugsRight(message.content, dimensions.width)
+                      ? { alignItems: 'flex-end' as const }
+                      : { width: '100%' as const })}
                     border={['right']}
                     borderStyle="rounded"
                     borderColor={UiColor.Cyan}
@@ -4333,7 +4341,9 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                     {message.content ? (
                       <MarkdownView content={message.content} />
                     ) : null}
-                    <text fg={MUTED}>{formatTime(message.createdAt)}</text>
+                    <text fg={MUTED} alignSelf="flex-end">
+                      {formatTime(message.createdAt)}
+                    </text>
                   </box>
                 ) : message.role === MessageRole.Assistant ? (
                   <box flexDirection="column">

@@ -7,7 +7,7 @@ import {
   createTextAttributes,
   parseColor,
 } from '@opentui/core';
-import { useKeyboard } from '@opentui/react';
+import { useKeyboard, useTerminalDimensions } from '@opentui/react';
 
 import { formatCost } from '@core/domain/format-cost';
 import { MessageRole } from '@core/domain/message';
@@ -24,6 +24,7 @@ import {
   type CodeBlockRenderNode,
 } from '@cli/ui/markdown-code-block.js';
 import { MARKDOWN_SYNTAX_STYLES } from '@cli/ui/markdown-theme.js';
+import { userBubbleHugsRight } from '@cli/ui/user-bubble.js';
 import { formatTime } from '@cli/ui/format-message-timing.js';
 
 const BOLD = createTextAttributes({ bold: true });
@@ -167,6 +168,7 @@ export function SubAgentTranscript({
   onClose,
 }: SubAgentTranscriptProps): React.ReactNode {
   const scrollRef = useRef<ScrollBoxRenderable | null>(null);
+  const dimensions = useTerminalDimensions();
   // The live run mutates in place, so React won't re-render on its own; while
   // running, tick every 500ms to pick up newly appended messages.
   const [, setTick] = useState(0);
@@ -284,7 +286,12 @@ export function SubAgentTranscript({
             >
               <box
                 flexDirection="column"
-                alignItems="flex-end"
+                // Short prompts hug the right edge; long ones stretch so the
+                // text gets a definite width and wraps instead of overflowing
+                // left and clipping (see userBubbleHugsRight).
+                {...(userBubbleHugsRight(message.content, dimensions.width)
+                  ? { alignItems: 'flex-end' as const }
+                  : { width: '100%' as const })}
                 border={['right']}
                 borderStyle="rounded"
                 borderColor="cyan"
@@ -296,7 +303,9 @@ export function SubAgentTranscript({
                     {message.content}
                   </text>
                 ) : null}
-                <text fg={MUTED}>{formatTime(message.createdAt)}</text>
+                <text fg={MUTED} alignSelf="flex-end">
+                  {formatTime(message.createdAt)}
+                </text>
               </box>
             </box>
           ) : message.role === MessageRole.Assistant ? (
