@@ -59,6 +59,20 @@
       "problemMatcher": []
     },
     {
+      "label": "Update installed justcode CLI",
+      "type": "shell",
+      "command": "npm run update:justcode",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Update local extension",
       "type": "shell",
       "command": "npm run vscode:install-local",
@@ -73,7 +87,7 @@
       "problemMatcher": []
     },
     {
-      "label": "build extension",
+      "label": "Build extension",
       "type": "shell",
       "command": "node esbuild.mjs",
       "options": {
@@ -86,7 +100,7 @@
       "problemMatcher": []
     },
     {
-      "label": "watch extension",
+      "label": "Watch extension",
       "type": "shell",
       "command": "node esbuild.mjs --watch",
       "options": {

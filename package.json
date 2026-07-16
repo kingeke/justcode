@@ -47,6 +47,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p apps/vscode && bun run web:typecheck",
     "install:local": "node scripts/install-local.mjs",
     "update:local": "npm run build:binary",
+    "update:justcode": "node scripts/update-justcode.mjs",
     "vscode:install-local": "cd apps/vscode && node esbuild.mjs && npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository -o justcode-vscode.vsix && code --install-extension justcode-vscode.vsix --force",
     "uninstall:local": "node scripts/uninstall-local.mjs",
     "postinstall": "node scripts/postinstall.mjs",
