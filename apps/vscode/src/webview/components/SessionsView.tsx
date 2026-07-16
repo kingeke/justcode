@@ -211,6 +211,12 @@ export function SessionsView({
                                 ) : null}
                                 {session.title ?? 'New chat'}
                               </span>
+                              {session.model ? (
+                                <span className="session-item-model">
+                                  {session.model.providerName} →{' '}
+                                  {session.model.modelId}
+                                </span>
+                              ) : null}
                               <span className="session-item-meta">
                                 {isActive ? (
                                   <span className="session-loading-label">
@@ -222,13 +228,6 @@ export function SessionsView({
                                     {session.messageCount !== 1
                                       ? 's'
                                       : ''} · {relativeTime(session.updatedAt)}
-                                    {session.model ? (
-                                      <>
-                                        {' · '}
-                                        {session.model.providerName} →{' '}
-                                        {session.model.modelId}
-                                      </>
-                                    ) : null}
                                   </>
                                 )}
                               </span>

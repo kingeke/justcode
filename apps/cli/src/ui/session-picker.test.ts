@@ -93,6 +93,13 @@ describe('session picker model column', () => {
     expect(source).toContain('`${providerName} → ${session.model.modelId}`');
   });
 
+  it('renders the model on its own line under the title', () => {
+    expect(source).toContain('function sessionModelContent(');
+    expect(source).toMatch(
+      /\{modelLine \? <text content=\{modelLine\} \/> : null\}/
+    );
+  });
+
   it('resolves the provider display name from the catalog', () => {
     expect(source).toContain('PROVIDER_BY_ID[session.model.providerId]?.name');
   });

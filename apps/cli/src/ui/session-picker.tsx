@@ -106,22 +106,28 @@ function sessionMetaContent(
     }),
   ];
 
-  // The provider → model the session last talked to, when it recorded one.
-  if (session.model) {
-    const providerName =
-      PROVIDER_BY_ID[session.model.providerId]?.name ??
-      session.model.providerId;
-    chunks.push(
-      tc('  '),
-      tc(`${providerName} → ${session.model.modelId}`, { fg: MUTED })
-    );
-  }
-
   if (isCurrent) {
     chunks.push(tc('  ✓', { fg: 'green' }));
   }
 
   return new StyledText(chunks);
+}
+
+/**
+ * The provider → model the session last talked to, rendered on its own line
+ * under the title. Undefined for sessions that never recorded one.
+ */
+function sessionModelContent(
+  session: ConversationSummary
+): StyledText | undefined {
+  if (!session.model) return undefined;
+  const providerName =
+    PROVIDER_BY_ID[session.model.providerId]?.name ?? session.model.providerId;
+  return new StyledText([
+    // Indent past the '› ' selection marker so it aligns with the title.
+    tc('  '),
+    tc(`${providerName} → ${session.model.modelId}`, { fg: MUTED }),
+  ]);
 }
 
 function tc(
@@ -335,16 +341,22 @@ export function SessionPicker({
             }
 
             const isCurrent = row.session.sessionId === currentSessionId;
+            const modelLine = sessionModelContent(row.session);
             return (
               <box
                 key={row.session.sessionId}
-                flexDirection="row"
+                flexDirection="column"
                 flexShrink={0}
               >
-                <box flexGrow={1}>
-                  <text content={sessionLineContent(row.session, isSelected)} />
+                <box flexDirection="row">
+                  <box flexGrow={1}>
+                    <text
+                      content={sessionLineContent(row.session, isSelected)}
+                    />
+                  </box>
+                  <text content={sessionMetaContent(row.session, isCurrent)} />
                 </box>
-                <text content={sessionMetaContent(row.session, isCurrent)} />
+                {modelLine ? <text content={modelLine} /> : null}
               </box>
             );
           })}

@@ -46,8 +46,13 @@ describe('SessionsView per-session model', () => {
     />
   );
 
-  it('shows the provider → model the session last talked to', () => {
+  it('shows the provider → model on its own line under the title', () => {
     expect(html).toContain('Ollama → qwen3');
+    // Rendered as its own element after the title, not inside the meta line.
+    expect(html).toMatch(
+      /session-item-title[^]*?<\/span><span class="session-item-model">Ollama → qwen3<\/span>/
+    );
+    expect(html).not.toMatch(/session-item-meta[^<]*→/);
   });
 
   it('omits the model for sessions that never recorded one', () => {
