@@ -1,4 +1,4 @@
-import { marked } from 'marked';
+import { marked, type Tokens } from 'marked';
 
 /**
  * Renders assistant Markdown to an HTML string for the transcript.
@@ -11,6 +11,32 @@ import { marked } from 'marked';
  * way users expect rather than collapsing soft line breaks.
  */
 marked.setOptions({ gfm: true, breaks: true });
+
+/** Escapes text so it displays literally instead of being parsed as HTML. */
+function escapeHtml(raw: string): string {
+  return raw
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
+/**
+ * Raw HTML in a reply must never reach the DOM live: a model that answers with
+ * an unfenced HTML document (inline `<style>`, `<svg>`, …) would otherwise
+ * restyle and overlay the entire webview — the CSP blocks scripts but not CSS
+ * or SVG. Escape both block and inline HTML tokens so they render as visible
+ * text; block tokens keep their line breaks to match the `breaks` option.
+ */
+marked.use({
+  renderer: {
+    html(token: Tokens.HTML | Tokens.Tag): string {
+      const escaped = escapeHtml(token.text);
+      return token.block
+        ? `<p>${escaped.replaceAll('\n', '<br>')}</p>`
+        : escaped;
+    },
+  },
+});
 
 /**
  * Parsed-HTML cache, keyed by the source Markdown. Committed transcript
