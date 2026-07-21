@@ -1412,7 +1412,10 @@ textarea:focus {
 .session-pin-btn,
 .session-rename-btn {
   flex: 0 0 auto;
-  margin: 4px 0;
+  /* Keep the buttons icon-sized: the row stretches its children, and a
+     multi-line row (title + model + meta) would otherwise paint each button's
+     hover background as a tall slab spanning the whole row. */
+  align-self: center;
   opacity: 0;
   color: var(--vscode-descriptionForeground, inherit);
 }
