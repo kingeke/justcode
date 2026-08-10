@@ -85,6 +85,112 @@ body {
   bottom: 48px;
 }
 
+/* Find-in-conversation bar (Ctrl/Cmd+F): floats over the top-right of the
+   transcript like VS Code's editor find widget. */
+.transcript-search {
+  position: absolute;
+  top: 6px;
+  right: 16px;
+  left: 8px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.35));
+  border-radius: 6px;
+  background: var(
+    --vscode-editorWidget-background,
+    var(--vscode-sideBar-background, var(--vscode-editor-background))
+  );
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+.transcript-search-input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-input-border, rgba(127, 127, 127, 0.35));
+  border-radius: 4px;
+  padding: 3px 6px;
+  font: inherit;
+  background: var(--vscode-input-background, transparent);
+  color: var(--vscode-input-foreground, inherit);
+}
+
+.transcript-search-input:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder, rgba(127, 127, 127, 0.6));
+}
+
+.transcript-search-input::placeholder {
+  color: var(--vscode-input-placeholderForeground, inherit);
+  opacity: 0.6;
+}
+
+/* A query with no hits, flagged the way VS Code flags a failed find. */
+.transcript-search-input-empty {
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100);
+}
+
+.transcript-search-count {
+  flex: none;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground);
+}
+
+.transcript-search-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.transcript-search-btn:hover:not(:disabled) {
+  background: var(
+    --vscode-toolbar-hoverBackground,
+    var(--vscode-list-hoverBackground)
+  );
+}
+
+.transcript-search-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.transcript-search-close {
+  font-size: 12px;
+}
+
+/* The matched words themselves, painted via the CSS Custom Highlight API (see
+   search-highlight.ts) so the rendered Markdown is never rewritten. Blue fill
+   with white text, so hits read clearly on both light and dark themes
+   regardless of what's underneath (user bubbles, code, links).
+   Literal colors, not theme variables: Chromium doesn't resolve `var()` inside
+   highlight pseudo-elements, so a themed value here silently drops out. */
+::highlight(justcode-search-match) {
+  background-color: #1f6feb;
+  color: #ffffff;
+}
+
+/* The single occurrence the bar is stepped to: a brighter blue plus an underline
+   so it's distinguishable from the other hits at a glance. */
+::highlight(justcode-search-active) {
+  background-color: #3b8eff;
+  color: #ffffff;
+  text-decoration: underline;
+}
+
 /* Empty-conversation greeting: logo + invitation dead-center in the visible
    chat area. Absolutely fills .transcript-wrap (the positioned shell around
    the transcript) so centering is exact regardless of transcript padding;

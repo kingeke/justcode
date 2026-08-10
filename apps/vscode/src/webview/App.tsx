@@ -52,6 +52,20 @@ import {
   SubAgentSidebar,
   SubAgentTranscriptModal,
 } from '@ext/webview/components/SubAgentPanel';
+import { TranscriptSearch } from '@ext/webview/components/TranscriptSearch';
+import {
+  applySearchHighlights,
+  clearSearchHighlights,
+} from '@ext/webview/search-highlight';
+import { scrollMessageIntoView } from '@ext/webview/transcript-scroll';
+import {
+  countTranscriptMatches,
+  findTranscriptMatches,
+  matchMessageIdAt,
+  SearchDirection,
+  stepMatchIndex,
+} from '@ext/webview/transcript-search';
+import { isFindShortcut, KeyboardKey } from '@ext/webview/platform';
 import { deriveChangedFiles, type ChangedFile } from '@ext/webview/changes';
 import { adjacentSessions } from '@ext/webview/session-groups';
 import { selectThinkingItems } from '@ext/webview/thinking-items';
@@ -91,6 +105,19 @@ export function App(): React.JSX.Element {
     name: string;
   } | null>(null);
   React.useEffect(() => setShowAllMessages(false), [state.sessionId]);
+  // Find-in-conversation (Ctrl/Cmd+F): the find bar's open state, its query and
+  // which occurrence is currently focused. View-only, and reset per session.
+  const [searchOpen, setSearchOpen] = React.useState(false);
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const [searchIndex, setSearchIndex] = React.useState(0);
+  // Bumped on every Ctrl/Cmd+F press so the bar re-focuses even when open.
+  const [searchFocusNonce, setSearchFocusNonce] = React.useState(0);
+  const closeSearch = React.useCallback((): void => {
+    setSearchOpen(false);
+    setSearchQuery('');
+    setSearchIndex(0);
+  }, []);
+  React.useEffect(() => closeSearch(), [state.sessionId, closeSearch]);
   // A sidebar jump whose target message is still hidden by the window: reveal
   // everything first, then scroll once the target has mounted.
   const pendingScrollRef = React.useRef<string | null>(null);
@@ -99,7 +126,7 @@ export function App(): React.JSX.Element {
     const node = document.getElementById(`msg-${pendingScrollRef.current}`);
     if (node) {
       pendingScrollRef.current = null;
-      node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      scrollMessageIntoView(transcriptRef.current, node);
     }
   });
   // The queued message being edited inline, and its working draft text.
@@ -913,15 +940,101 @@ export function App(): React.JSX.Element {
   // sidebar only lists committed messages, each anchored by MessageView's domId.
   // A target hidden by the message window reveals the full history first and
   // scrolls once it has mounted (via pendingScrollRef's effect).
-  const scrollToMessage = (messageId: string): void => {
+  const scrollToMessage = React.useCallback((messageId: string): void => {
     const node = document.getElementById(`msg-${messageId}`);
     if (node) {
-      node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // A jump means the user is reading history, not following the live turn —
+      // otherwise the next streamed token pins them straight back to the bottom.
+      stickToBottomRef.current = false;
+      scrollMessageIntoView(transcriptRef.current, node);
       return;
     }
     pendingScrollRef.current = messageId;
     setShowAllMessages(true);
-  };
+  }, []);
+
+  // Find-in-conversation: the committed messages containing the query, and the
+  // total number of occurrences the bar reports.
+  const searchMatches = React.useMemo(
+    () => findTranscriptMatches(state.messages, searchQuery),
+    [state.messages, searchQuery]
+  );
+  const searchMatchCount = countTranscriptMatches(searchMatches);
+
+  // Steps to the previous/next occurrence and scrolls it into view. Scrolling
+  // reveals windowed-away history when the hit lives in the hidden head.
+  const stepSearch = React.useCallback(
+    (direction: SearchDirection): void => {
+      if (searchMatchCount === 0) return;
+      const next = stepMatchIndex(searchIndex, searchMatchCount, direction);
+      setSearchIndex(next);
+      const messageId = matchMessageIdAt(searchMatches, next);
+      if (messageId) scrollToMessage(messageId);
+    },
+    [searchIndex, searchMatchCount, searchMatches, scrollToMessage]
+  );
+
+  // A new query starts from its first hit, and jumps straight to it.
+  const changeSearchQuery = React.useCallback(
+    (query: string): void => {
+      setSearchQuery(query);
+      setSearchIndex(0);
+      const messageId = matchMessageIdAt(
+        findTranscriptMatches(state.messages, query),
+        0
+      );
+      if (messageId) scrollToMessage(messageId);
+    },
+    [state.messages, scrollToMessage]
+  );
+
+  // Paint the matched words themselves (CSS Custom Highlight API — no DOM
+  // rewriting of the rendered Markdown). Re-runs whenever the query, the active
+  // hit, the transcript, or the mounted window changes, and clears on close.
+  React.useEffect(() => {
+    if (!searchOpen) {
+      clearSearchHighlights();
+      return undefined;
+    }
+    // After paint: the highlighted messages must be mounted and laid out, which
+    // includes the ones a jump just revealed via "show all".
+    const raf = requestAnimationFrame(() =>
+      applySearchHighlights({
+        container: transcriptRef.current,
+        matches: searchMatches,
+        query: searchQuery,
+        activeIndex: searchIndex,
+      })
+    );
+    return () => cancelAnimationFrame(raf);
+  }, [searchOpen, searchMatches, searchQuery, searchIndex, showAllMessages]);
+
+  // Highlight ranges are attached to live text nodes, so they die with the
+  // webview's DOM — drop them on unmount rather than leaving a stale registry.
+  React.useEffect(() => clearSearchHighlights, []);
+
+  // Ctrl/Cmd+F opens (or re-focuses) the find bar; Escape closes it. Bound on
+  // the document because VS Code's find widget never reaches a webview view, so
+  // the chat has to own the shortcut itself. Registered only on the chat view —
+  // the sessions list and model picker have their own search inputs.
+  React.useEffect(() => {
+    if (state.view !== ChatView.Chat) return undefined;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (isFindShortcut(event)) {
+        event.preventDefault();
+        setSearchOpen(true);
+        // Bumped so the bar re-focuses and selects its query when the shortcut
+        // is pressed again while already open (VS Code's find behavior).
+        setSearchFocusNonce((nonce) => nonce + 1);
+        return;
+      }
+      if (event.key === KeyboardKey.Escape && searchOpen) {
+        closeSearch();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [state.view, searchOpen, closeSearch]);
 
   const closeModelPicker = (): void => {
     setModelDefaultTarget(null);
@@ -1448,6 +1561,18 @@ export function App(): React.JSX.Element {
       ) : null}
 
       <div className="transcript-wrap">
+        {searchOpen ? (
+          <TranscriptSearch
+            key={searchFocusNonce}
+            query={searchQuery}
+            matchCount={searchMatchCount}
+            activeIndex={searchIndex}
+            onQueryChange={changeSearchQuery}
+            onNext={() => stepSearch(SearchDirection.Next)}
+            onPrevious={() => stepSearch(SearchDirection.Previous)}
+            onClose={closeSearch}
+          />
+        ) : null}
         <div
           className="transcript"
           ref={transcriptRef}
