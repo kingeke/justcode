@@ -4,6 +4,7 @@ import { WebviewRole, type WebviewMessage } from '@ext/shared/protocol';
 import { ToolName } from '@core/domain/tool-name';
 import { DiffView } from '@ext/webview/components/DiffView';
 import {
+  ChatIcon,
   CheckIcon,
   CopyIcon,
   FileIcon,
@@ -47,6 +48,11 @@ interface MessageViewProps {
    * as {@link onRetry}.
    */
   onEdit?: () => void;
+  /**
+   * Starts a new chat with this compaction summary pre-filled in the composer.
+   * Only passed for compaction summaries.
+   */
+  onMoveToNewChat?: () => void;
   /** DOM id for the message's root element, so the sidebar can scroll to it. */
   domId?: string;
 }
@@ -58,6 +64,7 @@ function MessageViewImpl({
   onOpenImage,
   onRetry,
   onEdit,
+  onMoveToNewChat,
   domId,
 }: {
   message: WebviewMessage;
@@ -76,6 +83,11 @@ function MessageViewImpl({
    * as {@link onRetry}.
    */
   onEdit?: () => void;
+  /**
+   * Starts a new chat with this compaction summary pre-filled in the composer.
+   * Only passed for compaction summaries.
+   */
+  onMoveToNewChat?: () => void;
   /** DOM id for the message's root element, so the sidebar can scroll to it. */
   domId?: string;
 }): React.JSX.Element {
@@ -116,6 +128,20 @@ function MessageViewImpl({
                 }}
               >
                 {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+              </button>
+            ) : null}
+            {onMoveToNewChat && message.content ? (
+              <button
+                type="button"
+                className="msg-copy-btn msg-compact-copy-btn msg-compact-move-btn"
+                title="Move to a new chat with this summary in the composer"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onMoveToNewChat();
+                }}
+              >
+                <ChatIcon size={13} />
               </button>
             ) : null}
           </summary>
@@ -324,6 +350,7 @@ export const MessageView = React.memo(
     prev.domId === next.domId &&
     Boolean(prev.onRetry) === Boolean(next.onRetry) &&
     Boolean(prev.onEdit) === Boolean(next.onEdit) &&
+    Boolean(prev.onMoveToNewChat) === Boolean(next.onMoveToNewChat) &&
     Boolean(prev.onOpenFile) === Boolean(next.onOpenFile) &&
     Boolean(prev.onOpenImage) === Boolean(next.onOpenImage)
 );

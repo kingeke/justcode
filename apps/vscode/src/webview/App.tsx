@@ -140,6 +140,10 @@ export function App(): React.JSX.Element {
   const composerDraftRef = React.useRef('');
   const composerDraftImagesRef = React.useRef<WebviewImage[]>([]);
   const composerDraftFilesRef = React.useRef<WebviewFileAttachment[]>([]);
+  // Bumped when the draft is replaced from outside the composer (moving a
+  // compaction summary to a new chat): the composer only seeds its state on
+  // mount, so remounting it is what makes the new draft show up.
+  const [composerNonce, setComposerNonce] = React.useState(0);
   const persistComposerDraft = React.useCallback(
     (
       draft: string,
@@ -869,6 +873,18 @@ export function App(): React.JSX.Element {
     // the first streamed reply auto-scrolls.
     stickToBottomRef.current = true;
     postToHost({ type: WebviewMessageType.NewSession });
+  };
+
+  // Carry a compaction summary into a fresh chat: start a new session and drop
+  // the summary into the composer, so the user decides what to do with it
+  // instead of it being sent straight away. The composer seeds its draft on
+  // mount only, so bump the nonce to remount it with the new text.
+  const moveToNewChat = (summary: string): void => {
+    composerDraftRef.current = summary;
+    composerDraftImagesRef.current = [];
+    composerDraftFilesRef.current = [];
+    setComposerNonce((nonce) => nonce + 1);
+    newSession();
   };
 
   const goBack = (): void => {
@@ -1694,6 +1710,13 @@ export function App(): React.JSX.Element {
                           onEdit: () => startEditMessage(message),
                         }
                       : {})}
+                    {...(message.isCompactSummary &&
+                    !state.busy &&
+                    !state.compacting
+                      ? {
+                          onMoveToNewChat: () => moveToNewChat(message.content),
+                        }
+                      : {})}
                     domId={`msg-${message.id}`}
                   />
                 </React.Fragment>
@@ -1960,6 +1983,7 @@ export function App(): React.JSX.Element {
 
       <Composer
         {...sharedComposerProps}
+        key={composerNonce}
         onSubmit={submit}
         initialDraft={composerDraftRef.current}
         initialImages={composerDraftImagesRef.current}

@@ -271,6 +271,38 @@ new`);
     expect(markup).toContain('Copy summary as Markdown');
   });
 
+  it('renders a move-to-new-chat button on a compaction summary when offered', () => {
+    const markup = renderToStaticMarkup(
+      <MessageView
+        message={{
+          id: 'c3',
+          role: WebviewRole.Assistant,
+          content: '## Summary\nwhat happened so far',
+          isCompactSummary: true,
+        }}
+        onMoveToNewChat={() => {}}
+      />
+    );
+
+    expect(markup).toContain('msg-compact-move-btn');
+    expect(markup).toContain('Move to a new chat');
+  });
+
+  it('omits the move-to-new-chat button when the handler is not provided', () => {
+    const markup = renderToStaticMarkup(
+      <MessageView
+        message={{
+          id: 'c4',
+          role: WebviewRole.Assistant,
+          content: '## Summary',
+          isCompactSummary: true,
+        }}
+      />
+    );
+
+    expect(markup).not.toContain('msg-compact-move-btn');
+  });
+
   it('omits the compaction summary copy button when there is no content', () => {
     const markup = renderToStaticMarkup(
       <MessageView
