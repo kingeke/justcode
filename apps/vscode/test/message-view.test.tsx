@@ -254,6 +254,39 @@ new`);
     expect(markup).not.toContain('tool-result');
   });
 
+  it('renders a copy button on a compaction summary', () => {
+    const markup = renderToStaticMarkup(
+      <MessageView
+        message={{
+          id: 'c1',
+          role: WebviewRole.Assistant,
+          content: '## Summary\nwhat happened so far',
+          isCompactSummary: true,
+        }}
+      />
+    );
+
+    expect(markup).toContain('msg-compact-summary');
+    expect(markup).toContain('msg-compact-copy-btn');
+    expect(markup).toContain('Copy summary as Markdown');
+  });
+
+  it('omits the compaction summary copy button when there is no content', () => {
+    const markup = renderToStaticMarkup(
+      <MessageView
+        message={{
+          id: 'c2',
+          role: WebviewRole.Assistant,
+          content: '',
+          isCompactSummary: true,
+        }}
+      />
+    );
+
+    expect(markup).toContain('msg-compact-summary');
+    expect(markup).not.toContain('msg-compact-copy-btn');
+  });
+
   it('renders input preview for whitelisted historical tools', () => {
     const markup = renderToStaticMarkup(
       <MessageView

@@ -3365,6 +3365,18 @@ textarea:focus {
   overflow-y: auto;
 }
 
+/* Copy-summary button sits inline in the compacted label; same hover reveal as
+   the message copy buttons. */
+.msg-compact-copy-btn {
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
+.msg-compact-summary:hover .msg-copy-btn,
+.msg-compact-summary .msg-copy-btn:focus-visible {
+  opacity: 1;
+}
+
 .settings-popup-hint {
   display: block;
   font-size: 10px;

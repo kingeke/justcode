@@ -102,6 +102,22 @@ function MessageViewImpl({
             Conversation compacted
             {compactedAt ? ` at ${compactedAt}` : ''} — summary sent to the
             model
+            {message.content ? (
+              <button
+                type="button"
+                className="msg-copy-btn msg-compact-copy-btn"
+                title={copied ? 'Copied' : 'Copy summary as Markdown'}
+                onClick={(event) => {
+                  // The button lives inside <summary>; without this the click
+                  // also toggles the details open/closed.
+                  event.preventDefault();
+                  event.stopPropagation();
+                  copyContent();
+                }}
+              >
+                {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+              </button>
+            ) : null}
           </summary>
           <div
             className="thinking-content markdown-body"
