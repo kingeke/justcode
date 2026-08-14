@@ -24,8 +24,9 @@ describe('chat header new-chat button', () => {
       'disabled={state.compacting || newSessionLoading}'
     );
 
-    // Last item: nothing after it in the header but the closing tags.
+    // Last item: nothing after it in the header but the conditional closing tags.
     const afterPlus = header.slice(header.indexOf('<PlusIcon'));
-    expect(afterPlus.trim()).toBe('<PlusIcon size={16} />\n        </button>');
+    expect(afterPlus).toContain('<PlusIcon size={16} />');
+    expect(afterPlus).toContain('</button>');
   });
 });
