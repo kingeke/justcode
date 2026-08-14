@@ -50,17 +50,32 @@ const cache = new Map<string, string>();
 const CACHE_LIMIT = 2000;
 
 export function renderMarkdown(text: string): string {
-  const hit = cache.get(text);
+  return cached(text, () => marked.parse(text, { async: false }));
+}
+
+/**
+ * Renders Markdown without wrapping it in a block element — for short labels
+ * (question option buttons, …) where a `<p>` would break the surrounding
+ * layout. Only inline syntax (code spans, emphasis, links) is honoured.
+ */
+export function renderMarkdownInline(text: string): string {
+  return cached(`inline:${text}`, () =>
+    marked.parseInline(text, { async: false })
+  );
+}
+
+function cached(key: string, render: () => string): string {
+  const hit = cache.get(key);
   if (hit !== undefined) {
-    cache.delete(text);
-    cache.set(text, hit);
+    cache.delete(key);
+    cache.set(key, hit);
     return hit;
   }
-  const html = marked.parse(text, { async: false });
+  const html = render();
   if (cache.size >= CACHE_LIMIT) {
     const oldest = cache.keys().next().value;
     if (oldest !== undefined) cache.delete(oldest);
   }
-  cache.set(text, html);
+  cache.set(key, html);
   return html;
 }

@@ -49,4 +49,32 @@ describe('InputPrompt', () => {
     expect(markup).not.toContain('prompt-options');
     expect(markup).toContain('prompt-text');
   });
+
+  it('renders the question and option labels as Markdown', () => {
+    const markup = renderToStaticMarkup(
+      <InputPrompt
+        request={{
+          type: HostMessageType.UserInputRequest,
+          id: 'q-3',
+          question:
+            'Use `amount_display`?\n\n- **default** `COST_TOTAL`\n- other',
+          options: ['Go with `COST_TOTAL`', 'Plain option'],
+        }}
+        onRespond={() => {}}
+      />
+    );
+
+    // Block Markdown in the question body: lists, emphasis, code spans.
+    expect(markup).toContain('prompt-head markdown-body');
+    expect(markup).toContain('<code>amount_display</code>');
+    expect(markup).toContain('<strong>default</strong>');
+    expect(markup).toContain('<ul>');
+    expect(markup).not.toContain('`amount_display`');
+
+    // Option labels render inline (no wrapping <p> to break the button row).
+    expect(markup).toContain('<code>COST_TOTAL</code>');
+    expect(markup).toContain(
+      '<span class="prompt-option-label markdown-body">Plain option</span>'
+    );
+  });
 });

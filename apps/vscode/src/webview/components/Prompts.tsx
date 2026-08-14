@@ -5,6 +5,7 @@ import type {
   UserInputRequestMessage,
 } from '@ext/shared/protocol';
 import { DiffView } from '@ext/webview/components/DiffView';
+import { renderMarkdown, renderMarkdownInline } from '@ext/webview/markdown';
 
 /** Inline gate shown when a tool needs the user's approval before running. */
 export function ApprovalPrompt({
@@ -68,7 +69,12 @@ export function InputPrompt({
 
   return (
     <div className="prompt prompt-input">
-      <div className="prompt-head">{request.question}</div>
+      {/* Questions are authored as Markdown (code spans, lists, emphasis), so
+          render them like assistant text instead of showing the raw source. */}
+      <div
+        className="prompt-head markdown-body"
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(request.question) }}
+      />
       {request.options && request.options.length > 0 ? (
         <ol className="prompt-options">
           {request.options.map((option, index) => (
@@ -79,7 +85,12 @@ export function InputPrompt({
                 onClick={() => onRespond(option)}
               >
                 <span className="prompt-option-number">{index + 1}.</span>
-                <span className="prompt-option-label">{option}</span>
+                <span
+                  className="prompt-option-label markdown-body"
+                  dangerouslySetInnerHTML={{
+                    __html: renderMarkdownInline(option),
+                  }}
+                />
               </button>
             </li>
           ))}
