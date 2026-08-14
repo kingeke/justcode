@@ -28,6 +28,7 @@ interface SessionsViewProps {
   onDelete: (sessionId: string) => void;
   onClearAll: () => void;
   onNewSession: () => void;
+  newSessionLoading?: boolean;
 }
 
 export function SessionsView({
@@ -40,6 +41,7 @@ export function SessionsView({
   onDelete,
   onClearAll,
   onNewSession,
+  newSessionLoading,
 }: SessionsViewProps): React.JSX.Element {
   const [query, setQuery] = React.useState('');
   // The session whose title is being edited inline, and the working text.
@@ -125,9 +127,18 @@ export function SessionsView({
             type="button"
             className="icon-btn"
             title="New session"
+            aria-busy={newSessionLoading}
+            disabled={newSessionLoading}
             onClick={onNewSession}
           >
-            <PlusIcon />
+            {newSessionLoading ? (
+              <span
+                className="spinner new-session-spinner"
+                aria-hidden="true"
+              />
+            ) : (
+              <PlusIcon />
+            )}
           </button>
         </div>
       </div>

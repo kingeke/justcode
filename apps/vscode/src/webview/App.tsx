@@ -84,6 +84,7 @@ const HOST_COMMANDS = new Set(['/usage']);
 
 export function App(): React.JSX.Element {
   const [state, dispatch] = React.useReducer(reducer, initialState);
+  const [newSessionLoading, setNewSessionLoading] = React.useState(false);
   // The image (data URL) shown full-size in the preview modal, or null when closed.
   const [previewImage, setPreviewImage] = React.useState<string | null>(null);
   // The sub agent run whose full transcript popup is open, or null when closed.
@@ -105,6 +106,9 @@ export function App(): React.JSX.Element {
     name: string;
   } | null>(null);
   React.useEffect(() => setShowAllMessages(false), [state.sessionId]);
+  React.useEffect(() => {
+    if (state.view === ChatView.Chat) setNewSessionLoading(false);
+  }, [state.view, state.sessionId, state.messages]);
   // Find-in-conversation (Ctrl/Cmd+F): the find bar's open state, its query and
   // which occurrence is currently focused. View-only, and reset per session.
   const [searchOpen, setSearchOpen] = React.useState(false);
@@ -301,6 +305,9 @@ export function App(): React.JSX.Element {
   // not UI state.
   React.useEffect(() => {
     const unsubscribe = onHostMessage((message) => {
+      if (message.type === HostMessageType.Ready) {
+        setNewSessionLoading(false);
+      }
       if (message.type === HostMessageType.DroppedFilesLoaded) {
         const files = message.files.map((file) => {
           const bytes = Uint8Array.from(atob(file.base64), (c) =>
@@ -872,6 +879,7 @@ export function App(): React.JSX.Element {
     // Same as openSession: a new chat starts pinned to the (empty) bottom so
     // the first streamed reply auto-scrolls.
     stickToBottomRef.current = true;
+    setNewSessionLoading(true);
     postToHost({ type: WebviewMessageType.NewSession });
   };
 
@@ -1312,6 +1320,7 @@ export function App(): React.JSX.Element {
         onDelete={deleteSession}
         onClearAll={clearAllSessions}
         onNewSession={newSession}
+        newSessionLoading={newSessionLoading}
       />
     );
   }
@@ -1563,10 +1572,15 @@ export function App(): React.JSX.Element {
               : 'New chat'
           }
           aria-label="New chat"
-          disabled={state.compacting}
+          aria-busy={newSessionLoading}
+          disabled={state.compacting || newSessionLoading}
           onClick={newSession}
         >
-          <PlusIcon size={16} />
+          {newSessionLoading ? (
+            <span className="spinner new-session-spinner" aria-hidden="true" />
+          ) : (
+            <PlusIcon size={16} />
+          )}
         </button>
       </div>
 

@@ -4363,6 +4363,10 @@ textarea:focus {
   opacity: 0.7;
 }
 
+.new-session-spinner {
+  display: inline-block;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

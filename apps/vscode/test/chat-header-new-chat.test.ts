@@ -19,7 +19,10 @@ describe('chat header new-chat button', () => {
     expect(header).toContain('aria-label="New chat"');
     expect(header).toContain('onClick={newSession}');
     expect(header).toContain('<PlusIcon size={16} />');
-    expect(header).toContain('disabled={state.compacting}');
+    expect(header).toContain('aria-busy={newSessionLoading}');
+    expect(header).toContain(
+      'disabled={state.compacting || newSessionLoading}'
+    );
 
     // Last item: nothing after it in the header but the closing tags.
     const afterPlus = header.slice(header.indexOf('<PlusIcon'));
