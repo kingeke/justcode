@@ -19,6 +19,7 @@ export enum CommandName {
   SubAgents = 'sub-agents',
   Implement = 'implement',
   EditPlan = 'edit-plan',
+  CopyPlan = 'copy-plan',
   CollapseResponses = 'collapse-responses',
   ConfigureMcpServers = 'configure-mcp-servers',
   ReadLimit = 'read-limit',
@@ -130,6 +131,10 @@ export const COMMANDS: Command[] = [
   {
     name: CommandName.EditPlan,
     description: 'Save the latest plan to a file to edit before implementing',
+  },
+  {
+    name: CommandName.CopyPlan,
+    description: 'Copy the latest plan to the clipboard as Markdown',
   },
   {
     name: CommandName.CollapseResponses,

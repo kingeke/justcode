@@ -670,7 +670,8 @@ body {
 }
 
 .plan-start-btn,
-.plan-edit-btn {
+.plan-edit-btn,
+.plan-copy-btn {
   font-family: inherit;
   font-size: 12px;
   font-weight: 600;
@@ -689,7 +690,8 @@ body {
   background: var(--vscode-button-hoverBackground, #2b7ce6);
 }
 
-.plan-edit-btn {
+.plan-edit-btn,
+.plan-copy-btn {
   background: var(
     --vscode-button-secondaryBackground,
     rgba(127, 127, 127, 0.2)
@@ -697,7 +699,8 @@ body {
   color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
 }
 
-.plan-edit-btn:hover {
+.plan-edit-btn:hover,
+.plan-copy-btn:hover {
   background: var(
     --vscode-button-secondaryHoverBackground,
     rgba(127, 127, 127, 0.3)

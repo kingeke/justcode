@@ -23,6 +23,18 @@ describe('commands', () => {
     );
   });
 
+  it('registers the plan hand-off commands, copy included', () => {
+    expect(isCommandName(CommandName.Implement)).toBe(true);
+    expect(isCommandName(CommandName.EditPlan)).toBe(true);
+    expect(isCommandName(CommandName.CopyPlan)).toBe(true);
+    // "/copy" surfaces the plan copy command (its "copy" prefix).
+    expect(filterCommands('copy')[0]?.name).toBe(CommandName.CopyPlan);
+    // "/plan" finds it (and edit-plan) by the hyphen segment.
+    expect(filterCommands('plan').map((command) => command.name)).toContain(
+      CommandName.CopyPlan
+    );
+  });
+
   it('ranks prefix matches ahead of fuzzy matches', () => {
     // Whole-name prefix matches come first, in declaration order; segment/
     // substring matches (e.g. "refresh" in local-model-refresh) follow.

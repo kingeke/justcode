@@ -31,7 +31,11 @@ import { ApprovalPrompt, InputPrompt } from '@ext/webview/components/Prompts';
 import { Composer } from '@ext/webview/components/Composer';
 import { SessionsView } from '@ext/webview/components/SessionsView';
 import { SessionSwitcher } from '@ext/webview/components/SessionSwitcher';
-import { ConversationSidebar } from '@ext/webview/components/ConversationSidebar';
+import {
+  ConversationSidebar,
+  mergeSidebarMessages,
+} from '@ext/webview/components/ConversationSidebar';
+import { PlanCard } from '@ext/webview/components/PlanCard';
 import { ModelPickerView } from '@ext/webview/components/ModelPickerView';
 import { WelcomeSplash } from '@ext/webview/components/WelcomeSplash';
 import {
@@ -977,6 +981,20 @@ export function App(): React.JSX.Element {
     setShowAllMessages(true);
   }, []);
 
+  // What the "Your messages" outline lists: the committed transcript plus the
+  // messages that so far only exist in the running turn (steering echoes folded
+  // in by the host, and follow-ups still queued), so anything typed mid-turn
+  // shows up immediately instead of only when the turn commits.
+  const sidebarMessages = React.useMemo(
+    () =>
+      mergeSidebarMessages(
+        state.messages,
+        state.liveTurnItems,
+        state.queuedMessages
+      ),
+    [state.messages, state.liveTurnItems, state.queuedMessages]
+  );
+
   // Find-in-conversation: the committed messages containing the query, and the
   // total number of occurrences the bar reports.
   const searchMatches = React.useMemo(
@@ -1760,6 +1778,9 @@ export function App(): React.JSX.Element {
                           content: item.content,
                         }}
                         expandTools={state.expandTools}
+                        // Anchor live items too, so the conversation sidebar can
+                        // scroll to a steering message before the turn commits.
+                        domId={`msg-${item.id}`}
                       />
                     );
                   case LiveTurnItemKind.Tool: {
@@ -1853,7 +1874,7 @@ export function App(): React.JSX.Element {
         ) : null}
         {state.showConversationSidebar ? (
           <ConversationSidebar
-            messages={state.messages}
+            messages={sidebarMessages}
             onSelect={scrollToMessage}
             stackedButtons={
               (showJumpToTop ? 1 : 0) + (showJumpToBottom ? 1 : 0)
@@ -2036,52 +2057,6 @@ export function App(): React.JSX.Element {
             alt="Image preview"
             onClick={(e) => e.stopPropagation()}
           />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * Renders a presented plan (a present_plan tool result) as its own card: the
- * plan markdown plus, on the most recent plan when idle, the Start/Edit actions.
- */
-function PlanCard({
-  plan,
-  showActions,
-  onStart,
-  onEdit,
-}: {
-  plan: string;
-  showActions: boolean;
-  onStart: () => void;
-  onEdit: () => void;
-}): React.JSX.Element {
-  return (
-    <div className="plan-card">
-      <div className="plan-card-label">Plan</div>
-      <div
-        className="plan-card-body markdown-body"
-        dangerouslySetInnerHTML={{ __html: renderMarkdown(plan) }}
-      />
-      {showActions ? (
-        <div className="plan-actions">
-          <button
-            type="button"
-            className="plan-start-btn"
-            onClick={onStart}
-            title="Switch to Build mode and implement this plan"
-          >
-            Start implementation →
-          </button>
-          <button
-            type="button"
-            className="plan-edit-btn"
-            onClick={onEdit}
-            title="Save the plan to a markdown file to edit before implementing"
-          >
-            Edit plan
-          </button>
         </div>
       ) : null}
     </div>

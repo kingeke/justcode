@@ -1472,6 +1472,102 @@ describe('ChatSessionService', () => {
     expect(steered).toBeDefined();
   });
 
+  it('persists the turn incrementally as messages, tool results and steering arrive', async () => {
+    // Snapshot every save so we can assert the turn reaches disk as it happens
+    // rather than only at the end (a mid-turn crash must not lose the work).
+    const snapshots: MessageRole[][] = [];
+    class SnapshottingRepository extends InMemoryConversationRepository {
+      public override async save(
+        conversation: ReturnType<typeof createConversation>
+      ): Promise<void> {
+        snapshots.push(conversation.messages.map((m) => m.role));
+        await super.save({
+          ...conversation,
+          messages: [...conversation.messages],
+        });
+      }
+    }
+    const repository = new SnapshottingRepository();
+    const tool = new RecordingWriteTool();
+    let turn = 0;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat(): Promise<ChatResult> {
+        turn += 1;
+        if (turn === 1) {
+          return {
+            content: 'writing it',
+            toolCalls: [
+              {
+                id: 'call-1',
+                name: 'write_file',
+                arguments: '{"path":"a.txt","content":"hi"}',
+              },
+            ],
+          };
+        }
+        // Stand in for model latency, so the steering message queued for this
+        // step is on disk before the step's own output is.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return { content: 'All done.' };
+      },
+      async listModels() {
+        return [
+          { id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai },
+        ];
+      },
+      getDefaultModel() {
+        return 'gpt';
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry: new ToolRegistry([tool]),
+    });
+
+    let drainCalls = 0;
+    await service.submitMessage({
+      conversation: titledConversation('session-1'),
+      model: 'gpt',
+      content: 'create a.txt',
+      drainSteering: () => {
+        drainCalls += 1;
+        return drainCalls === 2 ? 'actually make it b.txt' : null;
+      },
+    });
+
+    // The user message lands before the first provider call...
+    expect(snapshots[0]).toEqual([MessageRole.User]);
+    // ...and every mid-turn artifact is written before the final save: the
+    // assistant step, the tool result, and the steering message.
+    expect(
+      snapshots.some(
+        (roles) =>
+          roles.length === 2 &&
+          roles[1] === MessageRole.Assistant &&
+          roles !== snapshots.at(-1)
+      )
+    ).toBe(true);
+    expect(
+      snapshots.some(
+        (roles) => roles.length === 3 && roles[2] === MessageRole.Tool
+      )
+    ).toBe(true);
+    expect(
+      snapshots.some(
+        (roles) => roles.length === 4 && roles[3] === MessageRole.User
+      )
+    ).toBe(true);
+    // The final save is still the authoritative full exchange.
+    expect(snapshots.at(-1)).toEqual([
+      MessageRole.User,
+      MessageRole.Assistant,
+      MessageRole.Tool,
+      MessageRole.User,
+      MessageRole.Assistant,
+    ]);
+    expect(repository.conversation.messages).toHaveLength(5);
+  });
+
   it('retries chat-only and omits tools when the model rejects tools', async () => {
     const repository = new InMemoryConversationRepository();
     const tool = new RecordingWriteTool();

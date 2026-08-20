@@ -3,6 +3,11 @@ import * as React from 'react';
 import { WebviewRole, type WebviewMessage } from '@ext/shared/protocol';
 import { ChatIcon } from '@ext/webview/components/Icons';
 import { formatTime } from '@ext/webview/components/MessageView';
+import {
+  LiveTurnItemKind,
+  type LiveTurnItem,
+  type QueuedMessage,
+} from '@ext/webview/state';
 
 /** How many of the conversation's user messages the hover panel lists. */
 export const CONVERSATION_SIDEBAR_LIMIT = 50;
@@ -65,6 +70,32 @@ export function buildConversationItems(
         time: message.createdAt ? formatTime(message.createdAt) : '',
       };
     });
+}
+
+/**
+ * The full set of "what I asked" for the sidebar while a turn is running: the
+ * committed transcript, plus the messages that only exist in the live turn —
+ * the steering echoes the host folded into the running turn (`liveTurnItems`)
+ * and the follow-ups still waiting in the queue. Without these the sidebar goes
+ * blind to everything typed mid-turn until the turn commits, which on a long
+ * turn means the user can't see their own queued messages at all.
+ */
+export function mergeSidebarMessages(
+  messages: WebviewMessage[],
+  liveTurnItems: LiveTurnItem[] = [],
+  queuedMessages: QueuedMessage[] = []
+): WebviewMessage[] {
+  const live: WebviewMessage[] = liveTurnItems.flatMap((item) =>
+    item.kind === LiveTurnItemKind.Message && item.role === WebviewRole.User
+      ? [{ id: item.id, role: WebviewRole.User, content: item.content }]
+      : []
+  );
+  const queued: WebviewMessage[] = queuedMessages.map((message) => ({
+    id: message.id,
+    role: WebviewRole.User,
+    content: message.content,
+  }));
+  return [...messages, ...live, ...queued];
 }
 
 interface ConversationSidebarProps {

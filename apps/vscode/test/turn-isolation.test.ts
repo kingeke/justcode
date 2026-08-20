@@ -56,6 +56,7 @@ interface BridgeInternals {
   models: unknown[];
   postTurn(turn: TestTurn, message: HostToWebview): void;
   postTurnPrompt(turn: TestTurn, prompt: HostToWebview): void;
+  drainSteering(turn: TestTurn): string | null;
   replayLiveTurn(turn: TestTurn): void;
   resetSession(): Promise<void>;
   openSession(sessionId: string): Promise<void>;
@@ -264,6 +265,42 @@ describe('cross-session turn isolation', () => {
       { id: 'q1', content: 'also do this' },
     ]);
     expect(turnB.steeringQueue).toEqual([]);
+  });
+
+  it('records a consumed steering message so reopening the session replays it', () => {
+    const posted: HostToWebview[] = [];
+    const bridge = makeBridge(posted);
+    const turn = makeTurn('session-a');
+    bridge.activeTurns.set(turn.sessionId, turn);
+    bridge.sessionId = 'session-a';
+    turn.steeringQueue = [{ id: 'q1', content: 'also do this' }];
+
+    const drained = bridge.drainSteering(turn);
+
+    expect(drained).toBe('also do this');
+    expect(turn.steeringQueue).toEqual([]);
+    // Posted live *and* recorded, so a replay after navigating away and back
+    // still shows the steering message.
+    expect(
+      posted.filter((m) => m.type === HostMessageType.SteeringConsumed)
+    ).toHaveLength(1);
+    expect(turn.liveTurnEvents).toEqual([
+      {
+        type: HostMessageType.SteeringConsumed,
+        ids: ['q1'],
+        content: 'also do this',
+      },
+    ]);
+
+    posted.length = 0;
+    bridge.replayLiveTurn(turn);
+    expect(posted).toEqual([
+      {
+        type: HostMessageType.SteeringConsumed,
+        ids: ['q1'],
+        content: 'also do this',
+      },
+    ]);
   });
 
   it('never reuses a session with a running turn for a new chat', async () => {

@@ -5,9 +5,15 @@ import {
   buildConversationItems,
   CONVERSATION_PREVIEW_MAX_CHARS,
   CONVERSATION_SIDEBAR_LIMIT,
+  mergeSidebarMessages,
   toPlainText,
 } from '@ext/webview/components/ConversationSidebar';
-import { LocalActionType, initialState, reducer } from '@ext/webview/state';
+import {
+  LiveTurnItemKind,
+  LocalActionType,
+  initialState,
+  reducer,
+} from '@ext/webview/state';
 
 function message(
   id: string,
@@ -100,6 +106,49 @@ describe('buildConversationItems', () => {
       }),
     ]);
     expect(item?.time).not.toBe('');
+  });
+});
+
+describe('mergeSidebarMessages', () => {
+  it('includes steering echoes and still-queued follow-ups', () => {
+    const merged = mergeSidebarMessages(
+      [
+        message('m1', WebviewRole.User, 'first ask'),
+        message('m2', WebviewRole.Assistant, 'working on it'),
+      ],
+      [
+        {
+          kind: LiveTurnItemKind.Thinking,
+          id: 'live-1',
+          content: 'hmm',
+          durationMs: 10,
+        },
+        {
+          kind: LiveTurnItemKind.Message,
+          id: 'live-2',
+          role: WebviewRole.User,
+          content: 'actually do this instead',
+        },
+        {
+          kind: LiveTurnItemKind.Message,
+          id: 'live-3',
+          content: 'assistant prose',
+        },
+      ],
+      [{ id: 'q1', content: 'and this after', images: [] }]
+    );
+
+    const items = buildConversationItems(merged);
+    expect(items.map((item) => item.preview)).toEqual([
+      'and this after',
+      'actually do this instead',
+      'first ask',
+    ]);
+  });
+
+  it('returns the committed messages unchanged when nothing is in flight', () => {
+    const messages = [message('m1', WebviewRole.User, 'only ask')];
+    expect(mergeSidebarMessages(messages)).toEqual(messages);
   });
 });
 

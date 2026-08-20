@@ -179,6 +179,10 @@ export const commands: Item[] = [
     description: 'Save the latest plan to a file to edit before implementing.',
   },
   {
+    name: '/copy-plan',
+    description: 'Copy the latest plan to the clipboard as Markdown.',
+  },
+  {
     name: '/collapse-responses',
     description: 'Toggle hiding model responses to scan just your messages.',
   },

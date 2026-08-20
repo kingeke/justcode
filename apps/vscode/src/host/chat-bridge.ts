@@ -114,6 +114,7 @@ import {
   type UserInputRequestMessage,
   type ToolActivityMessage,
   type SubAgentActivityMessage,
+  type SteeringConsumedMessage,
   type WebviewSubAgentRunSnapshot,
   WebviewSubAgentPhase,
   WebviewSubAgentStatus,
@@ -174,6 +175,7 @@ interface ActiveTurn {
     | ThinkingMessage
     | ToolActivityMessage
     | SubAgentActivityMessage
+    | SteeringConsumedMessage
   >;
   /**
    * Live sub agent runs, keyed by run id. Each value is the run object the
@@ -1235,11 +1237,15 @@ export class ChatBridge {
       .join('\n\n');
     turn.steeringQueue = [];
     if (!content.trim()) return null;
-    this.postTurn(turn, {
+    const consumed: HostToWebview = {
       type: HostMessageType.SteeringConsumed,
       ids,
       content,
-    });
+    };
+    // Record it with the turn's other live events so reopening the session
+    // mid-turn replays the steering message instead of dropping it.
+    turn.liveTurnEvents.push(consumed);
+    this.postTurn(turn, consumed);
     return content;
   }
 

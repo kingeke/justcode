@@ -762,24 +762,61 @@ export class ChatSessionService {
       }
     }
 
-    // Persist the user's message before the (possibly long) provider call, so it
-    // survives navigating back to the session list mid-turn. Without this the
-    // message lives only in memory until `persistTurn` runs at the end of the
-    // turn, so reopening the session shows it as empty and the message appears
-    // lost. Best-effort — the turn's final save is authoritative and overwrites
-    // this snapshot with the full exchange.
-    try {
-      await this.repository.save({
-        ...input.conversation,
-        ...(generatedTitle && !input.conversation.title
-          ? { title: generatedTitle }
-          : {}),
-        messages: working,
-        updatedAt: new Date().toISOString(),
-      });
-    } catch {
-      // Non-fatal: the turn's final persist will write the message.
-    }
+    // Writes the turn's progress to disk as it happens — the user message before
+    // the (possibly long) provider call, then every assistant message, tool
+    // result and steering message as they're produced. Without this the turn
+    // lives only in memory until `persistTurn` runs at the end, so a crash, a
+    // dropped connection or closing the window mid-turn discards everything the
+    // turn produced (and reopening the session mid-turn shows it as stale).
+    // Saves are serialized and coalesced: a save requested while one is in
+    // flight collapses into a single follow-up write of the latest snapshot, so
+    // a long turn can't queue up one full-document rewrite per message.
+    // Best-effort throughout — `persistTurn` is authoritative.
+    let progressSave: Promise<void> | null = null;
+    let progressQueued = false;
+    const flushProgress = (): Promise<void> => {
+      if (progressSave) {
+        progressQueued = true;
+        return progressSave;
+      }
+      progressSave = (async () => {
+        try {
+          do {
+            progressQueued = false;
+            await this.repository.save(
+              this.buildTurnConversation(
+                input,
+                working,
+                generatedTitle,
+                activeToolNames,
+                gatewayCalledThisTurn,
+                subAgentRuns
+              )
+            );
+          } while (progressQueued);
+        } catch {
+          // Non-fatal: a later progress save (or the final persist) writes it.
+        } finally {
+          progressSave = null;
+        }
+      })();
+      return progressSave;
+    };
+    // Fire-and-forget variant for use inside the agent loop, so persistence
+    // never adds latency to the streamed turn.
+    const saveProgress = (): void => {
+      void flushProgress();
+    };
+    // Waits for any in-flight progress write to settle, so the turn's final
+    // (authoritative) save can't be overwritten by a stale snapshot landing
+    // after it.
+    const drainProgress = async (): Promise<void> => {
+      while (progressSave) {
+        await progressSave;
+      }
+    };
+
+    await flushProgress();
 
     // Streamed output of the *current* model response, accumulated here (not
     // just forwarded to the host) so an abort mid-stream can still persist the
@@ -803,6 +840,9 @@ export class ChatSessionService {
         const steering = input.drainSteering?.();
         if (steering && steering.trim()) {
           working.push(createMessage(MessageRole.User, steering.trim()));
+          // Commit the steering message right away: it's user input, so losing
+          // it to a mid-turn crash is the most visible kind of data loss.
+          saveProgress();
         }
 
         // Cap how much prior history travels to the model to save tokens. We trim
@@ -942,6 +982,9 @@ export class ChatSessionService {
             }
           )
         );
+        // The step's answer (and thinking) is now on `working` — write it out
+        // before the tool calls run, so a crash during them keeps it.
+        saveProgress();
         // This step's output is now committed to `working`; clear the buffers
         // so an abort during the tool calls below doesn't persist it twice.
         stepContent = '';
@@ -1009,6 +1052,9 @@ export class ChatSessionService {
               }
             )
           );
+          // Persist each completed tool round as it lands, so a long
+          // multi-tool turn never has more than the in-flight call at risk.
+          saveProgress();
 
           if (call.name === ToolName.LazyLoadTools) {
             gatewayCalledThisTurn = true;
@@ -1050,6 +1096,7 @@ export class ChatSessionService {
           thinkingStartedAt: stepThinkingStartedAt,
         });
         try {
+          await drainProgress();
           const interrupted = await this.persistTurn(
             input,
             working,
@@ -1066,6 +1113,7 @@ export class ChatSessionService {
       throw error;
     }
 
+    await drainProgress();
     const updatedConversation = await this.persistTurn(
       input,
       working,
@@ -1095,7 +1143,50 @@ export class ChatSessionService {
     gatewayCalledThisTurn: boolean,
     subAgentRuns: SubAgentRun[] = []
   ): Promise<Conversation> {
-    const updatedConversation: Conversation = {
+    const updatedConversation = this.buildTurnConversation(
+      input,
+      working,
+      generatedTitle,
+      activeToolNames,
+      gatewayCalledThisTurn,
+      subAgentRuns
+    );
+
+    // A title may have been persisted out of band since this turn started —
+    // typically background title generation (from this or a previous message)
+    // finishing mid-turn. The in-memory `input.conversation` wouldn't carry it,
+    // so saving as-is would wipe the freshly written title. Carry it forward.
+    if (!updatedConversation.title) {
+      try {
+        const persisted = await this.repository.load(
+          updatedConversation.sessionId
+        );
+        if (persisted.title) {
+          updatedConversation.title = persisted.title;
+        }
+      } catch {
+        // Couldn't read the persisted title — save without it rather than fail.
+      }
+    }
+
+    await this.repository.save(updatedConversation);
+    return updatedConversation;
+  }
+
+  /**
+   * Builds the conversation document for a turn's current working messages.
+   * Shared by the mid-turn progress saves and the final {@link persistTurn}, so
+   * an incremental snapshot is shaped exactly like the committed turn.
+   */
+  private buildTurnConversation(
+    input: SubmitMessageInput,
+    working: ChatMessage[],
+    generatedTitle: string | undefined,
+    activeToolNames: Set<string>,
+    gatewayCalledThisTurn: boolean,
+    subAgentRuns: SubAgentRun[] = []
+  ): Conversation {
+    return {
       ...input.conversation,
       ...(generatedTitle && !input.conversation.title
         ? { title: generatedTitle }
@@ -1123,26 +1214,6 @@ export class ChatSessionService {
       // grow the field.
       ...(subAgentRuns.length > 0 ? { subAgentRuns } : {}),
     };
-
-    // A title may have been persisted out of band since this turn started —
-    // typically background title generation (from this or a previous message)
-    // finishing mid-turn. The in-memory `input.conversation` wouldn't carry it,
-    // so saving as-is would wipe the freshly written title. Carry it forward.
-    if (!updatedConversation.title) {
-      try {
-        const persisted = await this.repository.load(
-          updatedConversation.sessionId
-        );
-        if (persisted.title) {
-          updatedConversation.title = persisted.title;
-        }
-      } catch {
-        // Couldn't read the persisted title — save without it rather than fail.
-      }
-    }
-
-    await this.repository.save(updatedConversation);
-    return updatedConversation;
   }
 
   private async runToolCall(

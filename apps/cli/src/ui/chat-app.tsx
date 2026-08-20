@@ -1595,26 +1595,22 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     null
   );
 
-  // Copy text as soon as the user finishes highlighting it with the mouse
-  // (the "selection" event fires once on mouse-up). We keep the highlight
-  // visible — copying is a side effect, not a selection change.
-  useSelectionHandler((selection) => {
-    const selectedText = selection.getSelectedText();
-    if (!selectedText.trim()) return;
-
-    // Over SSH the platform clipboard CLI writes the *remote* machine's
-    // clipboard, so OSC52 — which the terminal relays to the local one — is
-    // the only path that reaches the user. Locally it's the opposite: some
-    // terminals (macOS Terminal.app among them) silently discard OSC52 while
-    // emitting it still "succeeds", so the native CLI is authoritative and
-    // OSC52 is only the fallback.
+  // Writes text to the clipboard and flashes the status-line confirmation.
+  // Shared by the mouse-selection copy and /copy-plan.
+  //
+  // Over SSH the platform clipboard CLI writes the *remote* machine's
+  // clipboard, so OSC52 — which the terminal relays to the local one — is
+  // the only path that reaches the user. Locally it's the opposite: some
+  // terminals (macOS Terminal.app among them) silently discard OSC52 while
+  // emitting it still "succeeds", so the native CLI is authoritative and
+  // OSC52 is only the fallback.
+  const copyTextToClipboard = (text: string): boolean => {
+    if (!text.trim()) return false;
     const overSsh = Boolean(process.env.SSH_TTY ?? process.env.SSH_CONNECTION);
     const copied = overSsh
-      ? renderer.copyToClipboardOSC52(selectedText) ||
-        copyToClipboard(selectedText)
-      : copyToClipboard(selectedText) ||
-        renderer.copyToClipboardOSC52(selectedText);
-    if (!copied) return;
+      ? renderer.copyToClipboardOSC52(text) || copyToClipboard(text)
+      : copyToClipboard(text) || renderer.copyToClipboardOSC52(text);
+    if (!copied) return false;
 
     setCopiedNotice(true);
     if (copiedNoticeTimerRef.current) {
@@ -1624,6 +1620,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       setCopiedNotice(false);
       copiedNoticeTimerRef.current = null;
     }, 1500);
+    return true;
+  };
+
+  // Copy text as soon as the user finishes highlighting it with the mouse
+  // (the "selection" event fires once on mouse-up). We keep the highlight
+  // visible — copying is a side effect, not a selection change.
+  useSelectionHandler((selection) => {
+    copyTextToClipboard(selection.getSelectedText());
   });
 
   useEffect(
@@ -2782,6 +2786,22 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
           .catch((caughtError: unknown) => {
             setError(getErrorMessage(caughtError));
           });
+        return;
+      }
+
+      // No "Copy" button in the CLI either: copy the latest plan's Markdown
+      // source as-is, so it can be pasted elsewhere unchanged.
+      case CommandName.CopyPlan: {
+        const plan = findLatestPlanContent();
+        if (!plan) {
+          setError('No plan yet — ask for a plan first');
+          return;
+        }
+        if (!copyTextToClipboard(plan)) {
+          setError('Could not reach the clipboard — copy the plan manually');
+          return;
+        }
+        setStatus('Copied the plan to the clipboard as Markdown');
         return;
       }
 
@@ -5382,7 +5402,8 @@ const TodoBlock = React.memo(function TodoBlock({
 /**
  * Renders a presented plan (a present_plan tool result) as a titled card with
  * the plan markdown and a hint to the hand-off commands. The CLI has no buttons,
- * so /implement (build it) and /edit-plan (revise first) stand in for them.
+ * so /implement (build it), /edit-plan (revise first) and /copy-plan (copy the
+ * Markdown as-is) stand in for them.
  */
 const PlanBlock = React.memo(function PlanBlock({
   content,
@@ -5403,7 +5424,8 @@ const PlanBlock = React.memo(function PlanBlock({
       </text>
       <MarkdownView content={content} />
       <text fg={MUTED}>
-        /implement to build it · /edit-plan to revise it first
+        /implement to build it · /edit-plan to revise it first · /copy-plan to
+        copy it
       </text>
     </box>
   );
