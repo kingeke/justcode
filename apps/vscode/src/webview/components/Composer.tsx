@@ -10,6 +10,11 @@ import {
   getActiveSymbolMention,
 } from '@core/application/prompt-attachment-service';
 import {
+  MAX_VIDEO_FRAME_COUNT,
+  MIN_VIDEO_FRAME_COUNT,
+  clampVideoFrameCount,
+} from '@core/application/video-frames';
+import {
   BUILT_IN_MODE_CATEGORY,
   CUSTOM_MODE_CATEGORY,
   modePlaceholder,
@@ -75,6 +80,8 @@ export interface ComposerProps {
   autoApprove: boolean;
   expandTools: boolean;
   maxReadLines: number;
+  /** Frames a single video read samples by default. */
+  videoFrameCount: number;
   /** Recent context window items sent to the model per request; 0 means "off" (send all). */
   maxHistoryMessages: number;
   /** The user's chosen reasoning effort per model, nested by provider id. */
@@ -128,6 +135,7 @@ export interface ComposerProps {
   onToggleAutoApprove: () => void;
   onToggleExpandTools: () => void;
   onSetReadLimit: (lines: number) => void;
+  onSetVideoFrames: (frames: number) => void;
   /** Pass 0 to turn trimming off (send the whole conversation). */
   onSetHistoryLimit: (count: number) => void;
   /** When true, thinking blocks start collapsed. */
@@ -278,6 +286,8 @@ export function Composer(props: ComposerProps): React.JSX.Element {
   const modesRef = React.useRef<HTMLDivElement>(null);
   const [readLimitDraft, setReadLimitDraft] = React.useState('');
   const [editingReadLimit, setEditingReadLimit] = React.useState(false);
+  const [videoFramesDraft, setVideoFramesDraft] = React.useState('');
+  const [editingVideoFrames, setEditingVideoFrames] = React.useState(false);
   const [historyLimitDraft, setHistoryLimitDraft] = React.useState('');
   const [editingHistoryLimit, setEditingHistoryLimit] = React.useState(false);
   const [autoCompactDraft, setAutoCompactDraft] = React.useState('');
@@ -851,6 +861,22 @@ export function Composer(props: ComposerProps): React.JSX.Element {
     if (event.key === 'Escape') setEditingReadLimit(false);
   };
 
+  const commitVideoFrames = (): void => {
+    const parsed = parseInt(videoFramesDraft, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      // Clamped host-side too; clamping here keeps the shown value honest.
+      props.onSetVideoFrames(clampVideoFrameCount(parsed));
+    }
+    setEditingVideoFrames(false);
+  };
+
+  const onVideoFramesKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement>
+  ): void => {
+    if (event.key === 'Enter') commitVideoFrames();
+    if (event.key === 'Escape') setEditingVideoFrames(false);
+  };
+
   const commitHistoryLimit = (): void => {
     // Blank or 0 turns trimming off (send the whole conversation); any positive
     // value caps how many recent messages are forwarded.
@@ -896,6 +922,7 @@ export function Composer(props: ComposerProps): React.JSX.Element {
 
   commitPendingSettingsEditsRef.current = (): void => {
     if (editingReadLimit) commitReadLimit();
+    if (editingVideoFrames) commitVideoFrames();
     if (editingHistoryLimit) commitHistoryLimit();
     if (editingAutoCompact) commitAutoCompact();
   };
@@ -1654,6 +1681,50 @@ export function Composer(props: ComposerProps): React.JSX.Element {
                     <SettingInfoText
                       id={ComposerSettingId.MaxFileRead}
                       open={openSettingInfo === ComposerSettingId.MaxFileRead}
+                    />
+                    <div className="settings-popup-row">
+                      <span className="settings-popup-label">
+                        Video frames
+                        <SettingInfoButton
+                          id={ComposerSettingId.VideoFrames}
+                          open={
+                            openSettingInfo === ComposerSettingId.VideoFrames
+                          }
+                          onToggle={toggleSettingInfo}
+                        />
+                        <span className="settings-popup-hint">
+                          max {MAX_VIDEO_FRAME_COUNT}
+                        </span>
+                      </span>
+                      {editingVideoFrames ? (
+                        <input
+                          className="settings-popup-input"
+                          type="number"
+                          min={MIN_VIDEO_FRAME_COUNT}
+                          max={MAX_VIDEO_FRAME_COUNT}
+                          value={videoFramesDraft}
+                          // eslint-disable-next-line jsx-a11y/no-autofocus
+                          autoFocus
+                          onChange={(e) => setVideoFramesDraft(e.target.value)}
+                          onBlur={commitVideoFrames}
+                          onKeyDown={onVideoFramesKeyDown}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="settings-popup-value-btn"
+                          onClick={() => {
+                            setVideoFramesDraft(String(props.videoFrameCount));
+                            setEditingVideoFrames(true);
+                          }}
+                        >
+                          {props.videoFrameCount} frames
+                        </button>
+                      )}
+                    </div>
+                    <SettingInfoText
+                      id={ComposerSettingId.VideoFrames}
+                      open={openSettingInfo === ComposerSettingId.VideoFrames}
                     />
                     <div className="settings-popup-row">
                       <span className="settings-popup-label">

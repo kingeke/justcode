@@ -112,6 +112,11 @@ import { ensureMcpConfigFile } from '@runtime/mcp/mcp-config';
 import { clearModelsCache } from '@providers/http/models-cache';
 import { renderDiff } from '@cli/ui/render-diff.js';
 import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
+import {
+  DEFAULT_VIDEO_FRAME_COUNT,
+  MAX_VIDEO_FRAME_COUNT,
+  clampVideoFrameCount,
+} from '@core/application/video-frames';
 import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
 import { DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT } from '@core/application/compact-prompt';
 import {
@@ -313,6 +318,8 @@ interface ChatAppProps {
   onSaveSubAgentPrompt?: (id: string, prompt: string) => SubAgentEntry[] | null;
   initialMaxReadLines?: number;
   onMaxReadLinesChange?: (lines: number) => void;
+  initialVideoFrameCount?: number;
+  onVideoFrameCountChange?: (frames: number) => void;
   initialMaxHistoryMessages?: number;
   onMaxHistoryMessagesChange?: (count: number) => void;
   /** Auto-compact threshold percent at startup (0 = off). */
@@ -541,6 +548,7 @@ function commandLineContent(
     lazyToolLoading: boolean;
     expandTools: boolean;
     maxReadLines: number;
+    videoFrameCount: number;
     maxHistoryMessages: number;
     autoCompactThresholdPercent: number;
     reasoning: {
@@ -602,6 +610,11 @@ function commandLineContent(
     chunks.push(
       tc('  '),
       tc(`[${state.maxReadLines} lines]`, { fg: UiColor.Green })
+    );
+  } else if (cmd.name === CommandName.VideoFrames) {
+    chunks.push(
+      tc('  '),
+      tc(`[${state.videoFrameCount} frames]`, { fg: UiColor.Green })
     );
   } else if (cmd.name === CommandName.ContextWindow) {
     chunks.push(
@@ -1093,6 +1106,14 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   );
   const [maxReadLines, setMaxReadLines] = useState(
     props.initialMaxReadLines ?? DEFAULT_MAX_READ_LINES
+  );
+  const videoFrameCountRef = useRef(
+    clampVideoFrameCount(
+      props.initialVideoFrameCount ?? DEFAULT_VIDEO_FRAME_COUNT
+    )
+  );
+  const [videoFrameCount, setVideoFrameCount] = useState(
+    videoFrameCountRef.current
   );
   const maxHistoryMessagesRef = useRef(
     props.initialMaxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES
@@ -2496,6 +2517,34 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         setMaxReadLines(lines);
         props.onMaxReadLinesChange?.(lines);
         setStatus(`Read limit set to ${lines} lines`);
+        return;
+      }
+
+      case CommandName.VideoFrames: {
+        const trimmed = (arg ?? '').trim();
+        const current = videoFrameCountRef.current;
+        if (!trimmed) {
+          setStatus(
+            `Video frames is ${current} (use /video-frames <count> to change, max ${MAX_VIDEO_FRAME_COUNT})`
+          );
+          return;
+        }
+        const requested = Number.parseInt(trimmed, 10);
+        if (!Number.isFinite(requested) || requested <= 0) {
+          setError(
+            `Invalid frame count '${trimmed}'. Provide a positive number of frames.`
+          );
+          return;
+        }
+        const frames = clampVideoFrameCount(requested);
+        videoFrameCountRef.current = frames;
+        setVideoFrameCount(frames);
+        props.onVideoFrameCountChange?.(frames);
+        setStatus(
+          frames === requested
+            ? `Video frames set to ${frames}`
+            : `Video frames set to ${frames} (capped at ${MAX_VIDEO_FRAME_COUNT})`
+        );
         return;
       }
 
@@ -4562,6 +4611,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                       lazyToolLoading,
                       expandTools,
                       maxReadLines,
+                      videoFrameCount,
                       maxHistoryMessages,
                       autoCompactThresholdPercent: autoCompactThreshold,
                       reasoning: {

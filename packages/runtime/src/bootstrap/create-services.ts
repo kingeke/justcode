@@ -38,6 +38,11 @@ import {
   DEFAULT_MAX_READ_LINES,
 } from '@runtime/tools/read-file-tool';
 import {
+  ReadVideoTool,
+  DEFAULT_VIDEO_FRAME_COUNT,
+  clampVideoFrameCount,
+} from '@runtime/tools/read-video-tool';
+import {
   LazyLoadToolsTool,
   type LazyLoadableToolDefinition,
 } from '@runtime/tools/lazy-load-tools-tool';
@@ -70,6 +75,8 @@ export interface RuntimeServices {
   createProvider: (id: ProviderId) => ProviderClient;
   /** Update, at runtime, how many lines a single file read returns. */
   setMaxReadLines: (lines: number) => void;
+  /** Update, at runtime, how many frames a single video read samples. */
+  setVideoFrameCount: (frames: number) => void;
   /** Update, at runtime, how many recent messages are sent to the model. */
   setMaxHistoryMessages: (count: number) => void;
   /** Whether local providers refetch their model list on every load. */
@@ -184,6 +191,8 @@ export interface CreateRuntimeOptions {
   allowDefaultProvider?: boolean;
   /** Initial per-read line cap; falls back to the default when unset. */
   maxReadLines?: number;
+  /** Initial frame count for a single video read; default when unset. */
+  videoFrameCount?: number;
   /** Initial cap on recent messages sent to the model; default when unset. */
   maxHistoryMessages?: number;
   /**
@@ -242,6 +251,13 @@ export async function createRuntimeServices(
   const readSettings = {
     maxReadLines: options.maxReadLines ?? DEFAULT_MAX_READ_LINES,
   };
+  // Mutable so a runtime change (slash command / settings) reaches the video
+  // tool, which reads the default per call through the getter below.
+  const videoSettings = {
+    frameCount: clampVideoFrameCount(
+      options.videoFrameCount ?? DEFAULT_VIDEO_FRAME_COUNT
+    ),
+  };
   const historySettings = {
     maxHistoryMessages:
       options.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES,
@@ -281,6 +297,7 @@ export async function createRuntimeServices(
     new EditFileTool(workspaceFiles),
     new ApplyPatchTool(workspaceFiles),
     new ReadFileTool(workspaceFiles, () => readSettings.maxReadLines),
+    new ReadVideoTool(() => videoSettings.frameCount),
     new GrepTool(workspaceFiles),
     new GlobTool(workspaceFiles),
     new BashTool(),
@@ -475,6 +492,9 @@ export async function createRuntimeServices(
     createProvider: (id: ProviderId) => registry.create(id),
     setMaxReadLines: (lines: number) => {
       readSettings.maxReadLines = lines;
+    },
+    setVideoFrameCount: (frames: number) => {
+      videoSettings.frameCount = clampVideoFrameCount(frames);
     },
     setMaxHistoryMessages: (count: number) => {
       historySettings.maxHistoryMessages = count;

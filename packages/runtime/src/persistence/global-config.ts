@@ -97,6 +97,8 @@ export interface GlobalConfig {
     maxReadLines?: number;
     /** Max recent messages forwarded to the model per request (older trimmed). */
     maxHistoryMessages?: number;
+    /** Frames sampled by a single `read_video` call (the model may override it). */
+    videoFrameCount?: number;
   };
   /**
    * One-time data migrations already applied, keyed by id, so they never re-run.

@@ -1052,6 +1052,21 @@ export class ChatSessionService {
               }
             )
           );
+          // A tool may return images (e.g. `read_video`'s sampled frames).
+          // Tool messages carry text only on every provider wire, so hand the
+          // images to the model as a follow-up user message — the same shape
+          // used for pasted images, which all wires already render.
+          if (toolResult.images && toolResult.images.length > 0) {
+            working.push(
+              createMessage(
+                MessageRole.User,
+                `Images returned by ${call.name} (${toolResult.images.length}).`,
+                new Date(),
+                undefined,
+                { images: toolResult.images }
+              )
+            );
+          }
           // Persist each completed tool round as it lands, so a long
           // multi-tool turn never has more than the in-flight call at risk.
           saveProgress();

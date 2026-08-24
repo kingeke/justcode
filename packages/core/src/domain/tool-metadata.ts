@@ -30,6 +30,12 @@ export const TOOL_DISPLAY: ToolDisplay[] = [
     summary: 'Read files',
   },
   {
+    name: ToolName.ReadVideo,
+    label: 'read_video',
+    category: BUILT_IN_TOOL_CATEGORY,
+    summary: 'Read a video as sampled frames',
+  },
+  {
     name: ToolName.WriteFile,
     label: 'write',
     category: BUILT_IN_TOOL_CATEGORY,

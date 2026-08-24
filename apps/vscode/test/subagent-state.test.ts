@@ -122,6 +122,7 @@ describe('sub agent activity state', () => {
       autoApprove: false,
       expandTools: false,
       maxReadLines: 200,
+      videoFrameCount: 8,
       maxHistoryMessages: 50,
       autoCompactThresholdPercent: 80,
       thinkingCollapsed: false,

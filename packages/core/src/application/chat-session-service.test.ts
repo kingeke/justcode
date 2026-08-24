@@ -7,6 +7,8 @@ import {
 import { ToolRegistry } from '@core/application/tool-registry';
 import { createConversation } from '@core/domain/conversation';
 import { createMessage, MessageRole } from '@core/domain/message';
+import { ImageMediaType } from '@core/domain/image-media-type';
+import { ToolName } from '@core/domain/tool-name';
 import {
   ReasoningEffort,
   ToolsUnsupportedError,
@@ -865,6 +867,75 @@ describe('ChatSessionService', () => {
       cachedTokens: 0,
       cost: 0.05,
     });
+  });
+
+  it("forwards a tool's images as a follow-up user message", async () => {
+    const repository = new InMemoryConversationRepository();
+    // A tool that returns images (like `read_video`'s sampled frames): tool
+    // messages are text-only on the wires, so the loop must re-send them.
+    const framesTool: Tool = {
+      requiresApproval: false,
+      definition: {
+        name: ToolName.ReadVideo,
+        description: 'reads a video',
+        parameters: { type: 'object' },
+      },
+      describe: () => ({ title: 'read video' }),
+      execute: async () => ({
+        content: 'Sampled 2 frame(s)',
+        images: [
+          { mediaType: ImageMediaType.Jpeg, data: 'aaa' },
+          { mediaType: ImageMediaType.Jpeg, data: 'bbb' },
+        ],
+      }),
+    };
+    let turn = 0;
+    const provider: ProviderClient = {
+      providerId: ProviderId.Openai,
+      async sendChat(): Promise<ChatResult> {
+        turn += 1;
+        if (turn === 1) {
+          return {
+            content: '',
+            toolCalls: [
+              { id: 'call-1', name: ToolName.ReadVideo, arguments: '{}' },
+            ],
+          };
+        }
+        return { content: 'I can see the frames.' };
+      },
+      async listModels() {
+        return [
+          { id: 'gpt', displayName: 'gpt', providerId: ProviderId.Openai },
+        ];
+      },
+      getDefaultModel() {
+        return 'gpt';
+      },
+    };
+    const service = new ChatSessionService(repository, provider, {
+      toolRegistry: new ToolRegistry([framesTool]),
+    });
+
+    const started = await service.startSession({ sessionId: 'session-1' });
+    const result = await service.submitMessage({
+      conversation: { ...started.conversation, title: 'Session Title' },
+      model: started.activeModel,
+      content: 'Watch this clip',
+      requestApproval: async () => true,
+    });
+
+    const messages = result.conversation.messages;
+    const toolIndex = messages.findIndex(
+      (message) => message.role === MessageRole.Tool
+    );
+    const follow = messages[toolIndex + 1];
+    expect(follow?.role).toBe(MessageRole.User);
+    expect(follow?.images).toEqual([
+      { mediaType: ImageMediaType.Jpeg, data: 'aaa' },
+      { mediaType: ImageMediaType.Jpeg, data: 'bbb' },
+    ]);
+    expect(follow?.content).toContain(ToolName.ReadVideo);
   });
 
   it('sends only the most recent messages when a history limit is set', async () => {

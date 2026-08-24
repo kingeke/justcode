@@ -25,6 +25,10 @@ import {
   type WebviewSkillCommand,
 } from '@ext/shared/protocol';
 import type { ResolvedFile } from '@ext/webview/changes';
+import {
+  DEFAULT_VIDEO_FRAME_COUNT,
+  clampVideoFrameCount,
+} from '@core/application/video-frames';
 
 /** A tool invocation as the transcript tracks it across start/end events. */
 export interface ToolActivity {
@@ -182,6 +186,8 @@ export interface ChatState {
   autoApprove: boolean;
   expandTools: boolean;
   maxReadLines: number;
+  /** Frames a single video read samples by default (the model may ask for more). */
+  videoFrameCount: number;
   /** Recent context window items sent to the model per request; 0 means "off" (send all). */
   maxHistoryMessages: number;
   /** Auto-compact when ctx usage reaches this percent of the window; 0 = off. */
@@ -291,6 +297,7 @@ export const initialState: ChatState = {
   autoApprove: false,
   expandTools: false,
   maxReadLines: 200,
+  videoFrameCount: DEFAULT_VIDEO_FRAME_COUNT,
   maxHistoryMessages: 50,
   autoCompactThresholdPercent: 80,
   compacting: false,
@@ -330,6 +337,7 @@ export enum LocalActionType {
   ToggleLazyToolLoading = 'toggleLazyToolLoading',
   SetDisabledTools = 'setDisabledTools',
   SetReadLimit = 'setReadLimit',
+  SetVideoFrames = 'setVideoFrames',
   SetHistoryLimit = 'setHistoryLimit',
   SetAutoCompactThreshold = 'setAutoCompactThreshold',
   SetView = 'setView',
@@ -376,6 +384,7 @@ export type LocalAction =
   | { type: LocalActionType.ToggleLazyToolLoading }
   | { type: LocalActionType.SetDisabledTools; names: string[] }
   | { type: LocalActionType.SetReadLimit; lines: number }
+  | { type: LocalActionType.SetVideoFrames; frames: number }
   | { type: LocalActionType.SetHistoryLimit; count: number }
   | { type: LocalActionType.SetAutoCompactThreshold; percent: number }
   | { type: LocalActionType.SetView; view: ChatView }
@@ -480,6 +489,7 @@ export function reducer(state: ChatState, action: Action): ChatState {
         autoApprove: action.autoApprove,
         expandTools: action.expandTools,
         maxReadLines: action.maxReadLines,
+        videoFrameCount: action.videoFrameCount,
         maxHistoryMessages: action.maxHistoryMessages,
         autoCompactThresholdPercent: action.autoCompactThresholdPercent,
         compacting: false,
@@ -944,6 +954,12 @@ export function reducer(state: ChatState, action: Action): ChatState {
 
     case LocalActionType.SetReadLimit:
       return { ...state, maxReadLines: action.lines };
+
+    case LocalActionType.SetVideoFrames:
+      return {
+        ...state,
+        videoFrameCount: clampVideoFrameCount(action.frames),
+      };
 
     case LocalActionType.SetHistoryLimit:
       return { ...state, maxHistoryMessages: action.count };

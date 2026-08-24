@@ -7,6 +7,7 @@ export enum ToolName {
   LazyLoadTools = 'lazy_load_tools',
   ViewHistory = 'view_history',
   ReadFile = 'read_file',
+  ReadVideo = 'read_video',
   WriteFile = 'write_file',
   EditFile = 'edit_file',
   ApplyPatch = 'apply_patch',

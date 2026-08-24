@@ -13,6 +13,7 @@ import { cacheDirectory } from '@core/application/cache-dir';
 import type { ProviderId } from '@core/ports/provider-catalog';
 import { createRuntimeServices } from '@runtime/bootstrap/create-services';
 import { DEFAULT_MAX_READ_LINES } from '@runtime/tools/read-file-tool';
+import { DEFAULT_VIDEO_FRAME_COUNT } from '@runtime/tools/read-video-tool';
 import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
 import { DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT } from '@core/application/compact-prompt';
 import { loadAppConfig, parseProviderId } from '@runtime/config/app-config';
@@ -529,6 +530,9 @@ async function runChat(options: SharedOptions): Promise<void> {
     ...(savedConfig.cache?.maxReadLines
       ? { maxReadLines: savedConfig.cache.maxReadLines }
       : {}),
+    ...(savedConfig.cache?.videoFrameCount
+      ? { videoFrameCount: savedConfig.cache.videoFrameCount }
+      : {}),
     // 0 is a valid value ("off"), so probe for presence rather than truthiness.
     ...(savedConfig.cache?.maxHistoryMessages !== undefined
       ? { maxHistoryMessages: savedConfig.cache.maxHistoryMessages }
@@ -774,6 +778,8 @@ async function runChat(options: SharedOptions): Promise<void> {
       initialExpandTools: savedConfig.expandTools ?? true,
       initialMaxReadLines:
         savedConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES,
+      initialVideoFrameCount:
+        savedConfig.cache?.videoFrameCount ?? DEFAULT_VIDEO_FRAME_COUNT,
       initialMaxHistoryMessages:
         savedConfig.cache?.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES,
       initialAutoCompactThresholdPercent:
@@ -835,6 +841,12 @@ async function runChat(options: SharedOptions): Promise<void> {
         runtime.setMaxReadLines(lines);
         persistConfig({
           cache: { ...currentConfig.cache, maxReadLines: lines },
+        });
+      },
+      onVideoFrameCountChange: (frames: number) => {
+        runtime.setVideoFrameCount(frames);
+        persistConfig({
+          cache: { ...currentConfig.cache, videoFrameCount: frames },
         });
       },
       onMaxHistoryMessagesChange: (count: number) => {

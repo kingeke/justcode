@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { Composer, type ComposerProps } from '@ext/webview/components/Composer';
 import { WebviewModeIcon } from '@ext/shared/protocol';
+import { DEFAULT_VIDEO_FRAME_COUNT } from '@core/application/video-frames';
 
 function baseProps(overrides: Partial<ComposerProps> = {}): ComposerProps {
   return {
@@ -17,6 +18,7 @@ function baseProps(overrides: Partial<ComposerProps> = {}): ComposerProps {
     autoApprove: false,
     expandTools: false,
     maxReadLines: 200,
+    videoFrameCount: DEFAULT_VIDEO_FRAME_COUNT,
     maxHistoryMessages: 0,
     reasoningEffortByModel: {},
     onSetReasoningEffort: () => {},
@@ -31,6 +33,7 @@ function baseProps(overrides: Partial<ComposerProps> = {}): ComposerProps {
     onToggleAutoApprove: () => {},
     onToggleExpandTools: () => {},
     onSetReadLimit: () => {},
+    onSetVideoFrames: () => {},
     onSetHistoryLimit: () => {},
     thinkingCollapsed: false,
     onToggleThinkingCollapsed: () => {},

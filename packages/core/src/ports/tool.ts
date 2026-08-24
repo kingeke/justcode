@@ -8,6 +8,7 @@ import type {
   SubAgentActivityEvent,
   SubAgentRun,
 } from '@core/domain/sub-agent';
+import type { MessageImage } from '@core/domain/message';
 import type { TokenUsage } from '@core/ports/chat-model';
 
 /** A function definition advertised to the model (OpenAI function-calling shape). */
@@ -29,6 +30,12 @@ export interface ToolResult {
    * metrics reflect work done inside tools, not just the main model calls.
    */
   usage?: TokenUsage;
+  /**
+   * Images the tool produced (e.g. frames sampled from a video). Tool messages
+   * are text-only on every provider wire, so the agentic loop forwards these as
+   * a follow-up `user` message right after the tool result.
+   */
+  images?: MessageImage[];
 }
 
 /** A question a tool wants to put to the user, surfaced by the UI. */

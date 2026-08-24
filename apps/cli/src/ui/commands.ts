@@ -23,6 +23,7 @@ export enum CommandName {
   CollapseResponses = 'collapse-responses',
   ConfigureMcpServers = 'configure-mcp-servers',
   ReadLimit = 'read-limit',
+  VideoFrames = 'video-frames',
   ContextWindow = 'context-window',
   ContextUsage = 'context-usage',
   Usage = 'usage',
@@ -148,6 +149,11 @@ export const COMMANDS: Command[] = [
     name: CommandName.ReadLimit,
     description:
       'Set how many lines of a file the model reads at once, e.g. /read-limit 500',
+  },
+  {
+    name: CommandName.VideoFrames,
+    description:
+      'Set how many frames a video read samples by default, e.g. /video-frames 12',
   },
   {
     name: CommandName.ContextWindow,

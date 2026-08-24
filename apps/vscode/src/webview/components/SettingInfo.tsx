@@ -9,6 +9,7 @@ import { InfoIcon } from '@ext/webview/components/Icons';
  */
 export enum ComposerSettingId {
   MaxFileRead = 'maxFileRead',
+  VideoFrames = 'videoFrames',
   MaxContextWindow = 'maxContextWindow',
   AutoCompactAt = 'autoCompactAt',
   LazyToolLoading = 'lazyToolLoading',
@@ -23,6 +24,8 @@ export enum ComposerSettingId {
 export const COMPOSER_SETTING_INFO: Record<ComposerSettingId, string> = {
   [ComposerSettingId.MaxFileRead]:
     'Maximum number of lines a single file read returns. Longer files are paged in chunks so large files never flood the context window.',
+  [ComposerSettingId.VideoFrames]:
+    'How many frames a single video read samples by default. Each frame is sent to the model as an image, so more frames mean finer detail but a lot more context. The model can ask for a different number, or a narrower time window, on any individual read.',
   [ComposerSettingId.MaxContextWindow]:
     'Caps how many recent context-window items are sent to the model on each request. Older items are left out of the request but stay in the transcript. Set 0 to always send everything.',
   [ComposerSettingId.AutoCompactAt]:

@@ -41,6 +41,10 @@ import {
   setDebugLogDirectory,
 } from '@core/application/debug-log';
 import { DEFAULT_MAX_READ_LINES } from '@core/application/read-window';
+import {
+  DEFAULT_VIDEO_FRAME_COUNT,
+  clampVideoFrameCount,
+} from '@core/application/video-frames';
 import { DEFAULT_MAX_HISTORY_MESSAGES } from '@core/application/history-window';
 import {
   DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT,
@@ -268,6 +272,7 @@ export class ChatBridge {
   private autoApprove = false;
   private expandTools = false;
   private maxReadLines = DEFAULT_MAX_READ_LINES;
+  private videoFrameCount = DEFAULT_VIDEO_FRAME_COUNT;
   // 0 means "off" — the full conversation is sent without trimming.
   private maxHistoryMessages = DEFAULT_MAX_HISTORY_MESSAGES;
   // Auto-compact when the last request used at least this percent of the
@@ -524,6 +529,9 @@ export class ChatBridge {
         return;
       case WebviewMessageType.SetReadLimit:
         await this.setReadLimit(message.lines);
+        return;
+      case WebviewMessageType.SetVideoFrames:
+        await this.setVideoFrames(message.frames);
         return;
       case WebviewMessageType.SetHistoryLimit:
         await this.setHistoryLimit(message.count);
@@ -837,6 +845,9 @@ export class ChatBridge {
     this.expandTools = globalConfig.expandTools ?? false;
     this.maxReadLines =
       globalConfig.cache?.maxReadLines ?? DEFAULT_MAX_READ_LINES;
+    this.videoFrameCount = clampVideoFrameCount(
+      globalConfig.cache?.videoFrameCount ?? DEFAULT_VIDEO_FRAME_COUNT
+    );
     this.maxHistoryMessages =
       globalConfig.cache?.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES;
     this.autoCompactThresholdPercent =
@@ -896,6 +907,7 @@ export class ChatBridge {
         autoApprove: this.autoApprove,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
+        videoFrameCount: this.videoFrameCount,
         maxHistoryMessages: this.maxHistoryMessages,
         autoCompactThresholdPercent: this.autoCompactThresholdPercent,
         thinkingCollapsed: this.thinkingCollapsed,
@@ -918,6 +930,7 @@ export class ChatBridge {
 
     // Apply the current read and history limits to the runtime.
     services.setMaxReadLines(this.maxReadLines);
+    services.setVideoFrameCount(this.videoFrameCount);
     services.setMaxHistoryMessages(this.maxHistoryMessages);
     services.setLocalModelAutoRefresh(this.localModelAutoRefresh);
     services.setModelAutoRefresh(this.modelAutoRefresh);
@@ -961,6 +974,7 @@ export class ChatBridge {
         autoApprove: this.autoApprove,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
+        videoFrameCount: this.videoFrameCount,
         maxHistoryMessages: this.maxHistoryMessages,
         autoCompactThresholdPercent: this.autoCompactThresholdPercent,
         thinkingCollapsed: this.thinkingCollapsed,
@@ -1028,6 +1042,7 @@ export class ChatBridge {
         autoApprove: this.autoApprove,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
+        videoFrameCount: this.videoFrameCount,
         maxHistoryMessages: this.maxHistoryMessages,
         autoCompactThresholdPercent: this.autoCompactThresholdPercent,
         thinkingCollapsed: this.thinkingCollapsed,
@@ -1097,6 +1112,7 @@ export class ChatBridge {
         autoApprove: this.autoApprove,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
+        videoFrameCount: this.videoFrameCount,
         maxHistoryMessages: this.maxHistoryMessages,
         autoCompactThresholdPercent: this.autoCompactThresholdPercent,
         thinkingCollapsed: this.thinkingCollapsed,
@@ -2429,6 +2445,7 @@ export class ChatBridge {
           autoApprove: this.autoApprove,
           expandTools: this.expandTools,
           maxReadLines: this.maxReadLines,
+          videoFrameCount: this.videoFrameCount,
           maxHistoryMessages: this.maxHistoryMessages,
           autoCompactThresholdPercent: this.autoCompactThresholdPercent,
           thinkingCollapsed: this.thinkingCollapsed,
@@ -2803,6 +2820,23 @@ export class ChatBridge {
     await writeGlobalConfig(configDir, {
       ...config,
       cache: { ...config.cache, maxReadLines: lines },
+    });
+  }
+
+  // Frames cost context, so the user's number is clamped to the supported range
+  // before it reaches the tool or the config file.
+  private async setVideoFrames(frames: number): Promise<void> {
+    const clamped = clampVideoFrameCount(frames);
+    this.videoFrameCount = clamped;
+    const services = this.services;
+    if (services) {
+      services.setVideoFrameCount(clamped);
+    }
+    const configDir = cacheDirectory();
+    const config = await readGlobalConfig(configDir);
+    await writeGlobalConfig(configDir, {
+      ...config,
+      cache: { ...config.cache, videoFrameCount: clamped },
     });
   }
 
@@ -3474,6 +3508,7 @@ export class ChatBridge {
         autoApprove: this.autoApprove,
         expandTools: this.expandTools,
         maxReadLines: this.maxReadLines,
+        videoFrameCount: this.videoFrameCount,
         maxHistoryMessages: this.maxHistoryMessages,
         autoCompactThresholdPercent: this.autoCompactThresholdPercent,
         thinkingCollapsed: this.thinkingCollapsed,

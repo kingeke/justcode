@@ -62,6 +62,7 @@ export enum WebviewMessageType {
   ToggleAutoApprove = 'toggleAutoApprove',
   ToggleExpandTools = 'toggleExpandTools',
   SetReadLimit = 'setReadLimit',
+  SetVideoFrames = 'setVideoFrames',
   SetHistoryLimit = 'setHistoryLimit',
   /** Summarize the conversation and continue from the compact summary. */
   CompactSession = 'compactSession',
@@ -458,6 +459,8 @@ export interface ReadyMessage {
   autoApprove: boolean;
   expandTools: boolean;
   maxReadLines: number;
+  /** Frames a single video read samples by default (the model may ask for more). */
+  videoFrameCount: number;
   /** Recent context window items sent to the model per request; 0 means "off" (send all). */
   maxHistoryMessages: number;
   /** Auto-compact when ctx usage reaches this percent of the window; 0 = off. */
@@ -1128,6 +1131,12 @@ export interface SetReadLimitMessage {
   lines: number;
 }
 
+/** The user set a new default frame count for video reads. */
+export interface SetVideoFramesMessage {
+  type: WebviewMessageType.SetVideoFrames;
+  frames: number;
+}
+
 /** The user set a new history cap; 0 means "off" (send the whole conversation). */
 export interface SetHistoryLimitMessage {
   type: WebviewMessageType.SetHistoryLimit;
@@ -1329,6 +1338,7 @@ export type WebviewToHost =
   | ToggleAutoApproveMessage
   | ToggleExpandToolsMessage
   | SetReadLimitMessage
+  | SetVideoFramesMessage
   | SetHistoryLimitMessage
   | CompactSessionMessage
   | SetAutoCompactThresholdMessage

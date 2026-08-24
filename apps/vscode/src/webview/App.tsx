@@ -1138,6 +1138,11 @@ export function App(): React.JSX.Element {
     postToHost({ type: WebviewMessageType.SetReadLimit, lines });
   };
 
+  const setVideoFrames = (frames: number): void => {
+    dispatch({ type: LocalActionType.SetVideoFrames, frames });
+    postToHost({ type: WebviewMessageType.SetVideoFrames, frames });
+  };
+
   const setHistoryLimit = (count: number): void => {
     dispatch({ type: LocalActionType.SetHistoryLimit, count });
     postToHost({ type: WebviewMessageType.SetHistoryLimit, count });
@@ -1434,6 +1439,7 @@ export function App(): React.JSX.Element {
     autoApprove: state.autoApprove,
     expandTools: state.expandTools,
     maxReadLines: state.maxReadLines,
+    videoFrameCount: state.videoFrameCount,
     maxHistoryMessages: state.maxHistoryMessages,
     onCancel: cancel,
     skillCommands: state.skillCommands,
@@ -1477,6 +1483,7 @@ export function App(): React.JSX.Element {
     onToggleModelAutoRefresh: toggleModelAutoRefresh,
     onToggleLazyToolLoading: toggleLazyToolLoading,
     onSetReadLimit: setReadLimit,
+    onSetVideoFrames: setVideoFrames,
     onSetHistoryLimit: setHistoryLimit,
     autoCompactThresholdPercent: state.autoCompactThresholdPercent,
     onSetAutoCompactThreshold: setAutoCompactThreshold,

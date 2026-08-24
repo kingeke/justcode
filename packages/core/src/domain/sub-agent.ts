@@ -142,6 +142,7 @@ const SUB_AGENT_SHARED_PROMPT = [
 
 const EXPLORER_TOOLS = [
   ToolName.ReadFile,
+  ToolName.ReadVideo,
   ToolName.Grep,
   ToolName.Glob,
   ToolName.WebFetch,
