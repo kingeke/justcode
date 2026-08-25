@@ -52,7 +52,21 @@ import {
   type ToolActivityEvent,
   type ToolApprovalRequest,
 } from '@core/application/chat-session-service';
-import type { UserQuestionRequest } from '@core/ports/tool';
+import type { UserQuestionAnswer, UserQuestionRequest } from '@core/ports/tool';
+import { QuestionWizardPhase } from '@core/domain/question-wizard';
+import {
+  answerRows,
+  answeredSummary,
+  createWizard,
+  currentOptions,
+  isSubmitSelection,
+  reduceWizard,
+  shouldAutoSubmit,
+  wizardAnswers,
+  QuestionWizardActionType,
+  type QuestionWizardAction,
+  type QuestionWizardState,
+} from '@cli/ui/question-wizard';
 import {
   SubAgentActivityPhase,
   SubAgentRunStatus,
@@ -380,7 +394,9 @@ interface PendingApproval {
 
 interface PendingQuestion {
   request: UserQuestionRequest;
-  resolve: (answer: string) => void;
+  resolve: (answers: UserQuestionAnswer[]) => void;
+  /** Step-through state for the batch (current question, answers, phase). */
+  wizard: QuestionWizardState;
 }
 
 const MAX_PREVIEW_LINES = 16;
@@ -905,7 +921,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       return null;
     });
     setPendingQuestion((current) => {
-      current?.resolve('');
+      current?.resolve([]);
       return null;
     });
     setIsSending(false);
@@ -1157,6 +1173,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
   // normal prompt and submitting resolves the tool's awaiting promise.
   const [pendingQuestion, setPendingQuestion] =
     useState<PendingQuestion | null>(null);
+  // Mirror of the pending question so the global key handler can step the
+  // wizard synchronously without stale-closure reads.
+  const pendingQuestionRef = useRef<PendingQuestion | null>(pendingQuestion);
+  pendingQuestionRef.current = pendingQuestion;
   // Rendered diffs for file-changing tool calls, keyed by tool-call id (which
   // the committed messages share), so a write/edit/patch keeps showing its diff
   // inline in the transcript. Captured on the tool's 'start'; cleared only when
@@ -1580,6 +1600,18 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
       return;
     }
 
+    // A pending question drives its own arrow/enter navigation, so the textarea
+    // must give up focus for it — otherwise Enter would land in the (empty)
+    // input and answer the question with nothing. It takes focus back only
+    // while a custom answer is being typed.
+    if (
+      pendingQuestion &&
+      pendingQuestion.wizard.phase !== QuestionWizardPhase.CustomInput
+    ) {
+      area.blur();
+      return;
+    }
+
     area.focus();
   }, [
     browseIndex,
@@ -1759,6 +1791,76 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
         resolveApproval(false, false);
       } else if (key.name === KeyName.Escape) {
         cancelActiveRequest();
+      }
+      return;
+    }
+
+    // Escape while typing a custom answer backs out to the option list rather
+    // than cancelling the whole question.
+    if (
+      pendingQuestion &&
+      pendingQuestion.wizard.phase === QuestionWizardPhase.CustomInput &&
+      key.name === KeyName.Escape
+    ) {
+      dispatchQuestion({ type: QuestionWizardActionType.CancelCustom });
+      return;
+    }
+
+    // The question wizard owns navigation while it browses options or the
+    // review list; the prompt textarea only gets the keyboard back while the
+    // user types a custom answer (handled by the textarea itself).
+    if (
+      pendingQuestion &&
+      pendingQuestion.wizard.phase !== QuestionWizardPhase.CustomInput
+    ) {
+      if (key.ctrl && key.name === KeyName.C) {
+        exit();
+        return;
+      }
+      if (key.name === KeyName.Escape) {
+        cancelActiveRequest();
+        return;
+      }
+      if (key.name === KeyName.Up) {
+        dispatchQuestion({
+          type: QuestionWizardActionType.MoveSelection,
+          delta: -1,
+        });
+        return;
+      }
+      if (key.name === KeyName.Down || key.name === KeyName.Tab) {
+        dispatchQuestion({
+          type: QuestionWizardActionType.MoveSelection,
+          delta: 1,
+        });
+        return;
+      }
+      if (key.name === KeyName.Left) {
+        dispatchQuestion({ type: QuestionWizardActionType.Previous });
+        return;
+      }
+      if (key.name === KeyName.Right) {
+        dispatchQuestion({ type: QuestionWizardActionType.Next });
+        return;
+      }
+      if (key.name === KeyName.T) {
+        dispatchQuestion({ type: QuestionWizardActionType.StartCustom });
+        return;
+      }
+      if (key.name === KeyName.Return || key.name === KeyName.KpEnter) {
+        if (isSubmitSelection(pendingQuestion.wizard)) {
+          submitQuestion(pendingQuestion.wizard);
+        } else {
+          dispatchQuestion({ type: QuestionWizardActionType.Choose });
+        }
+        return;
+      }
+      // A digit picks that option outright (1-based, as rendered).
+      if (/^\d$/.test(value)) {
+        const index = Number.parseInt(value, 10) - 1;
+        if (index >= 0) {
+          dispatchQuestion({ type: QuestionWizardActionType.Choose, index });
+        }
       }
       return;
     }
@@ -2377,30 +2479,54 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
     });
   };
 
-  // Hand the typed answer back to the awaiting question tool, then clear the
-  // prompt. A bare option number (when options were offered) is expanded to that
-  // option's text so the user can answer with "2" instead of retyping it.
-  const resolveQuestion = (answer: string): void => {
-    setPendingQuestion((current) => {
-      if (!current) return null;
-      let finalAnswer = answer.trim();
-      const options = current.request.options;
-      if (options && /^\d+$/.test(finalAnswer)) {
-        const index = Number.parseInt(finalAnswer, 10) - 1;
-        if (index >= 0 && index < options.length) {
-          finalAnswer = options[index] ?? finalAnswer;
-        }
-      }
-      current.resolve(finalAnswer);
-      return null;
-    });
+  const clearPromptArea = (): void => {
     setInput('');
     const area = promptAreaRef.current;
     if (area && !area.isDestroyed) {
       area.setText('');
       area.cursorOffset = 0;
     }
+  };
+
+  // Hands every collected answer back to the awaiting question tool and clears
+  // the prompt.
+  const submitQuestion = (state: QuestionWizardState): void => {
+    const current = pendingQuestionRef.current;
+    if (!current) return;
+    pendingQuestionRef.current = null;
+    current.resolve(wizardAnswers(state));
+    setPendingQuestion(null);
+    clearPromptArea();
     setStatus('Working...');
+  };
+
+  // Steps the wizard, submitting when the flow reaches its end (the review
+  // screen's submit row, or the answer to a lone question).
+  const dispatchQuestion = (action: QuestionWizardAction): void => {
+    const current = pendingQuestionRef.current;
+    if (!current) return;
+    const next = reduceWizard(current.wizard, action);
+    if (shouldAutoSubmit(next)) {
+      submitQuestion(next);
+      return;
+    }
+    // Leaving the custom-input phase means the textarea is no longer the answer
+    // box — drop whatever is in it. Entering it seeds the textarea with the
+    // answer already typed for this question, so re-editing starts from it.
+    if (
+      current.wizard.phase === QuestionWizardPhase.CustomInput &&
+      next.phase !== QuestionWizardPhase.CustomInput
+    ) {
+      clearPromptArea();
+    } else if (
+      current.wizard.phase !== QuestionWizardPhase.CustomInput &&
+      next.phase === QuestionWizardPhase.CustomInput
+    ) {
+      setInputWithCursorAtEnd(next.draft);
+    }
+    const updated: PendingQuestion = { ...current, wizard: next };
+    pendingQuestionRef.current = updated;
+    setPendingQuestion(updated);
   };
 
   // The markdown of the most recently presented plan (the last `present_plan`
@@ -3359,10 +3485,10 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
 
     const requestUserInput = (
       request: UserQuestionRequest
-    ): Promise<string> => {
-      return new Promise<string>((resolve) => {
+    ): Promise<UserQuestionAnswer[]> => {
+      return new Promise<UserQuestionAnswer[]>((resolve) => {
         setStatus('Waiting for your answer...');
-        setPendingQuestion({ request, resolve });
+        setPendingQuestion({ request, resolve, wizard: createWizard(request) });
       });
     };
 
@@ -4707,23 +4833,7 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
             borderColor={UiColor.Yellow}
             paddingX={1}
           >
-            <text fg={UiColor.Yellow} attributes={BOLD}>
-              {pendingQuestion.request.question}
-            </text>
-            {pendingQuestion.request.options?.length
-              ? pendingQuestion.request.options.map((option, index) => (
-                  <text key={index} fg={MUTED}>
-                    {`  ${index + 1}. ${option}`}
-                  </text>
-                ))
-              : null}
-            <text fg={MUTED}>
-              Type your answer below and press Enter
-              {pendingQuestion.request.options?.length
-                ? ' (or the option number)'
-                : ''}
-              .
-            </text>
+            {renderQuestionWizard(pendingQuestion.wizard)}
           </box>
         ) : null}
 
@@ -4921,12 +5031,28 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
               terminalFocused &&
               browseIndex === null &&
               queueEditIndex === null &&
-              pendingApproval === null
+              pendingApproval === null &&
+              // A pending question drives its own keyboard navigation; the
+              // textarea is only the answer box while typing a custom answer.
+              (pendingQuestion === null ||
+                pendingQuestion.wizard.phase ===
+                  QuestionWizardPhase.CustomInput)
             }
             onSubmit={() => {
               const text = promptAreaRef.current?.plainText ?? input;
               if (pendingQuestion) {
-                resolveQuestion(text);
+                // Only a custom answer is typed here; while the wizard is
+                // navigating, Enter belongs to it (see the global handler) and
+                // must not answer with the empty input.
+                if (
+                  pendingQuestion.wizard.phase ===
+                  QuestionWizardPhase.CustomInput
+                ) {
+                  dispatchQuestion({
+                    type: QuestionWizardActionType.CommitCustom,
+                    draft: text,
+                  });
+                }
                 return;
               }
               void submit(text);
@@ -4974,7 +5100,15 @@ export function ChatApp(props: ChatAppProps): React.ReactNode {
                 }
 
                 if (pendingQuestion) {
-                  resolveQuestion(promptArea.plainText);
+                  if (
+                    pendingQuestion.wizard.phase ===
+                    QuestionWizardPhase.CustomInput
+                  ) {
+                    dispatchQuestion({
+                      type: QuestionWizardActionType.CommitCustom,
+                      draft: promptArea.plainText,
+                    });
+                  }
                   return;
                 }
 
@@ -5277,6 +5411,94 @@ const ToolResultInline = React.memo(function ToolResultInline({
 
   return <ToolResultBlock content={content} expanded={expanded} />;
 });
+
+/**
+ * The pending question batch: one question at a time with its options, or the
+ * review list once every question has been stepped through.
+ */
+function renderQuestionWizard(state: QuestionWizardState): React.ReactNode {
+  const questions = state.request.questions;
+  const total = questions.length;
+
+  if (state.phase === QuestionWizardPhase.Review) {
+    return (
+      <>
+        <text fg={UiColor.Yellow} attributes={BOLD}>
+          Review your answers
+        </text>
+        {questions.map((question, index) => {
+          const answer = state.answers[question.id] ?? '';
+          const selected = state.selection === index;
+          return (
+            <text
+              key={question.id}
+              fg={
+                selected
+                  ? UiColor.Cyan
+                  : answer.length > 0
+                    ? UiColor.Green
+                    : MUTED
+              }
+            >
+              {`${selected ? '❯' : ' '} ${answer.length > 0 ? '✓' : ' '} ${
+                index + 1
+              }. ${question.question} — ${
+                answer.length > 0 ? answer : 'not answered'
+              }`}
+            </text>
+          );
+        })}
+        <text fg={state.selection === total ? UiColor.Cyan : MUTED}>
+          {`${state.selection === total ? '❯' : ' '} ✓ Submit answers`}
+        </text>
+        <text fg={MUTED}>
+          ↑/↓ select · enter edit/submit · ← back to last question · esc cancel
+        </text>
+      </>
+    );
+  }
+
+  const question = questions[state.index];
+  const options = currentOptions(state);
+  const typing = state.phase === QuestionWizardPhase.CustomInput;
+
+  return (
+    <>
+      {/* Answers given so far stay on screen, so picking an option visibly
+          registers even though the flow moves straight to the next question. */}
+      {answeredSummary(state).map((entry) => (
+        <text key={entry.id} fg={UiColor.Green}>
+          {`✓ ${entry.position}. ${entry.question} — ${truncate(
+            entry.answer,
+            40
+          )}`}
+        </text>
+      ))}
+      {total > 1 ? (
+        <text fg={MUTED}>{`Question ${state.index + 1} of ${total}`}</text>
+      ) : null}
+      <text fg={UiColor.Yellow} attributes={BOLD}>
+        {question?.question ?? ''}
+      </text>
+      {answerRows(state).map((row, index) => (
+        <text
+          key={index}
+          fg={row.cursor ? UiColor.Cyan : row.chosen ? UiColor.Green : MUTED}
+          {...(row.chosen ? { attributes: BOLD } : {})}
+        >
+          {`${row.cursor ? '❯' : ' '} ${row.chosen ? '(•)' : '( )'} ${row.label}`}
+        </text>
+      ))}
+      <text fg={MUTED}>
+        {typing
+          ? 'Type below and press Enter · esc to go back'
+          : options.length > 0
+            ? '↑/↓ select · 1-9 or enter choose · t type · ←/→ back/next · esc cancel'
+            : 'enter or t to type your answer · ←/→ back/next · esc cancel'}
+      </text>
+    </>
+  );
+}
 
 function bashCommandFromArgs(rawArguments: string | undefined): string {
   if (!rawArguments) return '';

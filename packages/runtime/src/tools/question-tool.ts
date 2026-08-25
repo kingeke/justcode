@@ -4,51 +4,74 @@ import type {
   ToolExecutionContext,
   ToolInvocationView,
   ToolResult,
+  UserQuestionAnswer,
+  UserQuestionItem,
 } from '@core/ports/tool';
+import { ToolName } from '@core/domain/tool-name';
 
-interface QuestionArguments {
+interface QuestionInput {
   question: string;
   options?: string[];
 }
 
-/** Cap on how many suggested options are forwarded to the UI. */
+interface QuestionArguments {
+  questions: QuestionInput[];
+}
+
+/** Cap on how many suggested options are forwarded to the UI, per question. */
 const MAX_OPTIONS = 8;
+/** Cap on how many questions a single call may put to the user. */
+const MAX_QUESTIONS = 5;
 
 /**
- * Asks the user a question and returns their answer to the model. Used when the
- * model needs clarification or a decision before it can proceed. The actual
- * prompting is done by the host via the execution context's `askUser` callback;
- * when that isn't available (non-interactive runs) the tool reports that it
- * couldn't ask rather than blocking. It performs no I/O of its own, so it does
- * not require approval.
+ * Asks the user one or more questions and returns their answers to the model.
+ * Used when the model needs clarification or a decision before it can proceed.
+ * The host renders the batch as a step-through flow (next/previous, review,
+ * submit) via the execution context's `askUser` callback; when that isn't
+ * available (non-interactive runs) the tool reports that it couldn't ask rather
+ * than blocking. It performs no I/O of its own, so it does not require approval.
  */
 export class QuestionTool implements Tool {
   public readonly requiresApproval = false;
 
   public readonly definition: ToolDefinition = {
-    name: 'question',
+    name: ToolName.Question,
     description:
-      'Ask the user a question and wait for their answer. Use this when you ' +
-      'need clarification, a decision, or missing information before you can ' +
-      'continue — prefer it over guessing. Provide a "question" string and, ' +
-      'optionally, a list of suggested "options" the user can pick from (they ' +
-      'may still type their own answer).',
+      'Ask the user one or more questions and wait for their answers. Use ' +
+      'this when you need clarification, a decision, or missing information ' +
+      'before you can continue — prefer it over guessing. Batch every ' +
+      'related clarification into a single call (up to ' +
+      `${MAX_QUESTIONS} questions) instead of asking them one at a time: the ` +
+      'user steps through them with next/previous, reviews all answers, then ' +
+      'submits. Each question may carry a list of suggested "options" (the ' +
+      'user may still type their own answer).',
     parameters: {
       type: 'object',
       properties: {
-        question: {
-          type: 'string',
-          description: 'The question to put to the user.',
-        },
-        options: {
+        questions: {
           type: 'array',
-          items: { type: 'string' },
-          description:
-            'Optional suggested answers to present as a pick-list. The user ' +
-            'may choose one or type something else.',
+          description: `The questions to ask, in order (max ${MAX_QUESTIONS}).`,
+          items: {
+            type: 'object',
+            properties: {
+              question: {
+                type: 'string',
+                description: 'The question to put to the user.',
+              },
+              options: {
+                type: 'array',
+                items: { type: 'string' },
+                description:
+                  'Optional suggested answers to present as a pick-list. The ' +
+                  'user may choose one or type something else.',
+              },
+            },
+            required: ['question'],
+            additionalProperties: false,
+          },
         },
       },
-      required: ['question'],
+      required: ['questions'],
       additionalProperties: false,
     },
   };
@@ -58,8 +81,11 @@ export class QuestionTool implements Tool {
     if (!parsed) {
       return { title: 'question (unparseable arguments)' };
     }
+    const first = parsed.questions[0]?.question ?? '';
+    const extra = parsed.questions.length - 1;
+    const suffix = extra > 0 ? ` (+${extra} more)` : '';
     return {
-      title: `question: ${truncate(parsed.question, 80)}`,
+      title: `question: ${truncate(first, 80)}${suffix}`,
       preview: formatPreview(parsed),
     };
   }
@@ -71,15 +97,25 @@ export class QuestionTool implements Tool {
     const parsed = tryParse(rawArguments);
     if (!parsed) {
       return {
-        content: 'Invalid arguments: expected JSON with a "question" string.',
+        content:
+          'Invalid arguments: expected JSON with a "questions" array of ' +
+          '{ question, options? } objects.',
         isError: true,
       };
     }
 
-    const question = parsed.question.trim();
-    if (question.length === 0) {
+    if (parsed.questions.length === 0) {
       return {
-        content: 'Invalid arguments: "question" must be a non-empty string.',
+        content: 'Invalid arguments: "questions" must contain at least one.',
+        isError: true,
+      };
+    }
+
+    if (parsed.questions.length > MAX_QUESTIONS) {
+      return {
+        content:
+          `Invalid arguments: at most ${MAX_QUESTIONS} questions per call ` +
+          `(got ${parsed.questions.length}). Ask the most important ones now.`,
         isError: true,
       };
     }
@@ -92,16 +128,17 @@ export class QuestionTool implements Tool {
       };
     }
 
+    const questions: UserQuestionItem[] = parsed.questions.map(
+      (item, index) => ({
+        id: `q${index + 1}`,
+        question: item.question,
+        ...(item.options ? { options: item.options } : {}),
+      })
+    );
+
     try {
-      const answer = await context.askUser({
-        question,
-        ...(parsed.options ? { options: parsed.options } : {}),
-      });
-      const trimmed = answer.trim();
-      if (trimmed.length === 0) {
-        return { content: 'The user did not provide an answer.' };
-      }
-      return { content: `The user answered: ${trimmed}` };
+      const answers = await context.askUser({ questions });
+      return { content: formatAnswers(questions, answers) };
     } catch (error: unknown) {
       // A cancellation (e.g. the user interrupted the turn) propagates so the
       // agentic loop unwinds; any other failure is reported back to the model.
@@ -117,39 +154,84 @@ export class QuestionTool implements Tool {
 function tryParse(rawArguments: string): QuestionArguments | undefined {
   try {
     const parsed = JSON.parse(rawArguments) as Partial<QuestionArguments>;
-    if (typeof parsed.question !== 'string') {
+    if (!Array.isArray(parsed.questions)) {
       return undefined;
     }
-    const options = normalizeOptions(parsed.options);
-    return options
-      ? { question: parsed.question, options }
-      : { question: parsed.question };
+    const questions = parsed.questions
+      .map((item) => normalizeQuestion(item))
+      .filter((item): item is QuestionInput => item !== undefined);
+    return { questions };
   } catch {
     return undefined;
   }
 }
 
-/** Keep only non-empty string options, trimmed and capped. */
+/** Keeps a question with a non-empty prompt, trimming it and its options. */
+function normalizeQuestion(value: unknown): QuestionInput | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+  const candidate = value as Partial<QuestionInput>;
+  if (typeof candidate.question !== 'string') {
+    return undefined;
+  }
+  const question = candidate.question.trim();
+  if (question.length === 0) {
+    return undefined;
+  }
+  const options = normalizeOptions(candidate.options);
+  return options ? { question, options } : { question };
+}
+
+/** Keep only non-empty string options, trimmed, de-duplicated and capped. */
 function normalizeOptions(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) {
     return undefined;
   }
-  const options = value
-    .filter((item): item is string => typeof item === 'string')
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0)
-    .slice(0, MAX_OPTIONS);
-  return options.length > 0 ? options : undefined;
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const option = item.trim();
+    if (option.length === 0 || seen.has(option)) continue;
+    seen.add(option);
+    if (seen.size === MAX_OPTIONS) break;
+  }
+  return seen.size > 0 ? [...seen] : undefined;
 }
 
 function formatPreview(parsed: QuestionArguments): string {
-  if (!parsed.options || parsed.options.length === 0) {
-    return parsed.question;
-  }
-  const options = parsed.options
-    .map((option, index) => `${index + 1}. ${option}`)
+  return parsed.questions
+    .map((item, index) => {
+      const head = `${index + 1}. ${item.question}`;
+      if (!item.options || item.options.length === 0) {
+        return head;
+      }
+      const options = item.options.map((option) => `   - ${option}`).join('\n');
+      return `${head}\n${options}`;
+    })
     .join('\n');
-  return `${parsed.question}\n${options}`;
+}
+
+/** Renders the answers back to the model, pairing each with its question. */
+function formatAnswers(
+  questions: UserQuestionItem[],
+  answers: UserQuestionAnswer[]
+): string {
+  const byId = new Map(
+    answers.map((answer) => [answer.id, answer.answer.trim()])
+  );
+  const lines = questions.map((item, index) => {
+    const answer = byId.get(item.id) ?? '';
+    const shown = answer.length > 0 ? answer : '(skipped)';
+    return `${index + 1}. ${item.question} → ${shown}`;
+  });
+  const answered = questions.some(
+    (item) => (byId.get(item.id) ?? '').length > 0
+  );
+  if (!answered) {
+    return 'The user did not provide any answers.';
+  }
+  return `The user answered:\n${lines.join('\n')}`;
 }
 
 function isAbortError(error: unknown): boolean {

@@ -699,12 +699,25 @@ export interface ApprovalRequestMessage {
   view: WebviewToolView;
 }
 
-/** A mid-turn question from a tool (e.g. the question tool) needing free text. */
-export interface UserInputRequestMessage {
-  type: HostMessageType.UserInputRequest;
+/** One question in a mid-turn batch from a tool (e.g. the question tool). */
+export interface WebviewQuestion {
+  /** Stable id so answers map back to their question after edits. */
   id: string;
   question: string;
   options?: string[];
+}
+
+/** The user's answer to one question; empty means they skipped it. */
+export interface WebviewQuestionAnswer {
+  id: string;
+  answer: string;
+}
+
+/** A mid-turn batch of questions from a tool (e.g. the question tool). */
+export interface UserInputRequestMessage {
+  type: HostMessageType.UserInputRequest;
+  id: string;
+  questions: WebviewQuestion[];
 }
 
 /**
@@ -988,11 +1001,11 @@ export interface ApprovalResponseMessage {
   approved: boolean;
 }
 
-/** The user answered a pending tool question. */
+/** The user answered a pending batch of tool questions. */
 export interface UserInputResponseMessage {
   type: WebviewMessageType.UserInputResponse;
   id: string;
-  value: string;
+  answers: WebviewQuestionAnswer[];
 }
 
 /** The user picked a different model for subsequent turns. */

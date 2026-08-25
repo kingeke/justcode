@@ -93,7 +93,7 @@ export const TOOL_DISPLAY: ToolDisplay[] = [
     name: ToolName.Question,
     label: 'question',
     category: BUILT_IN_TOOL_CATEGORY,
-    summary: 'Ask the user a question',
+    summary: 'Ask the user questions',
   },
   {
     name: ToolName.ViewHistory,

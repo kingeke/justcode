@@ -1343,6 +1343,14 @@ body {
   flex: none;
 }
 
+/* The answer already chosen for the question on screen (visible when the user
+   steps back to it). */
+.prompt-option-chosen {
+  border-color: var(--vscode-focusBorder);
+  background: var(--vscode-list-activeSelectionBackground, transparent);
+  color: var(--vscode-list-activeSelectionForeground, inherit);
+}
+
 .prompt-option-label {
   word-break: break-word;
 }
@@ -1351,6 +1359,78 @@ body {
   display: flex;
   gap: 6px;
   margin-top: 6px;
+}
+
+/* Questions already answered, listed above the one being asked. */
+.prompt-answered {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+  opacity: 0.9;
+}
+
+.prompt-answered-mark {
+  flex: none;
+  color: var(--vscode-charts-green, var(--vscode-terminal-ansiGreen));
+}
+
+.prompt-answered-text {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.prompt-answered-question {
+  opacity: 0.7;
+  word-break: break-word;
+}
+
+.prompt-answered-answer {
+  font-weight: 600;
+  word-break: break-word;
+}
+
+/* Step counter above a question when a call asks several at once. */
+.prompt-step {
+  opacity: 0.7;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+/* Review step: every question with its answer and an inline edit button. */
+.prompt-review {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.prompt-review-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.prompt-review-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.prompt-review-question {
+  opacity: 0.8;
+  word-break: break-word;
+}
+
+.prompt-review-answer {
+  word-break: break-word;
 }
 
 .prompt-text {

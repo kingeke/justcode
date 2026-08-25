@@ -24,6 +24,7 @@ export enum KeyName {
   N = 'n',
   X = 'x',
   P = 'p',
+  T = 't',
   KpEnter = 'kpenter',
   Linefeed = 'linefeed',
 }

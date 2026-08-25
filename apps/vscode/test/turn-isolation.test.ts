@@ -178,8 +178,13 @@ describe('cross-session turn isolation', () => {
     const prompt: HostToWebview = {
       type: HostMessageType.UserInputRequest,
       id: 'q-1',
-      question: 'Which database?',
-      options: ['postgres', 'mysql'],
+      questions: [
+        {
+          id: 'q1',
+          question: 'Which database?',
+          options: ['postgres', 'mysql'],
+        },
+      ],
     };
     bridge.sessionId = 'session-a';
     bridge.postTurnPrompt(turn, prompt);
@@ -195,7 +200,7 @@ describe('cross-session turn isolation', () => {
     await (bridge as unknown as ChatBridge).handle({
       type: WebviewMessageType.UserInputResponse,
       id: 'q-1',
-      value: 'postgres',
+      answers: [{ id: 'q1', answer: 'postgres' }],
     });
     posted.length = 0;
     bridge.replayLiveTurn(turn);

@@ -29,6 +29,7 @@ import type {
   ToolExecutionContext,
   ToolInvocationView,
   ToolResult,
+  UserQuestionAnswer,
   UserQuestionRequest,
 } from '@core/ports/tool';
 import type { WorkspaceFilePort } from '@core/ports/workspace-file-port';
@@ -167,7 +168,9 @@ export interface SubmitMessageInput {
    */
   allowUnattended?: boolean;
   /** Lets a tool prompt the user for input mid-turn (e.g. the question tool). */
-  requestUserInput?: (request: UserQuestionRequest) => Promise<string>;
+  requestUserInput?: (
+    request: UserQuestionRequest
+  ) => Promise<UserQuestionAnswer[]>;
   onToolActivity?: (event: ToolActivityEvent) => void;
   /**
    * Fired as sub agents spawned by the `task` tool start, make progress, and
@@ -1334,7 +1337,7 @@ export class ChatSessionService {
       // (abort) reject the pending question so the loop can unwind.
       const requestUserInput = input.requestUserInput;
       const askUser = requestUserInput
-        ? (request: UserQuestionRequest): Promise<string> =>
+        ? (request: UserQuestionRequest): Promise<UserQuestionAnswer[]> =>
             awaitWithAbort(requestUserInput(request), input.signal)
         : undefined;
       // Upserts a sub agent run (by id) into this turn's collection and

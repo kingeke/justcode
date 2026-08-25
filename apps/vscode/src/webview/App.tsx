@@ -12,6 +12,7 @@ import {
   type WebviewImage,
   type WebviewMessage,
   type WebviewModel,
+  type WebviewQuestionAnswer,
   type WebviewReasoningChoice,
   type WebviewStats,
 } from '@ext/shared/protocol';
@@ -813,8 +814,8 @@ export function App(): React.JSX.Element {
     if (!state.autoApprove) toggleAutoApprove();
   };
 
-  const respondInput = (id: string, value: string): void => {
-    postToHost({ type: WebviewMessageType.UserInputResponse, id, value });
+  const respondInput = (id: string, answers: WebviewQuestionAnswer[]): void => {
+    postToHost({ type: WebviewMessageType.UserInputResponse, id, answers });
     dispatch({ type: LocalActionType.DismissInput });
   };
 
@@ -1850,7 +1851,7 @@ export function App(): React.JSX.Element {
             {state.input ? (
               <InputPrompt
                 request={state.input}
-                onRespond={(value) => respondInput(state.input!.id, value)}
+                onRespond={(answers) => respondInput(state.input!.id, answers)}
               />
             ) : null}
 

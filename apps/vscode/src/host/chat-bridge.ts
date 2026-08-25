@@ -32,7 +32,11 @@ import {
   ToolActivityPhase,
   type ToolActivityEvent,
 } from '@core/application/chat-session-service';
-import type { ToolInvocationView, UserQuestionRequest } from '@core/ports/tool';
+import type {
+  ToolInvocationView,
+  UserQuestionAnswer,
+  UserQuestionRequest,
+} from '@core/ports/tool';
 import { formatCost } from '@core/domain/format-cost';
 import { ToolName } from '@core/domain/tool-name';
 import { cacheDirectory } from '@core/application/cache-dir';
@@ -255,7 +259,10 @@ export class ChatBridge {
     string,
     (approved: boolean) => void
   >();
-  private readonly pendingInputs = new Map<string, (value: string) => void>();
+  private readonly pendingInputs = new Map<
+    string,
+    (answers: UserQuestionAnswer[]) => void
+  >();
   // Tool views captured live (keyed by tool-call id), kept so the rebuilt
   // transcript can reuse the pre-edit diff. Recomputing it afterward fails for
   // edits/patches: the file is already changed, so the original text is gone.
@@ -444,7 +451,7 @@ export class ChatBridge {
         this.closeTurnPrompt(message.id);
         return;
       case WebviewMessageType.UserInputResponse:
-        this.pendingInputs.get(message.id)?.(message.value);
+        this.pendingInputs.get(message.id)?.(message.answers);
         this.pendingInputs.delete(message.id);
         this.closeTurnPrompt(message.id);
         return;
@@ -2223,16 +2230,15 @@ export class ChatBridge {
   private requestUserInput(
     request: UserQuestionRequest,
     turn: ActiveTurn
-  ): Promise<string> {
-    return new Promise<string>((resolve) => {
+  ): Promise<UserQuestionAnswer[]> {
+    return new Promise<UserQuestionAnswer[]>((resolve) => {
       const id = randomUUID();
       this.pendingInputs.set(id, resolve);
       turn.pendingRequestIds.add(id);
       this.postTurnPrompt(turn, {
         type: HostMessageType.UserInputRequest,
         id,
-        question: request.question,
-        ...(request.options ? { options: request.options } : {}),
+        questions: request.questions,
       });
     });
   }

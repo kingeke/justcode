@@ -38,23 +38,40 @@ export interface ToolResult {
   images?: MessageImage[];
 }
 
-/** A question a tool wants to put to the user, surfaced by the UI. */
-export interface UserQuestionRequest {
+/** One question in a batch a tool wants to put to the user. */
+export interface UserQuestionItem {
+  /** Stable id so answers map back to their question after edits/reordering. */
+  id: string;
   /** The question to show the user. */
   question: string;
   /** Optional suggested answers the UI may present as a pick-list. */
   options?: string[];
 }
 
+/**
+ * A batch of questions a tool wants to put to the user, surfaced by the UI as a
+ * step-through flow (answer → next/previous → review → submit).
+ */
+export interface UserQuestionRequest {
+  questions: UserQuestionItem[];
+}
+
+/** The user's answer to one question; an empty answer means they skipped it. */
+export interface UserQuestionAnswer {
+  id: string;
+  answer: string;
+}
+
 export interface ToolExecutionContext {
   workspaceRoot: string;
   signal?: AbortSignal;
   /**
-   * Prompts the user and resolves with their typed answer. Provided by the host
-   * (the CLI) only for interactive turns; absent in non-interactive contexts, so
-   * tools that need it must handle its absence. Rejects if the user cancels.
+   * Prompts the user and resolves with one answer per question. Provided by the
+   * host (the CLI) only for interactive turns; absent in non-interactive
+   * contexts, so tools that need it must handle its absence. Rejects if the
+   * user cancels.
    */
-  askUser?: (request: UserQuestionRequest) => Promise<string>;
+  askUser?: (request: UserQuestionRequest) => Promise<UserQuestionAnswer[]>;
   /**
    * The id of the tool call being executed. Set by the agentic loop so tools
    * that spawn sub agents (`task`) can link their run to the transcript row.
